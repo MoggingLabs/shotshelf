@@ -147,6 +147,8 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
         println!("shotshelf: watching {}", dir.display());
     }
 
+    allow_reading_captures(app, &watch_dirs);
+
     let folders = match folders::start(app, &watch_dirs, std::sync::Arc::clone(&sink)) {
         Ok(watch) => Some(watch),
         Err(err) => {
@@ -161,6 +163,28 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
         watch_dirs,
         _folders: folders,
     });
+}
+
+/// Let the webview render captures straight off disk.
+///
+/// The asset protocol is scoped shut by default, and the scope has to be
+/// granted here rather than in `tauri.conf.json`: the macOS capture folder is
+/// only known once `defaults read` has run, and `SHOTSHELF_WATCH_DIRS` can
+/// replace the list outright. Deriving it from the resolved watch list keeps
+/// one source of truth — the shelf can read exactly what the engine watches,
+/// non-recursively, and nothing else.
+fn allow_reading_captures<R: Runtime>(app: &AppHandle<R>, dirs: &[PathBuf]) {
+    let scope = app.asset_protocol_scope();
+
+    let clipboard = clipboard::capture_dir(app);
+    for dir in dirs.iter().chain(clipboard.iter()) {
+        if let Err(err) = scope.allow_directory(dir, false) {
+            eprintln!(
+                "shotshelf: the shelf will not be able to show captures from {}: {err}",
+                dir.display()
+            );
+        }
+    }
 }
 
 /// Watch-path override. Phase 06 will feed this from the settings file; until

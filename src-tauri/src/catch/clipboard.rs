@@ -127,15 +127,20 @@ fn digest_of(bytes: &[u8]) -> u64 {
     hasher.finish()
 }
 
-/// Clipboard captures have no file of their own, so give them one under the app
-/// data dir — never the repo, never a shared temp location. Phase 06 adds the
-/// retention policy that cleans this folder up.
-fn write_capture<R: Runtime>(app: &AppHandle<R>, bytes: &[u8]) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
+/// Where clipboard captures are kept: under the app data dir, never the repo
+/// and never a shared temp location. The shelf has to be able to read from
+/// here too, which is why this is shared rather than inlined below.
+pub(super) fn capture_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    app.path()
         .app_data_dir()
-        .map_err(|err| err.to_string())?
-        .join("clipboard");
+        .ok()
+        .map(|dir| dir.join("clipboard"))
+}
+
+/// Clipboard captures have no file of their own, so give them one. Phase 06
+/// adds the retention policy that cleans this folder up.
+fn write_capture<R: Runtime>(app: &AppHandle<R>, bytes: &[u8]) -> Result<PathBuf, String> {
+    let dir = capture_dir(app).ok_or("no app data directory")?;
     std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
 
     let path = dir.join(format!("clipboard-{}.png", now_ms()));
