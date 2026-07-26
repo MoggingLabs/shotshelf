@@ -1,0 +1,70 @@
+name: CI
+
+# Shotshelf ships on Windows and macOS, and most of the per-OS code is behind
+# `cfg` gates that only the matching host compiles. Building on both is the only
+# way to know the macOS branches (activation policy, template tray icon,
+# `defaults read` screenshot location) still hold together.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+          - os: macos-latest
+            name: macOS
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Type-checks with `tsc --noEmit` and writes dist/, which the Rust build
+      # embeds via `frontendDist` — so this has to run before cargo.
+      - name: Build frontend
+        run: npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: rustfmt
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      - name: clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Build app
+        run: cargo build --manifest-path src-tauri/Cargo.toml
+
+# Runners come with what Tauri v2 needs: MSVC + WebView2 on Windows, the Xcode
+# command line tools on macOS. No Linux job — Shotshelf targets Windows and
+# macOS only. Installer bundling (.msi/.dmg) arrives with phase 08; this
+# workflow proves the app compiles and links on both, nothing more.
