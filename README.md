@@ -114,13 +114,29 @@ screenshot. The file wins — it has a real name and a real path — and the cli
 dropped rather than shelved twice. A clipboard-only capture (Win+Shift+S) is held ~1.5 s to
 tell the two apart.
 
+### The shelf
+
+Tiles are the full width of the strip (298 px in the default 320 px window) by 78 px tall,
+cropped with `object-fit: cover` so any aspect ratio stays recognisable, newest at the top.
+The shelf holds **50** captures and scrolls; the 51st pushes the oldest off the end. Hovering
+a tile reveals a **×** that takes it off the shelf — the file itself is never touched, moved
+or deleted. Recordings show a placeholder tile until poster frames land in v0.3.
+
+Thumbnails are rendered straight from disk over Tauri's asset protocol, never inlined as
+base64. That protocol is scoped shut by default, and the scope is granted at **runtime** from
+the same resolved watch list the engine uses — non-recursively, plus the clipboard folder.
+A static scope in `tauri.conf.json` could not express the macOS location, which is only known
+after `defaults read` has run, nor a `SHOTSHELF_WATCH_DIRS` override. The asset URL differs by
+platform (`http://asset.localhost/…` on Windows, `asset://localhost/…` on macOS);
+`convertFileSrc` picks the right one and the CSP allows both.
+
 ## 🗺️ Roadmap
 
 - [x] **v0.0** research → **build in Tauri v2**; adopt `drag-rs` + `notify` + `tauri-plugin-clipboard`
 - [ ] **v0.1** Tauri shell + catch engine + shelf UI (screenshots)
   - [x] scaffold — frameless always-on-top edge window, tray icon, plugins wired
   - [x] catch engine — `notify` folder watchers + clipboard images → `capture://new`
-  - [ ] shelf UI (thumbnail strip)
+  - [x] shelf UI — recent-first thumbnail strip, auto-shows on every capture
 - [ ] **v0.2** native drag-out (the crux) via `tauri-plugin-drag`
 - [ ] **v0.3** screen recordings (ffmpeg thumbs), settings/persistence, cross-platform parity, packaging
 
