@@ -1,0 +1,42 @@
+[package]
+name = "shotshelf"
+version = "0.1.0"
+description = "The shelf that catches every capture."
+authors = ["MoggingLabs"]
+license = "MIT"
+repository = "https://github.com/MoggingLabs/shotshelf"
+edition = "2021"
+
+[lib]
+# Tauri v2 keeps the app in a library so the binary stays a one-line entry point.
+name = "shotshelf_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# `tray-icon`         -> the menu-bar / system-tray icon
+# `image-png`         -> load the macOS template tray glyph at compile time
+# `macos-private-api` -> required for a transparent window on macOS
+# `protocol-asset`    -> lets the webview render capture files off disk (phase 03);
+#                        must stay in step with `app.security.assetProtocol`
+tauri = { version = "2", features = [
+  "tray-icon",
+  "image-png",
+  "macos-private-api",
+  "protocol-asset",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# ── Adopted plugins (see prompts/RESEARCH.md) — registered in src/lib.rs ──
+tauri-plugin-fs = "2"                                             # read captures off disk
+tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }  # edge/tray placement
+tauri-plugin-clipboard = "2"                                      # clipboard images (phase 02)
+tauri-plugin-drag = "2"                                           # native drag-out (phase 04)
+
+# Folder watching for the catch engine: https://github.com/notify-rs/notify
+# The debouncer is notify-rs' own, so we don't hand-roll event coalescing.
+notify = "8"
+notify-debouncer-full = "0.7"

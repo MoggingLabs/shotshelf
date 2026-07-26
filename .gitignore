@@ -51,6 +51,7 @@ export/
 # ── Desktop app (Tauri/Rust + Electron) ─────────────────────────────
 target/
 src-tauri/target/
+src-tauri/gen/
 *.app
 *.dmg
 *.msi
