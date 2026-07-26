@@ -1,0 +1,59 @@
+# ── Secrets: never commit real credentials ───────────────────────────
+.env
+.env.*
+!.env.example
+secrets/
+*.token
+*.tokens
+tokens.json
+*.har
+storage-state.json
+cookies.txt
+
+# ── Python ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Node ────────────────────────────────────────────────────────────
+node_modules/
+dist/
+build/
+npm-debug.log*
+pnpm-debug.log*
+
+# ── Data & snapshots (may contain account data) ─────────────────────
+snapshots/
+*.snapshot.json
+recon/
+
+# ── Local-only build prompts (never shipped) ────────────────────────
+prompts/
+
+# ── Third-party reference repos (unlicensed; consult, don't ship) ────
+reference/
+
+# ── OS / editor ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+catalog/verification/screenshots/
+export/
+
+# ── Desktop app (Tauri/Rust + Electron) ─────────────────────────────
+target/
+src-tauri/target/
+*.app
+*.dmg
+*.msi
+*.exe
+release/
+out/
