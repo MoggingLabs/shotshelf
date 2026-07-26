@@ -15,7 +15,7 @@ use std::{
 use tauri::{AppHandle, Listener, Manager, Runtime};
 use tauri_plugin_clipboard::Clipboard;
 
-use super::{now_ms, CaptureKind, CaptureSink};
+use super::{now_ms, CaptureKind, CaptureSink, Source};
 
 /// The plugin's watcher emits this on every clipboard change, of any type.
 const CLIPBOARD_UPDATE: &str = "plugin:clipboard://clipboard-monitor/update";
@@ -25,6 +25,14 @@ const CLIPBOARD_UPDATE: &str = "plugin:clipboard://clipboard-monitor/update";
 /// the difference between catching a Win+Shift+S and silently losing it.
 const READ_ATTEMPTS: u32 = 6;
 const READ_RETRY: Duration = Duration::from_millis(80);
+
+/// Win+PrtSc saves a PNG *and* copies it to the clipboard, so one screenshot
+/// reaches both watchers. Hold every clipboard image back long enough for the
+/// folder watcher to finish (debounce + settle is roughly 750 ms), then drop
+/// this copy if the same screenshot already arrived as a file — the file has a
+/// real name and a real path, and this is only an echo of it.
+const ECHO_GRACE: Duration = Duration::from_millis(1500);
+const ECHO_WINDOW: Duration = Duration::from_secs(4);
 
 pub fn start<R: Runtime>(app: &AppHandle<R>, sink: Arc<CaptureSink>) {
     if let Err(err) = app.state::<Clipboard>().start_monitor(app.clone()) {
@@ -68,8 +76,16 @@ fn spawn_worker<R: Runtime>(app: AppHandle<R>, rx: mpsc::Receiver<()>, sink: Arc
             }
             last_image = Some(digest);
 
+            // Let the folder watcher win if this is the same screenshot. The
+            // check comes before the write, so an echo never leaves a file
+            // behind either.
+            std::thread::sleep(ECHO_GRACE);
+            if sink.take_folder_echo(ECHO_WINDOW) {
+                continue;
+            }
+
             match write_capture(&app, &bytes) {
-                Ok(path) => sink.emit(&app, &path, CaptureKind::Image),
+                Ok(path) => sink.emit(&app, &path, CaptureKind::Image, Source::Clipboard),
                 Err(err) => eprintln!("shotshelf: could not save the clipboard image: {err}"),
             }
         }

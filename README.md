@@ -109,6 +109,11 @@ takes effect on the next start. Set `SHOTSHELF_WATCH_DIRS` (`;`-separated on Win
 elsewhere) to override the list until the settings file lands. Clipboard captures are written
 into the app data dir — never the repo.
 
+Win+PrtSc saves a file **and** copies to the clipboard, so both watchers see the same
+screenshot. The file wins — it has a real name and a real path — and the clipboard copy is
+dropped rather than shelved twice. A clipboard-only capture (Win+Shift+S) is held ~1.5 s to
+tell the two apart.
+
 ## 🗺️ Roadmap
 
 - [x] **v0.0** research → **build in Tauri v2**; adopt `drag-rs` + `notify` + `tauri-plugin-clipboard`

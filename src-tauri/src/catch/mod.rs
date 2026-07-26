@@ -56,17 +56,38 @@ pub fn kind_of(path: &Path) -> Option<CaptureKind> {
     }
 }
 
+/// Which watcher saw the capture. Win+PrtSc writes a PNG *and* copies it to
+/// the clipboard, so one screenshot reaches both of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    Folder,
+    Clipboard,
+}
+
 /// The one place a capture becomes an event, so de-duplication only has to
 /// happen once for both the folder watchers and the clipboard watcher.
 #[derive(Default)]
 pub struct CaptureSink {
     recent: Mutex<HashMap<PathBuf, Instant>>,
+    /// Set when a folder image is emitted, cleared when a clipboard capture
+    /// claims it as its own echo. See [`CaptureSink::take_folder_echo`].
+    folder_echo: Mutex<Option<Instant>>,
 }
 
 impl CaptureSink {
-    pub fn emit<R: Runtime>(&self, app: &AppHandle<R>, path: &Path, kind: CaptureKind) {
+    pub fn emit<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        path: &Path,
+        kind: CaptureKind,
+        source: Source,
+    ) {
         if !self.claim(path) {
             return;
+        }
+
+        if source == Source::Folder && kind == CaptureKind::Image {
+            *lock(&self.folder_echo) = Some(Instant::now());
         }
 
         let capture = Capture {
@@ -81,12 +102,24 @@ impl CaptureSink {
         }
     }
 
+    /// `true` if a folder image landed within `window` — and consumes it, so
+    /// one screenshot can only ever silence one clipboard echo. Without that,
+    /// a Win+PrtSc followed straight away by a genuine Win+Shift+S would lose
+    /// the second capture.
+    pub fn take_folder_echo(&self, window: Duration) -> bool {
+        let mut echo = lock(&self.folder_echo);
+        match *echo {
+            Some(seen) if seen.elapsed() < window => {
+                *echo = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// `true` the first time a path shows up inside [`DEDUPE_WINDOW`].
     fn claim(&self, path: &Path) -> bool {
-        let mut recent = match self.recent.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let mut recent = lock(&self.recent);
         let now = Instant::now();
         recent.retain(|_, seen| now.duration_since(*seen) < DEDUPE_WINDOW);
         // Re-inserting refreshes the timestamp, so a noisy writer stays quiet.
@@ -151,6 +184,14 @@ pub fn catch_watch_dirs<R: Runtime>(app: AppHandle<R>) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// A watcher thread dying mid-update should not take the whole engine with it;
+/// the worst a poisoned lock costs here is one stale timestamp.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 pub(crate) fn now_ms() -> u64 {

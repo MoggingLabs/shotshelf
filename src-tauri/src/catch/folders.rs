@@ -22,7 +22,7 @@ use notify::{
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
 use tauri::{AppHandle, Runtime};
 
-use super::{kind_of, CaptureKind, CaptureSink};
+use super::{kind_of, CaptureKind, CaptureSink, Source};
 
 /// Coalescing window for raw filesystem events.
 const DEBOUNCE: Duration = Duration::from_millis(400);
@@ -192,7 +192,7 @@ fn spawn_settler<R: Runtime>(
 
             pending.retain(|path, state| match settle(path, state) {
                 Settled::Ready => {
-                    sink.emit(&app, path, state.kind);
+                    sink.emit(&app, path, state.kind, Source::Folder);
                     false
                 }
                 Settled::Waiting => state.first_seen.elapsed() < SETTLE_TIMEOUT,
