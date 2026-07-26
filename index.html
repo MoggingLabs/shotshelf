@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shotshelf</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <!-- The shelf is a frameless widget: this strip is its only title bar, and
+         `data-tauri-drag-region` is what makes it draggable without decorations. -->
+    <div class="shelf">
+      <header class="shelf__bar" data-tauri-drag-region>
+        <span class="shelf__logo" data-tauri-drag-region></span>
+        <span class="shelf__title" data-tauri-drag-region>Shotshelf</span>
+        <span class="shelf__count" id="shelf-count" title="Captures on the shelf">0</span>
+        <button class="shelf__btn" id="shelf-hide" type="button" title="Hide shelf (tray icon brings it back)">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path d="M3 8h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+          <span class="sr-only">Hide shelf</span>
+        </button>
+      </header>
+
+      <main class="shelf__items" id="shelf-items" data-empty="true"></main>
+
+      <footer class="shelf__status">
+        <span class="shelf__dot" id="shelf-dot"></span>
+        <span class="shelf__status-text" id="shelf-status-text">Starting the catch engine…</span>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,282 @@
+//! Folder watching via `notify` + notify-rs' own debouncer.
+//!
+//! Two problems sit between "the OS wrote a file" and "this is a capture":
+//! filesystem events arrive in bursts, and a screen recording exists on disk
+//! long before it is finished. The debouncer solves the first; the settle loop
+//! below solves the second by holding a candidate until its size stops moving.
+
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    path::{Path, PathBuf},
+    sync::{
+        mpsc::{self, RecvTimeoutError},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+
+use notify::{
+    event::{EventKind, ModifyKind},
+    RecommendedWatcher, RecursiveMode,
+};
+use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
+use tauri::{AppHandle, Runtime};
+
+use super::{kind_of, CaptureKind, CaptureSink};
+
+/// Coalescing window for raw filesystem events.
+const DEBOUNCE: Duration = Duration::from_millis(400);
+/// How often a not-yet-settled candidate is re-checked.
+const SETTLE_TICK: Duration = Duration::from_millis(350);
+/// Screenshots are written in one go, so one unchanged size is enough.
+const IMAGE_STABLE_TICKS: u32 = 1;
+/// Recordings grow while they record; require a real pause before believing it.
+const VIDEO_STABLE_TICKS: u32 = 3;
+/// How long a vanished file is kept around before being forgotten.
+const GONE_GRACE: Duration = Duration::from_secs(5);
+/// A file that is still empty this long after its first event is not a capture
+/// being written — it is a placeholder, and keeping it would tick forever.
+const EMPTY_TIMEOUT: Duration = Duration::from_secs(15);
+/// Backstop for a file that never settles (an abandoned recording, say).
+const SETTLE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
+/// Dropping this stops the watcher and its settle thread.
+pub struct FolderWatch {
+    _debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
+}
+
+pub fn start<R: Runtime>(
+    app: &AppHandle<R>,
+    dirs: &[PathBuf],
+    sink: Arc<CaptureSink>,
+) -> Result<FolderWatch, notify::Error> {
+    let (tx, rx) = mpsc::channel::<Candidate>();
+
+    let mut debouncer = new_debouncer(DEBOUNCE, None, move |result| queue(result, &tx))?;
+
+    for dir in dirs {
+        // Non-recursive on purpose: capture folders are flat, and recursing a
+        // whole Pictures tree would be a lot of churn for nothing.
+        if let Err(err) = debouncer.watch(dir, RecursiveMode::NonRecursive) {
+            eprintln!("shotshelf: cannot watch {}: {err}", dir.display());
+        }
+    }
+
+    spawn_settler(app.clone(), rx, sink);
+
+    Ok(FolderWatch {
+        _debouncer: debouncer,
+    })
+}
+
+/// Hand every plausible capture to the settle loop. This runs on the
+/// debouncer's own thread, so it does no I/O beyond the filename checks.
+fn queue(result: DebounceEventResult, tx: &mpsc::Sender<Candidate>) {
+    let events = match result {
+        Ok(events) => events,
+        Err(errors) => {
+            for err in errors {
+                eprintln!("shotshelf: watch error: {err}");
+            }
+            return;
+        }
+    };
+
+    for event in events {
+        if !is_write(&event.kind) {
+            continue;
+        }
+        for path in &event.paths {
+            if let Some(candidate) = Candidate::new(path) {
+                let _ = tx.send(candidate);
+            }
+        }
+    }
+}
+
+/// Creations and content/rename changes only. Metadata-only touches are skipped
+/// so opening an old screenshot never looks like a new one.
+fn is_write(kind: &EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::Create(_)
+            | EventKind::Modify(ModifyKind::Any)
+            | EventKind::Modify(ModifyKind::Data(_))
+            | EventKind::Modify(ModifyKind::Name(_))
+    )
+}
+
+/// Half-written or sidecar files the writer will clean up itself.
+fn is_partial(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return true;
+    };
+    let lower = name.to_ascii_lowercase();
+
+    name.starts_with('~')
+        || name.starts_with('.') // includes macOS `._` AppleDouble files
+        || name.ends_with('~')
+        || lower.ends_with(".tmp")
+        || lower.ends_with(".temp")
+        || lower.ends_with(".part")
+        || lower.ends_with(".partial")
+        || lower.ends_with(".crdownload")
+        || lower.ends_with(".download")
+}
+
+struct Candidate {
+    path: PathBuf,
+    kind: CaptureKind,
+}
+
+impl Candidate {
+    fn new(path: &Path) -> Option<Self> {
+        if is_partial(path) {
+            return None;
+        }
+        Some(Self {
+            path: path.to_path_buf(),
+            kind: kind_of(path)?,
+        })
+    }
+}
+
+struct Pending {
+    kind: CaptureKind,
+    last_len: u64,
+    stable_ticks: u32,
+    first_seen: Instant,
+}
+
+enum Settled {
+    /// Finished writing — emit it.
+    Ready,
+    /// Still moving; check again next tick.
+    Waiting,
+    /// Gone for good; forget it.
+    Gone,
+}
+
+/// One thread owns every in-flight candidate, so a long recording can settle
+/// without holding up the screenshot taken while it was running.
+fn spawn_settler<R: Runtime>(
+    app: AppHandle<R>,
+    rx: mpsc::Receiver<Candidate>,
+    sink: Arc<CaptureSink>,
+) {
+    std::thread::spawn(move || {
+        let mut pending: HashMap<PathBuf, Pending> = HashMap::new();
+
+        loop {
+            // Idle at zero cost when nothing is in flight; tick only while
+            // something is waiting to settle.
+            let next = if pending.is_empty() {
+                match rx.recv() {
+                    Ok(candidate) => Some(candidate),
+                    Err(_) => return, // app is shutting down
+                }
+            } else {
+                match rx.recv_timeout(SETTLE_TICK) {
+                    Ok(candidate) => Some(candidate),
+                    Err(RecvTimeoutError::Timeout) => None,
+                    Err(RecvTimeoutError::Disconnected) => return,
+                }
+            };
+
+            if let Some(candidate) = next {
+                remember(&mut pending, candidate);
+            }
+            while let Ok(candidate) = rx.try_recv() {
+                remember(&mut pending, candidate);
+            }
+
+            pending.retain(|path, state| match settle(path, state) {
+                Settled::Ready => {
+                    sink.emit(&app, path, state.kind);
+                    false
+                }
+                Settled::Waiting => state.first_seen.elapsed() < SETTLE_TIMEOUT,
+                Settled::Gone => false,
+            });
+        }
+    });
+}
+
+fn remember(pending: &mut HashMap<PathBuf, Pending>, candidate: Candidate) {
+    let len = len_of(&candidate.path);
+
+    match pending.entry(candidate.path) {
+        Entry::Occupied(mut entry) => {
+            let state = entry.get_mut();
+            // Another event and a different size means it is still growing.
+            if state.last_len != len {
+                state.last_len = len;
+                state.stable_ticks = 0;
+            }
+        }
+        Entry::Vacant(entry) => {
+            entry.insert(Pending {
+                kind: candidate.kind,
+                last_len: len,
+                stable_ticks: 0,
+                first_seen: Instant::now(),
+            });
+        }
+    }
+}
+
+fn settle(path: &Path, state: &mut Pending) -> Settled {
+    let Ok(meta) = std::fs::metadata(path) else {
+        // Renamed or deleted right after we queued it.
+        return if state.first_seen.elapsed() < GONE_GRACE {
+            Settled::Waiting
+        } else {
+            Settled::Gone
+        };
+    };
+
+    if !meta.is_file() {
+        return Settled::Gone;
+    }
+
+    let len = meta.len();
+    if len == 0 {
+        // The writer has created the file but not filled it yet — unless it
+        // never will, in which case stop watching it.
+        state.last_len = 0;
+        state.stable_ticks = 0;
+        return if state.first_seen.elapsed() < EMPTY_TIMEOUT {
+            Settled::Waiting
+        } else {
+            Settled::Gone
+        };
+    }
+
+    if len == state.last_len && is_readable(path) {
+        state.stable_ticks += 1;
+    } else {
+        state.last_len = len;
+        state.stable_ticks = 0;
+    }
+
+    let needed = match state.kind {
+        CaptureKind::Image => IMAGE_STABLE_TICKS,
+        CaptureKind::Video => VIDEO_STABLE_TICKS,
+    };
+
+    if state.stable_ticks >= needed {
+        Settled::Ready
+    } else {
+        Settled::Waiting
+    }
+}
+
+fn len_of(path: &Path) -> u64 {
+    std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0)
+}
+
+/// Windows keeps an exclusive lock on a file that is still being written, so
+/// being able to open it is a second, cheap "the writer is done" signal.
+fn is_readable(path: &Path) -> bool {
+    std::fs::File::open(path).is_ok()
+}

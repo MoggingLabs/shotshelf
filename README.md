@@ -11,11 +11,14 @@ take and keeps it one drag away — so you never dig through folders for the cli
 ![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?style=for-the-badge&logo=tauri&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-6366f1?style=for-the-badge)](./LICENSE)
 
+[![CI](https://github.com/MoggingLabs/shotshelf/actions/workflows/ci.yml/badge.svg)](https://github.com/MoggingLabs/shotshelf/actions/workflows/ci.yml)
+
 </div>
 
 ---
 
-> **Status: early scaffold.** Cross-platform desktop app. **Stack decided: Tauri v2** — prior-art
+> **Status: the shell runs.** Cross-platform desktop app on **Tauri v2** — the frameless, always-on-top
+> edge window and its tray icon are in; the catch engine, thumbnails and drag-out come next. Prior-art
 > research settled fork-vs-build (nothing forkable does cross-platform auto-catch, so we build) and
 > confirmed the scary part, native drag-out, is a solved plugin. See `prompts/RESEARCH.md`. Part of
 > [MoggingLabs Internals](https://github.com/MoggingLabs/mogginglabs-internals), in a new category:
@@ -58,10 +61,61 @@ which is exactly our opening. So we **build the combination**, but **adopt** the
 bundled ffmpeg (video thumbnails). We **interoperate** with ShareX rather than fork it (watch its output
 folder). Full detail in `prompts/RESEARCH.md`.
 
+## 🚀 Run it
+
+**Prerequisites:** [Node](https://nodejs.org) 22+, [Rust](https://rustup.rs) (stable), plus the
+platform toolchain Tauri v2 needs:
+
+| | Windows 11 | macOS |
+| :-- | :-- | :-- |
+| Compiler | [VS Build Tools 2022](https://visualstudio.microsoft.com/downloads/) → *Desktop development with C++* | `xcode-select --install` |
+| Webview | [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) (preinstalled on Windows 11) | WKWebView (built in) |
+
+```bash
+npm install
+npm run tauri dev      # dev build, frontend hot-reloads
+npm run tauri build    # release bundle (.msi/.exe on Windows, .dmg/.app on macOS)
+```
+
+Identical commands on both OSes. The shelf docks to the right edge of the active monitor and has **no
+taskbar or Dock entry** by design — the tray icon (Windows) / menu-bar icon (macOS) shows, hides and
+quits it, and so does its right-click menu. Building the Rust side on its own (`cargo build` in
+`src-tauri/`) expects the frontend bundle to exist, so run `npm run build` first.
+
+```
+src/            frontend — vanilla TS + Vite, deliberately dependency-light
+src-tauri/      Rust — window docking, tray icon, plugin registration
+  catch/        the catch engine: folder watchers + clipboard watch
+  capabilities/ Tauri v2 permissions (local filesystem, clipboard, drag — no network)
+app-icon.png    icon source; regenerate the set with `npm run tauri icon app-icon.png`
+.github/        CI — builds on Windows and macOS
+```
+
+Most of the per-OS code sits behind `cfg` gates that only the matching host compiles, so CI
+builds both: every push and PR runs `tsc` → `vite build` → `cargo fmt --check` → `cargo clippy
+-D warnings` → `cargo build` on **windows-latest and macos-latest**. Run the same gate locally
+with `npm run build` then `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`.
+
+### Where it watches
+
+| | Capture folders | Clipboard-only captures |
+| :-- | :-- | :-- |
+| **Windows** | `%UserProfile%\Pictures\Screenshots`, `%UserProfile%\Videos\Captures` (Game Bar), `%UserProfile%\Videos\Screen Recordings` (Snipping Tool), `…\OneDrive\Pictures\Screenshots` | Win+Shift+S |
+| **macOS** | whatever `defaults read com.apple.screencapture location` returns, else `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
+
+Folders that don't exist are skipped, and the resolved list is logged at startup. macOS reads
+the screenshot location once per launch, so `defaults write com.apple.screencapture location …`
+takes effect on the next start. Set `SHOTSHELF_WATCH_DIRS` (`;`-separated on Windows, `:`
+elsewhere) to override the list until the settings file lands. Clipboard captures are written
+into the app data dir — never the repo.
+
 ## 🗺️ Roadmap
 
 - [x] **v0.0** research → **build in Tauri v2**; adopt `drag-rs` + `notify` + `tauri-plugin-clipboard`
 - [ ] **v0.1** Tauri shell + catch engine + shelf UI (screenshots)
+  - [x] scaffold — frameless always-on-top edge window, tray icon, plugins wired
+  - [x] catch engine — `notify` folder watchers + clipboard images → `capture://new`
+  - [ ] shelf UI (thumbnail strip)
 - [ ] **v0.2** native drag-out (the crux) via `tauri-plugin-drag`
 - [ ] **v0.3** screen recordings (ffmpeg thumbs), settings/persistence, cross-platform parity, packaging
 
