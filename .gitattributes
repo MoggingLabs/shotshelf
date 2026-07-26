@@ -1,0 +1,9 @@
+# Shotshelf is built on Windows and macOS. Normalising to LF everywhere keeps
+# the bytes identical on both, so diffs stay honest no matter how a
+# contributor has core.autocrlf set.
+* text=auto eol=lf
+
+# Icon assets Git must never rewrite.
+*.png binary
+*.ico binary
+*.icns binary
