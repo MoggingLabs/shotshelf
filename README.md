@@ -8,14 +8,16 @@ take and keeps it one drag away — so you never dig through folders for the cli
 
 ![Windows](https://img.shields.io/badge/Windows-11-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![macOS](https://img.shields.io/badge/macOS-supported-000000?style=for-the-badge&logo=apple&logoColor=white)
+![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?style=for-the-badge&logo=tauri&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-6366f1?style=for-the-badge)](./LICENSE)
 
 </div>
 
 ---
 
-> **Status: early scaffold.** Cross-platform desktop app; the exact stack (Tauri vs Electron) and how
-> much we fork vs build are being decided by prior-art research — see the Roadmap. Part of
+> **Status: early scaffold.** Cross-platform desktop app. **Stack decided: Tauri v2** — prior-art
+> research settled fork-vs-build (nothing forkable does cross-platform auto-catch, so we build) and
+> confirmed the scary part, native drag-out, is a solved plugin. See `prompts/RESEARCH.md`. Part of
 > [MoggingLabs Internals](https://github.com/MoggingLabs/mogginglabs-internals), in a new category:
 > an **internal desktop utility** (not a platform driver like the `-wire` tools).
 
@@ -38,26 +40,30 @@ One job, done well. No accounts, no cloud, no 15 settings.
 
 ## 🧱 How it works (target)
 
-1. **Catch engine** — watches the OS screenshot/recording save folders (Windows + macOS) and the
-   clipboard, emits a "new capture" event.
-2. **Shelf UI** — an always-on-top edge widget rendering recent captures as thumbnails (image + video
-   frame).
-3. **Drag-out** — native OS drag-and-drop of the underlying file into any other app (the crux; assessed
-   per stack in research), with copy-to-clipboard as a fallback.
+1. **Catch engine** — watches the OS screenshot/recording save folders (Windows + macOS) with the Rust
+   [`notify`](https://github.com/notify-rs/notify) crate, plus a clipboard watch
+   (`tauri-plugin-clipboard`) for clipboard-only captures (Win+Shift+S / ⌘⌃⇧4). Emits a "new capture" event.
+2. **Shelf UI** — an always-on-top, frameless edge widget rendering recent captures as thumbnails
+   (images directly; a bundled **ffmpeg** poster-frame for recordings).
+3. **Drag-out** — native OS drag-and-drop of the underlying file into any other app via
+   [`tauri-plugin-drag`](https://github.com/crabnebula-dev/drag-rs) (the crux — a solved, maintained
+   plugin covering Windows + macOS), with copy-to-clipboard as a fallback.
 
-## 🧭 Reuse first (decided by research)
+## 🧭 Reuse first (settled by research)
 
-Per our standing rule, we don't rewrite what exists. The prior-art research (landing in
-`prompts/RESEARCH.md`) is scoped to find a **forkable cross-platform "drop shelf"** and mature
-libraries for the hard parts (native drag-out, capture-folder watching, clipboard image access) before
-we write anything — and to pick **Tauri vs Electron** with reasoning.
+Per our standing rule, we don't rewrite what exists. Research found **no forkable cross-platform shelf
+that auto-catches screenshots** — every one that does (Dropover, FlowShelf) is closed-source macOS-only,
+which is exactly our opening. So we **build the combination**, but **adopt** the hard parts:
+`tauri-plugin-drag`/`drag-rs` (drag-out), `notify` + `tauri-plugin-clipboard` (capture detection), and
+bundled ffmpeg (video thumbnails). We **interoperate** with ShareX rather than fork it (watch its output
+folder). Full detail in `prompts/RESEARCH.md`.
 
 ## 🗺️ Roadmap
 
-- [ ] **v0.0** research → adopt-vs-build + stack decision; scaffold the chosen shell
-- [ ] **v0.1** catch engine + shelf UI (screenshots)
-- [ ] **v0.2** native drag-out (the crux)
-- [ ] **v0.3** screen recordings, settings/persistence, cross-platform parity, packaging
+- [x] **v0.0** research → **build in Tauri v2**; adopt `drag-rs` + `notify` + `tauri-plugin-clipboard`
+- [ ] **v0.1** Tauri shell + catch engine + shelf UI (screenshots)
+- [ ] **v0.2** native drag-out (the crux) via `tauri-plugin-drag`
+- [ ] **v0.3** screen recordings (ffmpeg thumbs), settings/persistence, cross-platform parity, packaging
 
 ## 🔐 Privacy — captures never leave your machine
 
