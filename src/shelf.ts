@@ -40,6 +40,13 @@ interface DragSource {
   icon: string;
 }
 
+/** What ffmpeg could tell us about a recording. */
+interface VideoDetails {
+  poster: string | null;
+  durationMs: number | null;
+  bytes: number;
+}
+
 /** Newest first, matching how the shelf reads top to bottom. */
 const items: ShelfItem[] = [];
 
@@ -82,6 +89,11 @@ function removeItem(id: string): void {
 
   const [removed] = items.splice(index, 1);
   removed?.node.remove();
+
+  // The poster frame is ours; the recording is not. Only the cache is cleared.
+  if (removed?.kind === "video") {
+    void invoke("forget_video", { path: removed.path }).catch(() => {});
+  }
 
   if (items.length === 0) showEmptyState();
   else updateCount();
@@ -132,6 +144,13 @@ function tile(capture: Capture): HTMLElement {
     caption(name, capture.ts),
     actions(capture, name),
   );
+
+  if (capture.kind === "video") {
+    el.append(playBadge());
+    // ffmpeg runs on the Rust side; the tile shows its film glyph until the
+    // poster frame comes back, and keeps it if one never does.
+    void describeVideo(el, capture);
+  }
 
   // Press-and-move on the tile itself hands the capture to the OS. The action
   // buttons are excluded so copy and remove stay clickable.
@@ -213,12 +232,81 @@ function imageThumb(path: string, name: string): HTMLElement {
   return img;
 }
 
-/** Poster frames arrive in phase 05; until then a video gets a marker tile. */
+/** Shown until ffmpeg produces a poster frame, and kept if it can't. */
 function videoThumb(): HTMLElement {
   const el = document.createElement("div");
   el.className = "tile__thumb tile__thumb--glyph";
   el.textContent = "🎬";
   return el;
+}
+
+/** Marks a tile as a recording even once it looks like a still. */
+function playBadge(): HTMLElement {
+  const el = document.createElement("span");
+  el.className = "tile__play";
+  el.textContent = "▶";
+  return el;
+}
+
+/**
+ * Swap the film glyph for a real frame and put the recording's length and size
+ * on the tile. A failure here is not worth surfacing — the tile stays useful,
+ * and it still drags out the original file.
+ */
+async function describeVideo(el: HTMLElement, capture: Capture): Promise<void> {
+  let details: VideoDetails;
+  try {
+    details = await invoke<VideoDetails>("video_details", { path: capture.path });
+  } catch (error) {
+    console.error("[shotshelf] could not read that recording", error);
+    return;
+  }
+
+  const meta = el.querySelector<HTMLElement>(".tile__time");
+  if (meta) meta.textContent = describeSize(details);
+
+  if (!details.poster) return;
+
+  const glyph = el.querySelector(".tile__thumb");
+  if (!glyph) return;
+
+  const frame = document.createElement("img");
+  frame.className = "tile__thumb";
+  frame.src = convertFileSrc(details.poster);
+  frame.alt = fileName(capture.path);
+  frame.decoding = "async";
+  frame.draggable = false;
+  // If the frame won't load, go back to the film glyph rather than leaving a
+  // broken image on the shelf.
+  frame.addEventListener("error", () => frame.replaceWith(videoThumb()));
+  glyph.replaceWith(frame);
+}
+
+function describeSize(details: VideoDetails): string {
+  const size = formatBytes(details.bytes);
+  return details.durationMs === null
+    ? size
+    : `${formatDuration(details.durationMs)} · ${size}`;
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+
+  const units = ["kB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+
+  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit] ?? "GB"}`;
 }
 
 function missingThumb(): HTMLElement {

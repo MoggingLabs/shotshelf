@@ -227,6 +227,22 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Keeps a recording readable as a recording once it looks like a still. */
+.tile__play {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 9px;
+  padding-left: 2px;
+}
+
 .tile__actions {
   position: absolute;
   top: 5px;
