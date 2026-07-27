@@ -10,6 +10,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "sidecar": "node scripts/prepare-sidecar.mjs",
+    "release": "node scripts/build-release.mjs",
     "postinstall": "node scripts/prepare-sidecar.mjs",
     "tauri": "tauri"
   },

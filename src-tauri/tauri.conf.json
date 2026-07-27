@@ -41,6 +41,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "category": "Utility",
     "copyright": "© MoggingLabs",
     "publisher": "MoggingLabs",
@@ -53,6 +54,24 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://releases.mogginglabs.internal/shotshelf/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk4Njc5ODlFNUM5NUM4RTkKUldUcHlKVmNucGhubU5vWFVSaFVERk1CdHBQcXAzVm5aQ2hqSjdLWUcrREtTRThFVUZhNkJFaWEK"
+    }
   }
 }

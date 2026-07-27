@@ -1,0 +1,150 @@
+# Shotshelf — install and use
+
+Shotshelf catches every screenshot and screen recording you take and keeps it one drag away on
+an always-on-top shelf. This guide takes you from download to first drag-out.
+
+> **Your captures never leave your machine.** Shotshelf makes exactly one network request: on
+> launch it asks the internal release feed whether a newer version exists, sending nothing but
+> its own version number. No capture, no filename, no metadata, no telemetry, no analytics —
+> not now and not later. Everything else it does happens on local disk.
+
+---
+
+## Install
+
+### Windows 11
+
+1. Download `Shotshelf_<version>_x64_en-US.msi` (or `Shotshelf_<version>_x64-setup.exe`).
+2. Run it. The installer is per-user, so it needs no administrator rights.
+3. Launch **Shotshelf** from the Start menu.
+
+If SmartScreen warns that the publisher is unknown, the build you have is **unsigned** — check
+with whoever produced it before continuing. Signed builds install without a warning.
+
+### macOS
+
+1. Download `Shotshelf_<version>_aarch64.dmg` (Apple Silicon) or `..._x64.dmg` (Intel).
+2. Open it and drag **Shotshelf** into Applications.
+3. Launch it from Applications.
+
+A signed and notarized build opens straight away. If macOS says the app "cannot be opened
+because the developer cannot be verified", the build is **unsigned or un-notarized** — again,
+check its provenance rather than working around the warning.
+
+**First-run permission prompt.** Shotshelf reads screenshots from wherever macOS saves them,
+which is `~/Desktop` unless you have changed it. macOS will ask for access to that folder the
+first time — allow it, or Shotshelf will see nothing. It does **not** need Screen Recording
+permission: Shotshelf never captures anything itself, it only watches for files the OS has
+already written.
+
+---
+
+## First run
+
+Shotshelf lives in the tray (Windows) / menu bar (macOS). It has no taskbar or Dock entry by
+design. The shelf docks to the right edge of your screen and shows an empty state until you
+take your first capture.
+
+**Where it watches:**
+
+| | Capture folders | Clipboard-only captures |
+| :-- | :-- | :-- |
+| **Windows** | `%UserProfile%\Pictures\Screenshots`, `%UserProfile%\Videos\Captures` (Game Bar), `%UserProfile%\Videos\Screen Recordings` (Snipping Tool), and the OneDrive copy of Screenshots | Win+Shift+S |
+| **macOS** | wherever `defaults read com.apple.screencapture location` points, otherwise `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
+
+Folders that don't exist are skipped. The status line at the bottom of the shelf tells you how
+many it's watching.
+
+Take a screenshot. Within about a second the shelf appears with a thumbnail of it.
+
+---
+
+## Using the shelf
+
+- **Drag out** — press a tile and move. The capture leaves as a real file you can drop into
+  Explorer, Finder, an email, a chat box or an editor. It's a copy: the original stays put.
+- **Copy** (⧉ on hover) — for apps that take a paste but refuse a file drop. Images go on the
+  clipboard as pixels, recordings as a file reference.
+- **Pin** (☆ / ★ on hover) — pinned captures ignore the retention window and the item limit,
+  and are the only ones still on the shelf after a restart.
+- **Remove** (× on hover) — takes it off the shelf. **It never deletes the file.**
+- **Show/hide** — the tray icon, its right-click menu, or the global hotkey
+  (`Ctrl+Shift+S` on Windows, `⌘⇧S` on macOS by default).
+
+Recordings show a frame from themselves plus their length and size. If a recording can't be
+decoded the tile keeps a film glyph and still drags out fine.
+
+---
+
+## Settings
+
+The gear in the title strip opens everything there is:
+
+| Setting | What it does |
+| :-- | :-- |
+| **Edge** | Which side of the screen the shelf docks to |
+| **Monitor** | Which display. An unplugged monitor leaves the shelf where it is |
+| **Keep for** | How long unpinned captures stay. Removing them never touches the files |
+| **Max items** | How many unpinned captures the shelf holds |
+| **Hotkey** | The global show/hide shortcut |
+
+Settings are one JSON file you can also edit by hand:
+
+| | |
+| :-- | :-- |
+| **Windows** | `%APPDATA%\com.mogginglabs.shotshelf\settings.json` |
+| **macOS** | `~/Library/Application Support/com.mogginglabs.shotshelf/settings.json` |
+
+**About the default hotkey:** a global shortcut takes that combination away from every other
+app. On macOS `⌘⇧S` is Save As almost everywhere, so it's worth changing to something you don't
+otherwise use. If the combination is already taken, Shotshelf still runs — it just can't be
+summoned that way, and says so in its log. A shortcut that won't register is refused and the
+previous one stays active.
+
+### Where Shotshelf keeps things
+
+| | Windows | macOS |
+| :-- | :-- | :-- |
+| Settings | `%APPDATA%\com.mogginglabs.shotshelf\` | `~/Library/Application Support/com.mogginglabs.shotshelf/` |
+| Clipboard captures | `%APPDATA%\com.mogginglabs.shotshelf\clipboard\` | `~/Library/Application Support/com.mogginglabs.shotshelf/clipboard/` |
+| Video poster frames | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\posters\` | `~/Library/Caches/com.mogginglabs.shotshelf/posters/` |
+
+Deleting those folders costs you pins and thumbnails, nothing else. Your captures live wherever
+the OS put them and Shotshelf never moves or deletes them.
+
+---
+
+## Updates
+
+On launch Shotshelf asks the internal feed whether a newer version exists. If one does, it
+downloads and installs it in place; restart to run it. If the feed is unreachable — you're
+offline, or off the VPN — it carries on silently.
+
+An update is only installed if it carries a valid signature from the MoggingLabs updater key.
+A compromised feed cannot make Shotshelf run arbitrary code.
+
+To go back a version, install the older build over the top.
+
+---
+
+## Uninstall
+
+- **Windows** — Settings → Apps → Installed apps → Shotshelf → Uninstall.
+- **macOS** — drag Shotshelf from Applications to the Bin.
+
+Then delete the folders in the table above if you want its settings and caches gone too. Your
+screenshots and recordings are untouched by any of this.
+
+---
+
+## Something's wrong
+
+| Symptom | Likely cause |
+| :-- | :-- |
+| Nothing appears when you take a screenshot | The folder isn't being watched — check the status line. On macOS, the folder permission prompt may have been declined |
+| The hotkey does nothing | Another app already owns that combination; change it in settings |
+| A recording shows a film glyph, not a frame | ffmpeg couldn't decode that file. The tile still drags out |
+| A tile shows ⚠ | The file has been moved or deleted since it was caught |
+| The shelf is nowhere to be seen | Click the tray/menu-bar icon, or press the hotkey |
+
+Shotshelf logs to standard output. To see it, run the installed binary from a terminal.

@@ -193,6 +193,64 @@ after `defaults read` has run, nor a `SHOTSHELF_WATCH_DIRS` override. The asset 
 platform (`http://asset.localhost/…` on Windows, `asset://localhost/…` on macOS);
 `convertFileSrc` picks the right one and the CSP allows both.
 
+## 📦 Releasing
+
+Installing and using Shotshelf is [docs/USAGE.md](./docs/USAGE.md). This is how the installers
+get made.
+
+```bash
+npm run release              # signs if the environment can, otherwise unsigned
+npm run release -- --unsigned  # never sign; for a local smoke test
+```
+
+Same command on both OSes. It produces an `.msi` and an NSIS `.exe` on Windows, a `.dmg` and
+`.app` on macOS, plus the updater artifacts — with the ffmpeg sidecar inside each. **No signing
+material lives in the repo**; it all comes from the environment, and a build with none of it set
+still succeeds and emits unsigned artifacts.
+
+| Variable | Needed for |
+| :-- | :-- |
+| `WINDOWS_CERT_THUMBPRINT` | Authenticode signing on Windows (cert must be in the Windows cert store) |
+| `APPLE_SIGNING_IDENTITY` | Developer ID signing on macOS |
+| `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | macOS notarization (or `APPLE_API_KEY` + `APPLE_API_ISSUER` + `APPLE_API_KEY_PATH`) |
+| `TAURI_SIGNING_PRIVATE_KEY` | Signing the update payload — without it, installed apps reject the update |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | If that key has a password |
+
+Windows and macOS differ in kind here, not just in variable names: Windows signing is one
+Authenticode timestamped signature, while macOS needs a Developer ID signature **and** a
+round-trip to Apple's notary service before Gatekeeper will open it.
+
+### The update feed
+
+`bundle.createUpdaterArtifacts` is on, so each build also emits a `.sig` next to the installer.
+The app asks the endpoint in `tauri.conf.json`, with `{{target}}`, `{{arch}}` and
+`{{current_version}}` substituted:
+
+```
+https://releases.mogginglabs.internal/shotshelf/{{target}}/{{arch}}/{{current_version}}
+```
+
+Serve either a static manifest or a dynamic endpoint that answers `204 No Content` when the
+caller is current. The manifest shape:
+
+```json
+{
+  "version": "0.2.0",
+  "notes": "What changed",
+  "pub_date": "2026-07-27T12:00:00Z",
+  "platforms": {
+    "windows-x86_64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf_0.2.0_x64-setup.nsis.zip" },
+    "darwin-aarch64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf_0.2.0_aarch64.app.tar.gz" }
+  }
+}
+```
+
+The **public** half of the updater key is in `tauri.conf.json`; the private half must never be
+committed — `*.key` is git-ignored. Regenerate the pair with
+`npm run tauri signer generate -- -w <path outside the repo>` and paste the new public key into
+`plugins.updater.pubkey`. Losing the private key means no further updates can be signed for
+already-installed apps.
+
 ## 🗺️ Roadmap
 
 - [x] **v0.0** research → **build in Tauri v2**; adopt `drag-rs` + `notify` + `tauri-plugin-clipboard`
@@ -205,7 +263,7 @@ platform (`http://asset.localhost/…` on Windows, `asset://localhost/…` on ma
   - [x] recordings — bundled ffmpeg poster frames, duration + size on the tile
   - [x] settings + persistence — edge/monitor, retention, pinning, global hotkey
   - [ ] cross-platform parity pass
-  - [ ] packaging
+  - [x] packaging — signed installers, bundled ffmpeg, internal updater, [USAGE](./docs/USAGE.md)
 
 ## 🔐 Privacy — captures never leave your machine
 
