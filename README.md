@@ -35,7 +35,7 @@ instead of fixing our filing habits.
 
 - **Catches** every new screenshot and screen recording automatically (watches the OS capture
   locations + clipboard).
-- **Holds** them in a popover that hangs off the tray icon, newest first, as thumbnails.
+- **Holds** them in a popover in the corner of your screen, newest first, as thumbnails.
 - **Drags out** — grab an item off the shelf and drop it straight into an email, editor, or chat. No
   Finder/Explorer spelunking, no 4-second window.
 
@@ -83,11 +83,11 @@ npm run tauri dev      # dev build, frontend hot-reloads
 npm run tauri build    # release bundle (.msi/.exe on Windows, .dmg/.app on macOS)
 ```
 
-Identical commands on every OS. The shelf is a popover anchored to the tray icon (Windows,
-Linux) / menu-bar icon (macOS) and has **no taskbar or Dock entry** by design — that icon, its
-right-click menu, and the global hotkey are how you summon it. On Linux the tray protocol
-sends no click events to the app, so there the menu and the hotkey are the only ways in, and
-the popover corner-anchors because the icon's position can't be read. Building the Rust side on its own
+Identical commands on every OS. The shelf is a popover that rests in the bottom-right corner of
+the screen and has **no taskbar or Dock entry** by design — the tray icon (Windows, Linux) /
+menu-bar icon (macOS), its right-click menu, and the global hotkey are how you summon it. On
+Linux the tray protocol sends no click events to the app, so there the menu and the hotkey are
+the only ways in. Building the Rust side on its own
 (`cargo build` in `src-tauri/`) expects the frontend bundle to exist, so run `npm run build` first.
 
 ```
@@ -125,7 +125,7 @@ tell the two apart.
 
 ### The shelf
 
-The shelf is a **popover anchored to the tray icon**, 225×420, not a window that sits on your
+The shelf is a **popover resting in the bottom-right corner of the screen**, 225×420, not a window that sits on your
 screen. It opens on a tray click or the hotkey — focused, so Esc and clicking away dismiss it
 like any other popover — and when a capture lands it **peeks** for about four seconds without
 ever taking focus, then closes itself. Hovering it holds it open; dragging out of it will not
@@ -171,8 +171,10 @@ and are the only shelf state that survives a restart; only their paths and a tim
 stored, never capture contents. Retention is in hours and accepts fractions, which is the only
 practical way to watch expiry work without waiting an hour.
 
-The popover anchors itself to the tray icon each time it opens, so moving between monitors or
-rearranging displays needs no setting at all.
+The popover places itself in the corner each time it opens, measured against the monitor's work
+area rather than its full size — so it clears the taskbar wherever that sits, and rearranging
+displays needs no setting at all. The column is pinned by that same corner, so as it grows it
+moves upward and the newest card stays where your eye already is.
 
 ### Recordings
 

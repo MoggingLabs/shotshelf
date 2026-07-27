@@ -1,6 +1,7 @@
 //! The shelf popover: where it appears, and when it goes away.
 //!
-//! Shotshelf hangs off the tray icon rather than docking to a screen edge. Two
+//! Shotshelf rests in the bottom-right corner of the screen, clear of the
+//! taskbar, and is summoned from the tray rather than hanging off it. Two
 //! ways in, and they behave differently on purpose:
 //!
 //! * **Opened** — a tray click or the global shortcut. Takes focus, so Esc and
@@ -10,7 +11,6 @@
 //!   complaint people have about shelves that do this. It closes itself.
 
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow};
-use tauri_plugin_positioner::{Position, WindowExt};
 
 /// Label of the shelf window — must match `tauri.conf.json`.
 pub const SHELF: &str = "main";
@@ -29,36 +29,43 @@ fn is_opened() -> bool {
     OPENED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Anchor the popover to the tray icon.
+/// How far the popover sits from the corner it rests in.
+const SCREEN_MARGIN: f64 = 12.0;
+
+/// Park the popover in the bottom-right corner of the screen.
 ///
-/// `tauri-plugin-positioner` is fed the tray rectangle by the tray event
-/// handler, so it already knows where the icon sits — below the menu bar on
-/// macOS, above the notification area on Windows — and it keeps the popover on
-/// screen near the edges. No coordinate maths here.
-fn anchor<R: Runtime>(shelf: &WebviewWindow<R>) {
-    if let Err(err) = shelf.move_window(anchor_position()) {
-        eprintln!("shotshelf: could not anchor the shelf to the tray: {err}");
-    }
-}
+/// Measured against the monitor's **work area**, not its full size: the taskbar
+/// lives in the difference between the two, and a window placed against the
+/// real bottom edge disappears behind it. This is also why the placement is
+/// done here rather than with `tauri-plugin-positioner` — its `BottomRight`
+/// works off `monitor.size()`, so it would tuck the shelf under the taskbar.
+///
+/// `size` is the logical size the caller has just asked for, rather than
+/// anything read back off the window. A resize has not necessarily reached the
+/// OS by the time this runs, so querying `outer_size()` here would place the
+/// window using its previous shape.
+fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
+    // The primary monitor is where the taskbar and the tray icon live, so it is
+    // the screen "the bottom-right corner" means, whatever monitor the window
+    // happened to be on last.
+    let monitor = match shelf.primary_monitor().or_else(|_| shelf.current_monitor()) {
+        Ok(Some(monitor)) => monitor,
+        Ok(None) => return,
+        Err(err) => {
+            eprintln!("shotshelf: could not read the monitor layout: {err}");
+            return;
+        }
+    };
 
-/// `TrayCenter` is only meaningful once a tray event has told the positioner
-/// where the icon is — before that it lands in the corner of the screen, which
-/// is how a launch peek ended up at the top-left. Until then, aim for the
-/// corner the tray actually lives in.
-fn anchor_position() -> Position {
-    if crate::tray::tray_located() {
-        return Position::TrayCenter;
-    }
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    let to_physical = |value: f64| (value * scale).round() as i32;
 
-    // Windows keeps its notification area bottom-right; the macOS menu bar is
-    // along the top.
-    #[cfg(target_os = "windows")]
-    {
-        Position::BottomRight
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        Position::TopRight
+    let x = area.position.x + area.size.width as i32 - to_physical(size.0 + SCREEN_MARGIN);
+    let y = area.position.y + area.size.height as i32 - to_physical(size.1 + SCREEN_MARGIN);
+
+    if let Err(err) = shelf.set_position(tauri::PhysicalPosition::new(x, y)) {
+        eprintln!("shotshelf: could not place the shelf: {err}");
     }
 }
 
@@ -72,7 +79,7 @@ fn anchor_position() -> Position {
 pub const BROWSE_SIZE: (f64, f64) = (225.0, 420.0);
 pub const COLUMN_WIDTH: f64 = BROWSE_SIZE.0;
 
-/// Open the popover deliberately: full grid, anchored, on top, and focused.
+/// Open the popover deliberately: full grid, in its corner, on top, and focused.
 pub fn open<R: Runtime>(app: &AppHandle<R>) {
     let Some(shelf) = app.get_webview_window(SHELF) else {
         return;
@@ -80,7 +87,7 @@ pub fn open<R: Runtime>(app: &AppHandle<R>) {
 
     set_opened(true);
     let _ = shelf.set_size(tauri::LogicalSize::new(BROWSE_SIZE.0, BROWSE_SIZE.1));
-    anchor(&shelf);
+    place(&shelf, BROWSE_SIZE);
     let _ = shelf.show();
     let _ = shelf.set_focus();
 
@@ -97,10 +104,12 @@ pub fn peek<R: Runtime>(app: &AppHandle<R>, height: f64) {
     };
 
     set_opened(false);
-    let _ = shelf.set_size(tauri::LogicalSize::new(COLUMN_WIDTH, height.max(80.0)));
-    // Re-anchor every time: the window just changed size, the tray can move
-    // between monitors, and a peek must never appear where the icon used to be.
-    anchor(&shelf);
+    let height = height.max(80.0);
+    let _ = shelf.set_size(tauri::LogicalSize::new(COLUMN_WIDTH, height));
+    // Re-place on every peek: the column grows a card at a time, and it is
+    // pinned by its bottom-right corner, so a taller one has to move up to keep
+    // that corner where it was.
+    place(&shelf, (COLUMN_WIDTH, height));
     let _ = shelf.show();
 }
 

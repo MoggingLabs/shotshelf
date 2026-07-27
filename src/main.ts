@@ -95,7 +95,7 @@ function showColumn(): void {
 }
 
 /**
- * Rust has already sized, anchored, shown and focused the window by the time
+ * Rust has already sized, placed, shown and focused the window by the time
  * this runs — all that is left is to render the right shape.
  *
  * It must not call back into `show_shelf`: `open()` emits this event, so doing
