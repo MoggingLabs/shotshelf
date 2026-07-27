@@ -83,9 +83,11 @@ npm run tauri dev      # dev build, frontend hot-reloads
 npm run tauri build    # release bundle (.msi/.exe on Windows, .dmg/.app on macOS)
 ```
 
-Identical commands on both OSes. The shelf is a popover anchored to the tray icon (Windows) /
-menu-bar icon (macOS) and has **no taskbar or Dock entry** by design — that icon, its right-click
-menu, and the global hotkey are how you summon it. Building the Rust side on its own
+Identical commands on every OS. The shelf is a popover anchored to the tray icon (Windows,
+Linux) / menu-bar icon (macOS) and has **no taskbar or Dock entry** by design — that icon, its
+right-click menu, and the global hotkey are how you summon it. On Linux the tray protocol
+sends no click events to the app, so there the menu and the hotkey are the only ways in, and
+the popover corner-anchors because the icon's position can't be read. Building the Rust side on its own
 (`cargo build` in `src-tauri/`) expects the frontend bundle to exist, so run `npm run build` first.
 
 ```
