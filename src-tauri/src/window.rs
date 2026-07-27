@@ -65,10 +65,12 @@ fn anchor_position() -> Position {
 /// The two shapes the popover takes.
 ///
 /// Browsing your history and glancing at what just landed are different jobs,
-/// so they get different windows: a two-column grid you opened on purpose, and
-/// a narrow column that shows only what has just arrived.
-pub const BROWSE_SIZE: (f64, f64) = (360.0, 420.0);
-pub const COLUMN_WIDTH: f64 = 182.0;
+/// but they are the same width: one column of cards, sized so a screenshot in
+/// one is actually recognisable. Only the height and the chrome differ — browse
+/// is a fixed, scrollable box with a title strip, the column is sized to
+/// exactly the cards it holds and carries no furniture at all.
+pub const BROWSE_SIZE: (f64, f64) = (225.0, 420.0);
+pub const COLUMN_WIDTH: f64 = BROWSE_SIZE.0;
 
 /// Open the popover deliberately: full grid, anchored, on top, and focused.
 pub fn open<R: Runtime>(app: &AppHandle<R>) {

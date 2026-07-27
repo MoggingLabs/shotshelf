@@ -1,11 +1,16 @@
 /**
  * Shelf state + rendering.
  *
- * Tiles are a two-column grid at 16:10 — close enough to a screen's own shape
- * that a capture arrives almost uncropped. The previous 3.8:1 letterbox kept
- * only the middle 46% of a 1080p screenshot and threw away the top, which is
- * exactly where a screenshot keeps its meaning: title bars, headers, the first
- * line of a terminal. Dark captures rendered as empty holes.
+ * Tiles are one column of 16:9 cards — a screen's own shape, so a full-screen
+ * capture fills one exactly. Anything of another shape is fitted whole rather
+ * than cropped to its middle. Both halves of that matter: the original 3.8:1
+ * letterbox kept only the middle 46% of a 1080p screenshot and threw away the
+ * top, which is exactly where a screenshot keeps its meaning — title bars,
+ * headers, the first line of a terminal. Dark captures rendered as empty holes.
+ *
+ * One column rather than two because the popover is only 225 wide; splitting
+ * that in half leaves a card too small to recognise anything in, which defeats
+ * the only job a thumbnail has.
  *
  * The shelf is always on top and always running, so it never re-renders the
  * whole strip: a new capture inserts one node and drops at most one off the end.
@@ -63,8 +68,15 @@ const COLUMN_MS = 60_000;
 /** How often the column checks whether a card's minute is up. */
 const COLUMN_TICK_MS = 1000;
 
-/** Card geometry, mirrored in the CSS. Used to size the column window. */
-const CARD_HEIGHT = 99;
+/**
+ * Card geometry, mirrored in the CSS. Used to size the column window.
+ *
+ * The popover is 225 wide with 12px of padding either side and a 1px border,
+ * so a card is 199 across; at 16:9 that is 112 tall. Change the window width,
+ * the padding or the tile's aspect and this has to move with them, or the
+ * column window stops matching what it is holding.
+ */
+const CARD_HEIGHT = 112;
 const CARD_GAP = 9;
 const COLUMN_PADDING = 24;
 /** Beyond this the column scrolls rather than growing off the screen. */
@@ -451,6 +463,8 @@ function tile(capture: Capture, pinned: boolean): HTMLElement {
     actions(capture, name, pinned),
   );
 
+  if (capture.kind !== "video") setWash(el, capture.path);
+
   if (capture.kind === "video") {
     el.append(badge());
     void describeVideo(el, capture);
@@ -485,6 +499,22 @@ function imageThumb(path: string, name: string): HTMLElement {
   img.draggable = false;
   img.addEventListener("error", () => img.replaceWith(glyphThumb("alert", "missing")));
   return img;
+}
+
+/**
+ * The blurred fill behind a thumbnail.
+ *
+ * A card is a fixed 16:9 but captures are any shape, and a fitted thumbnail
+ * leaves bars either side. Filling them with a blown-up, blurred copy of the
+ * capture itself turns that dead space into something that still belongs to the
+ * capture — the whole image stays visible and uncropped in front of it.
+ *
+ * Set as a custom property rather than another element so replacing the
+ * thumbnail (a poster frame arriving, a missing file falling back to a glyph)
+ * cannot leave a mismatched layer behind.
+ */
+function setWash(tile: HTMLElement, path: string): void {
+  tile.style.setProperty("--wash", `url("${convertFileSrc(path)}")`);
 }
 
 /** Shown until ffmpeg produces a poster frame, and kept if it can't. */
@@ -548,6 +578,8 @@ async function describeVideo(el: HTMLElement, capture: Capture): Promise<void> {
   frame.draggable = false;
   frame.addEventListener("error", () => frame.replaceWith(videoThumb()));
   glyph.replaceWith(frame);
+  // The poster is the recording's own frame, so it fills the bars too.
+  setWash(el, details.poster);
 }
 
 function describeSize(details: VideoDetails): string {

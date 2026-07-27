@@ -125,18 +125,22 @@ tell the two apart.
 
 ### The shelf
 
-The shelf is a **popover anchored to the tray icon**, 360×420, not a window that sits on your
+The shelf is a **popover anchored to the tray icon**, 225×420, not a window that sits on your
 screen. It opens on a tray click or the hotkey — focused, so Esc and clicking away dismiss it
 like any other popover — and when a capture lands it **peeks** for about four seconds without
 ever taking focus, then closes itself. Hovering it holds it open; dragging out of it will not
 dismiss it. A shelf that appears on every screenshot and *stays* is the thing people end up
 turning off, and a shelf that steals focus mid-sentence is the complaint Dropover's users made.
 
-Captures sit in a **two-column grid at 16:10**, grouped by day, newest first. The aspect ratio
-is the whole point: a screenshot keeps its meaning at the *top* —
-title bars, headers, the first line of a terminal — and the shelf's original 3.8:1 tiles
-cropped a 1080p capture to the middle 46%, throwing that away and rendering dark captures as
-empty holes. 16:10 is near enough to a screen's own shape that almost nothing is lost.
+Captures sit in a **single column of 16:9 cards**, grouped by day, newest first. At 225 wide
+there is only room for one: two columns would leave a card too small to recognise anything in,
+which is the only job a thumbnail has. 16:9 is a screen's own shape, so a full-screen capture
+fills a card exactly — nothing cropped, nothing letterboxed — and anything of another shape is
+fitted whole rather than cut down to its middle.
+
+The aspect ratio is the whole point: a screenshot keeps its meaning at the *top* — title bars,
+headers, the first line of a terminal — and the shelf's original 3.8:1 tiles cropped a 1080p
+capture to the middle 46%, throwing that away and rendering dark captures as empty holes.
 
 The shelf holds **50** captures and scrolls; the 51st pushes the oldest off the end. Hovering
 a tile reveals pin, copy and remove controls — removing takes it off the shelf, and the file

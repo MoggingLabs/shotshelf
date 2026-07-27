@@ -78,13 +78,10 @@ body {
   display: none;
 }
 
+/* Horizontal padding matches the browse view exactly, so a card comes out the
+   same width in both shapes — which is the whole point of the column. */
 .shelf[data-mode="column"] .shelf__items {
-  padding: 11px;
-}
-
-/* One column of cards at the same size they are in the grid. */
-.shelf__items[data-view="column"] .group__grid {
-  grid-template-columns: minmax(0, 1fr);
+  padding: 11px 12px;
 }
 
 /* ── Title strip (the drag handle) ─────────────────────────────────────── */
@@ -196,11 +193,13 @@ body {
   margin-top: 4px;
 }
 
-/* 9px gap and a 16:10 card are what `columnHeight()` measures the window
-   against, so these three numbers move together. */
+/* One column, in both shapes. Two columns at this width would leave a card too
+   small to recognise a screenshot in, which is the only job a thumbnail has.
+   The 9px gap and the card's aspect are what `columnHeight()` measures the
+   window against, so those numbers move together. */
 .group__grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 9px;
 }
 
@@ -208,8 +207,9 @@ body {
 
 .tile {
   position: relative;
-  /* Near enough to a screen's own shape that captures arrive barely cropped. */
-  aspect-ratio: 16 / 10;
+  /* A screen's own shape: a full-screen capture fills this exactly, with
+     nothing cropped and nothing letterboxed. */
+  aspect-ratio: 16 / 9;
   border-radius: var(--tile-radius);
   /* Lighter than the panel, so a dark capture still reads as a tile and not
      as a hole in the shelf. */
@@ -223,11 +223,37 @@ body {
   box-shadow: inset 0 0 0 1px var(--stroke-strong), 0 4px 14px rgba(0, 0, 0, 0.45);
 }
 
+/* The bars either side of a fitted thumbnail, filled with a blurred blow-up of
+   the capture itself. `--wash` is unset until a thumbnail loads, and an unset
+   background-image is simply nothing, so a tile without one costs no paint.
+   Scaled past the edges because a blur samples past its own bounds and would
+   otherwise show a pale rim; the tile's `overflow: hidden` crops it back. */
+.tile::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: var(--wash);
+  background-size: cover;
+  background-position: center;
+  filter: blur(14px) saturate(1.25);
+  transform: scale(1.2);
+  opacity: 0.5;
+}
+
 .tile__thumb {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  /* Positioned, but deliberately without a z-index: that puts it in tree order
+     with the other positioned children, so it covers the wash while the label,
+     badge and hover controls after it still paint on top. */
+  position: relative;
+  /* `contain`, not `cover`: the card is a fixed size, but what lands on it is
+     any shape at all — a tall window, a thin region snip. Cover would crop
+     those to their middle, which is how tiles became unrecognisable before. A
+     full-screen capture matches the card exactly and so fills it either way;
+     everything else is shown whole, letterboxed against the tile. */
+  object-fit: contain;
   /* The native drag carries the file out; the webview's own image drag would
      only get in its way. */
   -webkit-user-drag: none;
