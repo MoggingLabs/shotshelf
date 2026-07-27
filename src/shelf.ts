@@ -7,7 +7,8 @@
  * tile takes it off the shelf and leaves the file exactly where it is.
  */
 
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { startDrag } from "@crabnebula/tauri-plugin-drag";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
 export type CaptureKind = "image" | "video";
 
@@ -28,6 +29,16 @@ interface ShelfItem extends Capture {
 const MAX_ITEMS = 50;
 /** How long a freshly caught tile stays highlighted. */
 const HIGHLIGHT_MS = 1400;
+/** Pointer travel before a press on a tile becomes a drag rather than a click. */
+const DRAG_THRESHOLD_PX = 6;
+/** How long the copy button confirms itself. */
+const COPIED_MS = 1100;
+
+/** What the Rust side hands back to feed a native drag. */
+interface DragSource {
+  path: string;
+  icon: string;
+}
 
 /** Newest first, matching how the shelf reads top to bottom. */
 const items: ShelfItem[] = [];
@@ -119,10 +130,65 @@ function tile(capture: Capture): HTMLElement {
   el.append(
     capture.kind === "video" ? videoThumb() : imageThumb(capture.path, name),
     caption(name, capture.ts),
-    removeButton(`${capture.ts}:${capture.path}`, name),
+    actions(capture, name),
   );
 
+  // Press-and-move on the tile itself hands the capture to the OS. The action
+  // buttons are excluded so copy and remove stay clickable.
+  el.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    if ((event.target as HTMLElement).closest(".tile__action")) return;
+    armDrag(el, capture, event);
+  });
+
   return el;
+}
+
+/**
+ * Wait for real pointer travel before starting a drag, so a click on a tile
+ * stays a click and the strip can still be scrolled.
+ */
+function armDrag(node: HTMLElement, capture: Capture, start: PointerEvent): void {
+  const from = { x: start.clientX, y: start.clientY };
+
+  const onMove = (move: PointerEvent) => {
+    const travelled = Math.hypot(move.clientX - from.x, move.clientY - from.y);
+    if (travelled < DRAG_THRESHOLD_PX) return;
+    disarm();
+    void beginDrag(node, capture);
+  };
+
+  const disarm = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", disarm);
+    window.removeEventListener("pointercancel", disarm);
+  };
+
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", disarm);
+  window.addEventListener("pointercancel", disarm);
+}
+
+/**
+ * Hand the real file to the OS via `tauri-plugin-drag`. `mode: "copy"` is the
+ * important part: dragging a capture out must never move the original.
+ */
+async function beginDrag(node: HTMLElement, capture: Capture): Promise<void> {
+  node.classList.add("tile--dragging");
+  const done = () => node.classList.remove("tile--dragging");
+
+  try {
+    const source = await invoke<DragSource>("prepare_drag", {
+      path: capture.path,
+      kind: capture.kind,
+    });
+    // Cancelling a drag just resolves with "Cancelled" — nothing to undo.
+    await startDrag({ item: [source.path], icon: source.icon, mode: "copy" }, done);
+  } catch (error) {
+    console.error("[shotshelf] could not drag that capture out", error);
+  } finally {
+    done();
+  }
 }
 
 /**
@@ -138,6 +204,9 @@ function imageThumb(path: string, name: string): HTMLElement {
   img.alt = name;
   img.loading = "lazy";
   img.decoding = "async";
+  // The webview would otherwise start its own HTML5 image drag and shadow the
+  // native one, which is what actually carries the file to other apps.
+  img.draggable = false;
   // The file can be moved or deleted behind our back; say so rather than
   // showing a broken image.
   img.addEventListener("error", () => img.replaceWith(missingThumb()));
@@ -179,14 +248,51 @@ function caption(name: string, ts: number): HTMLElement {
   return el;
 }
 
-function removeButton(id: string, name: string): HTMLElement {
+function actions(capture: Capture, name: string): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "tile__actions";
+  wrap.append(copyButton(capture, name), removeButton(capture, name));
+  return wrap;
+}
+
+/** For the apps that take a paste but refuse a file drop. */
+function copyButton(capture: Capture, name: string): HTMLElement {
   const button = document.createElement("button");
-  button.className = "tile__remove";
+  button.className = "tile__action";
+  button.type = "button";
+  button.title = `Copy ${name} to the clipboard`;
+  button.textContent = "⧉";
+
+  button.addEventListener("click", () => {
+    void invoke("copy_capture", { path: capture.path, kind: capture.kind })
+      .then(() => confirmOn(button, "✓"))
+      .catch((error: unknown) => {
+        console.error("[shotshelf] could not copy that capture", error);
+        confirmOn(button, "!");
+      });
+  });
+
+  return button;
+}
+
+function removeButton(capture: Capture, name: string): HTMLElement {
+  const button = document.createElement("button");
+  button.className = "tile__action tile__action--remove";
   button.type = "button";
   button.title = `Remove ${name} from the shelf (the file stays on disk)`;
   button.textContent = "×";
-  button.addEventListener("click", () => removeItem(id));
+  button.addEventListener("click", () =>
+    removeItem(`${capture.ts}:${capture.path}`),
+  );
   return button;
+}
+
+function confirmOn(button: HTMLElement, glyph: string): void {
+  const original = button.textContent;
+  button.textContent = glyph;
+  window.setTimeout(() => {
+    button.textContent = original;
+  }, COPIED_MS);
 }
 
 function fileName(path: string): string {

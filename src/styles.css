@@ -183,6 +183,9 @@ body {
   height: 100%;
   /* Screenshots are every shape; crop to the tile rather than letterbox. */
   object-fit: cover;
+  /* The native drag carries the file out; the webview's own image drag would
+     only get in its way. */
+  -webkit-user-drag: none;
 }
 
 .tile__thumb--glyph {
@@ -224,10 +227,22 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.tile__remove {
+.tile__actions {
   position: absolute;
   top: 5px;
   right: 5px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 90ms ease-out;
+}
+
+.tile:hover .tile__actions,
+.tile__actions:focus-within {
+  opacity: 1;
+}
+
+.tile__action {
   display: grid;
   place-items: center;
   width: 21px;
@@ -235,22 +250,28 @@ body {
   padding: 0;
   border: none;
   border-radius: 50%;
-  opacity: 0;
   background: rgba(0, 0, 0, 0.6);
   color: #fff;
-  font-size: 15px;
+  font-size: 13px;
   line-height: 1;
   cursor: default;
-  transition: opacity 90ms ease-out;
 }
 
-.tile:hover .tile__remove,
-.tile__remove:focus-visible {
-  opacity: 1;
+.tile__action:hover {
+  background: rgba(99, 102, 241, 0.92);
 }
 
-.tile__remove:hover {
+.tile__action--remove {
+  font-size: 15px;
+}
+
+.tile__action--remove:hover {
   background: rgba(220, 38, 38, 0.9);
+}
+
+/* The OS draws the drag image; fading the tile shows where it came from. */
+.tile--dragging {
+  opacity: 0.5;
 }
 
 /* A freshly caught tile flashes once so the eye lands on it. */

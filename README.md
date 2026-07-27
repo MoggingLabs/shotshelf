@@ -122,6 +122,17 @@ The shelf holds **50** captures and scrolls; the 51st pushes the oldest off the 
 a tile reveals a **×** that takes it off the shelf — the file itself is never touched, moved
 or deleted. Recordings show a placeholder tile until poster frames land in v0.3.
 
+### Getting a capture out
+
+Press a tile and move: the capture leaves the shelf as a **real file**, dropped into Explorer,
+Finder, an email, a chat box or an editor — `tauri-plugin-drag` (`drag-rs`) hands it to the OS
+in `copy` mode, so the original never moves. A press that doesn't travel stays a click, which
+keeps the copy and remove controls usable.
+
+Each tile also has a **copy** button for the apps that take a paste but refuse a file drop:
+images go on the clipboard as pixels, recordings as a file reference. Shotshelf flags its own
+clipboard writes so copying a capture doesn't shelve a second copy of it.
+
 Thumbnails are rendered straight from disk over Tauri's asset protocol, never inlined as
 base64. That protocol is scoped shut by default, and the scope is granted at **runtime** from
 the same resolved watch list the engine uses — non-recursively, plus the clipboard folder.
@@ -137,7 +148,7 @@ platform (`http://asset.localhost/…` on Windows, `asset://localhost/…` on ma
   - [x] scaffold — frameless always-on-top edge window, tray icon, plugins wired
   - [x] catch engine — `notify` folder watchers + clipboard images → `capture://new`
   - [x] shelf UI — recent-first thumbnail strip, auto-shows on every capture
-- [ ] **v0.2** native drag-out (the crux) via `tauri-plugin-drag`
+- [x] **v0.2** native drag-out (the crux) via `tauri-plugin-drag`, with a clipboard-copy fallback
 - [ ] **v0.3** screen recordings (ffmpeg thumbs), settings/persistence, cross-platform parity, packaging
 
 ## 🔐 Privacy — captures never leave your machine

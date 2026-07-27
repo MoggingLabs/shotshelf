@@ -19,7 +19,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 /// Event the shelf front-end listens on. Payload is [`Capture`].
@@ -29,7 +29,7 @@ pub const CAPTURE_EVENT: &str = "capture://new";
 /// OS produced for it.
 const DEDUPE_WINDOW: Duration = Duration::from_secs(3);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CaptureKind {
     Image,
@@ -72,6 +72,10 @@ pub struct CaptureSink {
     /// Set when a folder image is emitted, cleared when a clipboard capture
     /// claims it as its own echo. See [`CaptureSink::take_folder_echo`].
     folder_echo: Mutex<Option<Instant>>,
+    /// Set when Shotshelf itself writes to the clipboard, so copying a capture
+    /// out doesn't shelve a second copy of it. See
+    /// [`CaptureSink::take_own_clipboard_write`].
+    own_clipboard_write: Mutex<Option<Instant>>,
 }
 
 impl CaptureSink {
@@ -117,6 +121,24 @@ impl CaptureSink {
         }
     }
 
+    /// Warn the clipboard watcher that the next change is Shotshelf's own
+    /// doing — the copy-out fallback in [`crate::share`].
+    pub fn expect_own_clipboard_write(&self, window: Duration) {
+        *lock(&self.own_clipboard_write) = Some(Instant::now() + window);
+    }
+
+    /// `true` if that warning is still standing, consuming it either way.
+    pub fn take_own_clipboard_write(&self) -> bool {
+        let mut expected = lock(&self.own_clipboard_write);
+        match *expected {
+            Some(until) => {
+                *expected = None;
+                until > Instant::now()
+            }
+            None => false,
+        }
+    }
+
     /// `true` the first time a path shows up inside [`DEDUPE_WINDOW`].
     fn claim(&self, path: &Path) -> bool {
         let mut recent = lock(&self.recent);
@@ -157,7 +179,11 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
         }
     };
 
-    clipboard::start(app, sink);
+    clipboard::start(app, std::sync::Arc::clone(&sink));
+
+    // The copy-out fallback needs to reach the sink to flag its own clipboard
+    // writes, so the shelf doesn't catch what the shelf just copied.
+    app.manage(sink);
 
     app.manage(CatchEngine {
         watch_dirs,

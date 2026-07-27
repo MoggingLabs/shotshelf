@@ -9,6 +9,7 @@
 //! registered, and none will be.
 
 mod catch;
+mod share;
 mod tray;
 mod window;
 
@@ -16,7 +17,11 @@ use tauri::Manager;
 
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![catch::catch_watch_dirs])
+        .invoke_handler(tauri::generate_handler![
+            catch::catch_watch_dirs,
+            share::prepare_drag,
+            share::copy_capture,
+        ])
         // ── Adopted plugins — don't hand-roll what these already solve ──
         .plugin(tauri_plugin_fs::init()) // read captures off disk
         .plugin(tauri_plugin_positioner::init()) // edge/tray window placement
