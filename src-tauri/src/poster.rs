@@ -33,6 +33,41 @@ pub struct VideoDetails {
     pub bytes: u64,
 }
 
+/// Keep at most this many cached frames. A shelf capped at 200 items cannot
+/// legitimately need more, so anything beyond it is an orphan.
+const POSTER_CACHE_LIMIT: usize = 200;
+
+/// Drop the oldest cached frames on launch.
+///
+/// Frames are deleted when their tile leaves the shelf, but that relies on
+/// every route out remembering to ask — and one of them didn't. This is the
+/// backstop: the cache is ours, it is derived data, and nothing here can cost
+/// anyone a capture.
+pub fn prune_cache<R: Runtime>(app: &AppHandle<R>) {
+    let Ok(dir) = poster_dir(app) else { return };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+
+    let mut frames: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((modified, entry.path()))
+        })
+        .collect();
+
+    if frames.len() <= POSTER_CACHE_LIMIT {
+        return;
+    }
+
+    // Newest first, so the tail is what gets dropped.
+    frames.sort_unstable_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    for (_, stale) in frames.drain(POSTER_CACHE_LIMIT..) {
+        let _ = std::fs::remove_file(stale);
+    }
+}
+
 /// Poster frames are rendered through the asset protocol like any other
 /// capture, so the cache directory needs the same grant the watched folders
 /// get — without it the shelf silently shows broken images.
@@ -247,4 +282,46 @@ fn poster_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
         .join("posters");
     std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
     Ok(dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_duration_ffmpeg_prints() {
+        let stderr = "  Duration: 00:00:12.34, start: 0.000000, bitrate: 1234 kb/s";
+        assert_eq!(parse_duration(stderr), Some(12_000));
+
+        let long = "  Duration: 01:02:03.00, start: 0.000000";
+        assert_eq!(parse_duration(long), Some(3_723_000));
+    }
+
+    #[test]
+    fn survives_a_stream_with_no_known_length() {
+        // Live captures and some containers report this rather than a time.
+        assert_eq!(parse_duration("  Duration: N/A, start: 0.000000"), None);
+        assert_eq!(parse_duration("no duration here at all"), None);
+    }
+
+    #[test]
+    fn duration_survives_a_round_trip_through_the_cache_name() {
+        // The length rides in the filename so a cache hit needs no second
+        // ffmpeg run; a mismatch here would silently show the wrong duration.
+        let name = cache_name(0xdead_beef, Some(8_000));
+        let suffix = name
+            .strip_prefix(&format!("{:016x}_", 0xdead_beef_u64))
+            .expect("prefix must match what `cached` looks for");
+        assert_eq!(
+            suffix.trim_end_matches(".jpg").parse::<u64>().ok(),
+            Some(8_000)
+        );
+    }
+
+    #[test]
+    fn an_unknown_duration_still_produces_a_usable_name() {
+        let name = cache_name(1, None);
+        assert!(name.ends_with("_na.jpg"));
+        assert!(name.starts_with(&format!("{:016x}_", 1_u64)));
+    }
 }

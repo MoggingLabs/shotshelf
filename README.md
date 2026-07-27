@@ -66,10 +66,16 @@ folder). Full detail in `prompts/RESEARCH.md`.
 **Prerequisites:** [Node](https://nodejs.org) 22+, [Rust](https://rustup.rs) (stable), plus the
 platform toolchain Tauri v2 needs:
 
-| | Windows 11 | macOS |
-| :-- | :-- | :-- |
-| Compiler | [VS Build Tools 2022](https://visualstudio.microsoft.com/downloads/) → *Desktop development with C++* | `xcode-select --install` |
-| Webview | [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) (preinstalled on Windows 11) | WKWebView (built in) |
+| | Windows 11 | macOS | Linux |
+| :-- | :-- | :-- | :-- |
+| Compiler | [VS Build Tools 2022](https://visualstudio.microsoft.com/downloads/) → *Desktop development with C++* | `xcode-select --install` | `build-essential` |
+| Webview | [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) (preinstalled on Windows 11) | WKWebView (built in) | `libwebkit2gtk-4.1-dev` |
+| Tray | built in | built in | `libayatana-appindicator3-dev` |
+
+Linux also needs `librsvg2-dev`, `libxdo-dev`, `libssl-dev` and `patchelf` — see the CI workflow
+for the exact list. **Linux is compile-verified only:** it builds and its tests pass in CI, but
+nobody has run Shotshelf on a Linux desktop, so the tray, the capture paths and GTK drag-out are
+all unproven there.
 
 ```bash
 npm install            # also fetches the ffmpeg sidecar (~80 MB, one platform)
@@ -77,9 +83,11 @@ npm run tauri dev      # dev build, frontend hot-reloads
 npm run tauri build    # release bundle (.msi/.exe on Windows, .dmg/.app on macOS)
 ```
 
-Identical commands on both OSes. The shelf is a popover anchored to the tray icon (Windows) /
-menu-bar icon (macOS) and has **no taskbar or Dock entry** by design — that icon, its right-click
-menu, and the global hotkey are how you summon it. Building the Rust side on its own
+Identical commands on every OS. The shelf is a popover anchored to the tray icon (Windows,
+Linux) / menu-bar icon (macOS) and has **no taskbar or Dock entry** by design — that icon, its
+right-click menu, and the global hotkey are how you summon it. On Linux the tray protocol
+sends no click events to the app, so there the menu and the hotkey are the only ways in, and
+the popover corner-anchors because the icon's position can't be read. Building the Rust side on its own
 (`cargo build` in `src-tauri/`) expects the frontend bundle to exist, so run `npm run build` first.
 
 ```
@@ -102,6 +110,7 @@ with `npm run build` then `cargo clippy --manifest-path src-tauri/Cargo.toml -- 
 | :-- | :-- | :-- |
 | **Windows** | `%UserProfile%\Pictures\Screenshots`, `%UserProfile%\Videos\Captures` (Game Bar), `%UserProfile%\Videos\Screen Recordings` (Snipping Tool), `…\OneDrive\Pictures\Screenshots` | Win+Shift+S |
 | **macOS** | whatever `defaults read com.apple.screencapture location` returns, else `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
+| **Linux** | `~/Pictures/Screenshots` (GNOME, XDG portal), `~/Pictures` (Spectacle, Flameshot), `~/Videos/Screencasts`, `~/Videos` | same clipboard watch |
 
 Folders that don't exist are skipped, and the resolved list is logged at startup. macOS reads
 the screenshot location once per launch, so `defaults write com.apple.screencapture location …`

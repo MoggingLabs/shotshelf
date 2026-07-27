@@ -12,6 +12,10 @@ const TRAY_ID: &str = "shotshelf";
 /// The positioner only learns where the tray icon is from a tray event, so
 /// until one has fired `Position::TrayCenter` puts the popover in the corner of
 /// the screen instead. This records when it becomes trustworthy.
+///
+/// On Linux it stays false forever: StatusNotifierItem gives the app no click
+/// events at all, so the icon rectangle is never knowable and the popover is
+/// corner-anchored for the whole session.
 static TRAY_LOCATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn tray_located() -> bool {
@@ -40,13 +44,20 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .icon(icon)
         .tooltip("Shotshelf — the shelf that catches every capture")
         .menu(&menu)
-        // Left click toggles the shelf; the menu belongs on right click.
+        // Windows and macOS: left click toggles the shelf, so the menu belongs
+        // on right click. Ignored on Linux, where the tray is an AppIndicator
+        // and the host decides — which is the reason the menu carries a
+        // "Show / Hide shelf" item at all. Without it Linux would have no way
+        // to open the shelf but the hotkey.
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "toggle" => window::toggle(app),
             "quit" => app.exit(0),
             _ => {}
         })
+        // Never fires on Linux — `tray-icon` documents the event as unemitted
+        // there even though the icon shows. Everything below is Windows/macOS
+        // in practice; Linux drives the shelf from the menu above.
         .on_tray_icon_event(|tray, event| {
             // Feeds the positioner the tray rectangle, which is the only way it
             // can place the popover under the icon.

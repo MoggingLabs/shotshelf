@@ -1,9 +1,11 @@
 name: CI
 
-# Shotshelf ships on Windows and macOS, and most of the per-OS code is behind
-# `cfg` gates that only the matching host compiles. Building on both is the only
-# way to know the macOS branches (activation policy, template tray icon,
-# `defaults read` screenshot location) still hold together.
+# Most of the per-OS code sits behind `cfg` gates that only the matching host
+# compiles, so a green build on one OS says nothing about the others. Building
+# on all three is the only way to know the macOS branches (activation policy,
+# template tray icon, `defaults read` screenshot location) and the Linux ones
+# still hold together. This is not theoretical: the first Linux run caught an
+# unused parameter in `apply_material`, which has no backdrop branch there.
 
 on:
   push:
@@ -30,9 +32,27 @@ jobs:
             name: Windows
           - os: macos-latest
             name: macOS
+          - os: ubuntu-latest
+            name: Linux
 
     steps:
       - uses: actions/checkout@v7
+
+      # Tauri on Linux is GTK + WebKit, and the tray needs AppIndicator. None
+      # of it ships on a bare runner. Compile-verification only: nobody has
+      # actually run Shotshelf on a Linux desktop.
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf \
+            build-essential
 
       - uses: actions/setup-node@v7
         with:
@@ -41,6 +61,12 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
+
+      # Node's own runner, on the pure helpers. Every bug these cover shipped
+      # once: a byte count rendered as "48 B", day keys that sorted December
+      # before June.
+      - name: Test frontend
+        run: npm test
 
       # Type-checks with `tsc --noEmit` and writes dist/, which the Rust build
       # embeds via `frontendDist` — so this has to run before cargo.
@@ -61,10 +87,13 @@ jobs:
       - name: clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
+      - name: Test
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
       - name: Build app
         run: cargo build --manifest-path src-tauri/Cargo.toml
 
 # Runners come with what Tauri v2 needs: MSVC + WebView2 on Windows, the Xcode
-# command line tools on macOS. No Linux job — Shotshelf targets Windows and
-# macOS only. Installer bundling (.msi/.dmg) arrives with phase 08; this
-# workflow proves the app compiles and links on both, nothing more.
+# command line tools on macOS. Linux needs the apt step above. This workflow
+# proves the app compiles, lints and links on all three — installer bundling
+# lives in release.yml, which ships Windows and macOS only.

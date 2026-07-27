@@ -9,11 +9,25 @@
 //!   appearing mid-sentence and swallowing your keystrokes is the single
 //!   complaint people have about shelves that do this. It closes itself.
 
-use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindow};
 use tauri_plugin_positioner::{Position, WindowExt};
 
 /// Label of the shelf window — must match `tauri.conf.json`.
 pub const SHELF: &str = "main";
+
+/// Whether what is on screen is the browse view you asked for, as opposed to
+/// the column that popped up on its own. The tray needs the difference: asking
+/// for the shelf while a column happens to be showing should give you the
+/// shelf, not hide the column.
+static OPENED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn set_opened(opened: bool) {
+    OPENED.store(opened, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn is_opened() -> bool {
+    OPENED.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Anchor the popover to the tray icon.
 ///
@@ -48,26 +62,42 @@ fn anchor_position() -> Position {
     }
 }
 
-/// Open the popover deliberately: anchored, on top, and focused.
+/// The two shapes the popover takes.
+///
+/// Browsing your history and glancing at what just landed are different jobs,
+/// so they get different windows: a two-column grid you opened on purpose, and
+/// a narrow column that shows only what has just arrived.
+pub const BROWSE_SIZE: (f64, f64) = (360.0, 420.0);
+pub const COLUMN_WIDTH: f64 = 182.0;
+
+/// Open the popover deliberately: full grid, anchored, on top, and focused.
 pub fn open<R: Runtime>(app: &AppHandle<R>) {
     let Some(shelf) = app.get_webview_window(SHELF) else {
         return;
     };
 
+    set_opened(true);
+    let _ = shelf.set_size(tauri::LogicalSize::new(BROWSE_SIZE.0, BROWSE_SIZE.1));
     anchor(&shelf);
     let _ = shelf.show();
     let _ = shelf.set_focus();
+
+    // The front-end owns the shape: tell it this was deliberate, so it swaps
+    // out of the auto-popup column and stops running its timers.
+    let _ = shelf.emit("shelf://opened", ());
 }
 
-/// Show the popover without taking focus, for a capture that just landed.
-/// The front-end decides how long it stays; this only puts it on screen.
-pub fn peek<R: Runtime>(app: &AppHandle<R>) {
+/// Show the narrow column without taking focus, sized to just the cards it
+/// holds. The front-end decides how tall that is and when it goes away.
+pub fn peek<R: Runtime>(app: &AppHandle<R>, height: f64) {
     let Some(shelf) = app.get_webview_window(SHELF) else {
         return;
     };
 
-    // Re-anchor every time: the tray can move between monitors, and a peek
-    // should never appear where the icon used to be.
+    set_opened(false);
+    let _ = shelf.set_size(tauri::LogicalSize::new(COLUMN_WIDTH, height.max(80.0)));
+    // Re-anchor every time: the window just changed size, the tray can move
+    // between monitors, and a peek must never appear where the icon used to be.
     anchor(&shelf);
     let _ = shelf.show();
 }
@@ -76,6 +106,7 @@ pub fn hide<R: Runtime>(app: &AppHandle<R>) {
     let Some(shelf) = app.get_webview_window(SHELF) else {
         return;
     };
+    set_opened(false);
     let _ = shelf.hide();
 
     // Hiding the window alone leaves macOS treating Shotshelf as the active
@@ -90,9 +121,11 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) {
         return;
     };
 
+    // Only the browse view toggles shut. Asking for the shelf while a column
+    // is popped up should hand you the shelf, not take the column away.
     match shelf.is_visible() {
-        Ok(true) => hide(app),
-        Ok(false) => open(app),
+        Ok(true) if is_opened() => hide(app),
+        Ok(_) => open(app),
         Err(err) => eprintln!("shotshelf: could not read shelf visibility: {err}"),
     }
 }
@@ -100,6 +133,11 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) {
 /// Frosted glass behind the popover — acrylic on Windows, vibrancy on macOS.
 /// Cosmetic only: a failure here leaves a solid panel, which still works.
 pub fn apply_material<R: Runtime>(shelf: &WebviewWindow<R>) {
+    // Linux has no equivalent backdrop, so neither branch below compiles there
+    // and the window is left to the CSS panel alone.
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let _ = shelf;
+
     #[cfg(target_os = "windows")]
     if let Err(err) = window_vibrancy::apply_acrylic(shelf, Some((16, 18, 26, 190))) {
         eprintln!("shotshelf: no acrylic backdrop ({err}) — falling back to a solid panel");
@@ -116,13 +154,16 @@ pub fn apply_material<R: Runtime>(shelf: &WebviewWindow<R>) {
     }
 }
 
-/// Commands the front-end uses to drive the peek timer.
+/// Commands the front-end uses to drive the popover.
+///
+/// `height` is only meaningful for the column: the front-end knows how many
+/// cards are showing, so it decides how tall the window needs to be.
 #[tauri::command]
-pub fn show_shelf<R: Runtime>(app: AppHandle<R>, focus: bool) {
+pub fn show_shelf<R: Runtime>(app: AppHandle<R>, focus: bool, height: Option<f64>) {
     if focus {
         open(&app);
     } else {
-        peek(&app);
+        peek(&app, height.unwrap_or(120.0));
     }
 }
 

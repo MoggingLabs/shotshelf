@@ -57,6 +57,26 @@ body {
   overflow: hidden;
 }
 
+/* ── The auto-popup column ─────────────────────────────────────────────── */
+/* A capture landed and the shelf is showing only that: one card wide, as tall
+   as it needs, no chrome. Everything the browse view carries — the title
+   strip, settings, alerts — is furniture you did not ask for here. */
+
+.shelf[data-mode="column"] .shelf__bar,
+.shelf[data-mode="column"] .settings,
+.shelf[data-mode="column"] .shelf__alert {
+  display: none;
+}
+
+.shelf[data-mode="column"] .shelf__items {
+  padding: 11px;
+}
+
+/* One column of cards at the same size they are in the grid. */
+.shelf__items[data-view="column"] .group__grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 /* ── Title strip (the drag handle) ─────────────────────────────────────── */
 
 .shelf__bar {
@@ -166,6 +186,8 @@ body {
   margin-top: 4px;
 }
 
+/* 9px gap and a 16:10 card are what `columnHeight()` measures the window
+   against, so these three numbers move together. */
 .group__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

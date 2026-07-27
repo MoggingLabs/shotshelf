@@ -106,9 +106,28 @@ fn expand_tilde(raw: &str, home: Option<&Path>) -> PathBuf {
     }
 }
 
-/// Linux is not a target platform for Shotshelf (Windows + macOS only); this
-/// keeps the crate compiling elsewhere and is untested.
+/// Linux: no single agreed location, so watch the handful the common tools
+/// actually use.
+///
+/// GNOME Screenshot and the XDG desktop portal write to `~/Pictures/Screenshots`;
+/// KDE's Spectacle and Flameshot default to `~/Pictures`; GNOME's recorder puts
+/// screencasts in `~/Videos`. Missing directories are filtered out by the
+/// caller, so listing all of them costs nothing on a desktop that uses one.
+///
+/// Untested: this is compile-verified only — there is no Linux machine here.
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
-    app.path().picture_dir().into_iter().collect()
+    let path = app.path();
+    let mut dirs = Vec::new();
+
+    if let Ok(pictures) = path.picture_dir() {
+        dirs.push(pictures.join("Screenshots"));
+        dirs.push(pictures);
+    }
+    if let Ok(videos) = path.video_dir() {
+        dirs.push(videos.join("Screencasts"));
+        dirs.push(videos);
+    }
+
+    dirs
 }

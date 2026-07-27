@@ -6,20 +6,19 @@ import { initSettings, settingsOpen } from "./settings";
 import {
   addCapture,
   applySettings,
+  columnHeight,
+  columnIsEmpty,
+  holdColumn,
   isDragging,
   mountShelf,
+  noteCapture,
   restorePinned,
+  setMode,
   type Capture,
 } from "./shelf";
 
-/**
- * How long a capture-triggered peek stays on screen before dismissing itself.
- * A shelf that appears on every screenshot and *stays* is the thing people
- * end up disabling, so a peek is deliberately short-lived.
- */
-const PEEK_MS = 4000;
-/** Shorter grace once the pointer has left again — you already looked. */
-const PEEK_AFTER_HOVER_MS = 1200;
+/** How long the shelf stays up after launch, so a running app looks like one. */
+const LAUNCH_MS = 4000;
 
 function el<T extends HTMLElement>(selector: string): T {
   const node = document.querySelector<T>(selector);
@@ -37,53 +36,75 @@ const hideButton = el<HTMLButtonElement>("#shelf-hide");
 settingsButton.prepend(icon("settings", 14));
 hideButton.prepend(icon("minus", 14));
 
-mountShelf(el<HTMLElement>("#shelf-items"), el<HTMLElement>("#shelf-count"));
+mountShelf(el<HTMLElement>("#shelf-items"), el<HTMLElement>("#shelf-count"), () => {
+  // A card aged out. Either the column needs to be shorter, or it is done.
+  if (opened) return;
+  if (columnIsEmpty()) dismiss();
+  else showColumn();
+});
 
 // ── Popover lifetime ─────────────────────────────────────────────────────
-// The shelf hangs off the tray icon rather than living on screen, so the only
-// interesting question is when it should leave.
+//
+// Two shapes, two rules:
+//
+// * **column** — a capture landed. A narrow strip sized to just the cards it
+//   is holding, never focused, that empties itself a card at a time and then
+//   drops back into the tray.
+// * **browse** — you asked for it. The full grid, and it stays put while you
+//   work in other windows until you actually close it.
 
-let peekTimer: number | undefined;
-let hovering = false;
+let launchTimer: number | undefined;
+/**
+ * Whether the popover is open because you asked for it.
+ *
+ * Distinct from the render mode: the shelf starts in the browse *shape* for
+ * its launch appearance, but nobody asked for it, so a capture arriving then
+ * should still pop the column.
+ */
+let opened = false;
 
 function dismiss(): void {
-  window.clearTimeout(peekTimer);
+  window.clearTimeout(launchTimer);
+  opened = false;
+  // Whatever shape it was in, the next capture gets the column.
+  setMode("column");
   void invoke("hide_shelf");
 }
 
-function schedulePeekEnd(delay: number): void {
-  window.clearTimeout(peekTimer);
-  peekTimer = window.setTimeout(() => {
-    // Anything that means "I am using this" wins over the timer.
-    if (hovering || isDragging() || settingsOpen()) return;
-    dismiss();
-  }, delay);
+/** Put the column on screen at whatever height its cards need right now. */
+function showColumn(): void {
+  root.dataset["mode"] = "column";
+  void invoke("show_shelf", { focus: false, height: columnHeight() });
 }
 
-root.addEventListener("pointerenter", () => {
-  hovering = true;
-  window.clearTimeout(peekTimer);
-});
+/**
+ * Rust has already sized, anchored, shown and focused the window by the time
+ * this runs — all that is left is to render the right shape.
+ *
+ * It must not call back into `show_shelf`: `open()` emits this event, so doing
+ * so re-entered `open()` on every emit and re-opened the window forever, which
+ * made every dismissal look broken.
+ */
+function adoptBrowse(): void {
+  opened = true;
+  root.dataset["mode"] = "browse";
+  setMode("browse");
+}
 
-root.addEventListener("pointerleave", () => {
-  hovering = false;
-  schedulePeekEnd(PEEK_AFTER_HOVER_MS);
-});
+// Hovering or focusing the column stops its cards ageing out under the pointer.
+root.addEventListener("pointerenter", () => holdColumn(true));
+root.addEventListener("pointerleave", () => holdColumn(false));
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") dismiss();
 });
 
-// Clicking outside a popover closes it. A drag is the exception: handing a file
-// to the OS takes focus away, and vanishing mid-drag would break the one
-// feature the shelf exists for.
+// Note what is deliberately absent: nothing dismisses on focus loss. An opened
+// popover is sticky by design, and the column is never focused in the first
+// place — it is the card timers that end it.
 void shelfWindow.onFocusChanged(({ payload: focused }) => {
-  if (focused) {
-    window.clearTimeout(peekTimer);
-    return;
-  }
-  if (isDragging() || settingsOpen()) return;
-  dismiss();
+  holdColumn(focused);
+  if (focused) window.clearTimeout(launchTimer);
 });
 
 hideButton.addEventListener("click", dismiss);
@@ -95,14 +116,20 @@ if (!import.meta.env.DEV) {
 // ── Captures ─────────────────────────────────────────────────────────────
 
 void listen<Capture>("capture://new", ({ payload }) => {
-  addCapture(payload);
-  // Peek without focus: you are usually still typing in whatever you captured.
-  void invoke("show_shelf", { focus: false });
-  schedulePeekEnd(PEEK_MS);
+  // Open on purpose? Then don't reshape the window under you — just add it.
+  if (opened) {
+    addCapture(payload);
+    return;
+  }
+
+  noteCapture(payload);
+  showColumn();
 });
 
-// The launch peek dismisses itself the same way a capture's does.
-schedulePeekEnd(PEEK_MS);
+// Shown once at launch, then treated exactly like an empty column.
+launchTimer = window.setTimeout(() => {
+  if (!isDragging() && !settingsOpen()) dismiss();
+}, LAUNCH_MS);
 
 // Settings first: the shelf reads its limits from them, and pinned captures
 // have to be back before anything new lands on top.
@@ -124,6 +151,10 @@ void invoke<string[]>("catch_watch_dirs")
     console.error("[shotshelf] could not read the watch folders", error);
     say("The catch engine is unavailable — no captures will be picked up.");
   });
+
+// Rust shows the window when the tray is clicked or the hotkey fires; this
+// only reshapes the front-end to match.
+void listen("shelf://opened", () => adoptBrowse());
 
 /** The alert strip stays out of the way until there is something to say. */
 function say(message: string): void {

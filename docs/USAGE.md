@@ -37,11 +37,25 @@ first time — allow it, or Shotshelf will see nothing. It does **not** need Scr
 permission: Shotshelf never captures anything itself, it only watches for files the OS has
 already written.
 
+### Linux
+
+There is no Linux download. Shotshelf compiles, lints and links on Linux — CI builds it on
+every change — but nobody has yet run it on a Linux desktop, so it ships without an installer
+rather than shipping unverified. To try it, build from source: install `libwebkit2gtk-4.1-dev`,
+`libayatana-appindicator3-dev`, `librsvg2-dev`, `libxdo-dev` and `patchelf`, then
+`npm ci && npm run tauri build`. The tray needs an AppIndicator host — GNOME needs the
+AppIndicator extension; KDE, Xfce and Cinnamon have one already.
+
+Two things work differently there, both imposed by the tray protocol rather than by choice:
+Linux tray icons deliver no click events to the app, so **open the shelf from the icon's menu
+or the hotkey** rather than by clicking the icon; and because the icon's position can't be
+read either, the popover anchors to the top-right of the screen instead of to the icon.
+
 ---
 
 ## First run
 
-Shotshelf lives in the tray (Windows) / menu bar (macOS). It has no taskbar or Dock entry by
+Shotshelf lives in the tray (Windows, Linux) / menu bar (macOS). It has no taskbar or Dock entry by
 design — the shelf is a **popover that hangs off that icon**, not a window that sits on your
 screen.
 
@@ -52,12 +66,19 @@ screen.
 - The icon's tooltip tells you how many captures are on the shelf. On macOS the count also sits
   beside the icon.
 
+**Windows 11 hides new tray icons.** The first time you run Shotshelf its icon goes into the
+overflow flyout behind the **^** chevron, not onto the taskbar itself. That is a deliberate
+Windows restriction — an app cannot promote its own icon — so drag it out of the flyout onto
+the taskbar once and it stays there. Until you do, the popover still works; you just have to
+open the flyout to click it, or use the hotkey.
+
 **Where it watches:**
 
 | | Capture folders | Clipboard-only captures |
 | :-- | :-- | :-- |
 | **Windows** | `%UserProfile%\Pictures\Screenshots`, `%UserProfile%\Videos\Captures` (Game Bar), `%UserProfile%\Videos\Screen Recordings` (Snipping Tool), and the OneDrive copy of Screenshots | Win+Shift+S |
 | **macOS** | wherever `defaults read com.apple.screencapture location` points, otherwise `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
+| **Linux** | `~/Pictures/Screenshots` (GNOME, XDG portal) and `~/Pictures` (Spectacle, Flameshot), plus `~/Videos` and `~/Videos/Screencasts` | the clipboard watch applies here too |
 
 Folders that don't exist are skipped. The status line at the bottom of the shelf tells you how
 many it's watching.
@@ -103,6 +124,7 @@ Settings are one JSON file you can also edit by hand:
 | :-- | :-- |
 | **Windows** | `%APPDATA%\com.mogginglabs.shotshelf\settings.json` |
 | **macOS** | `~/Library/Application Support/com.mogginglabs.shotshelf/settings.json` |
+| **Linux** | `~/.config/com.mogginglabs.shotshelf/settings.json` |
 
 **About the default hotkey:** a global shortcut takes that combination away from every other
 app. On macOS `⌘⇧S` is Save As almost everywhere, so it's worth changing to something you don't
@@ -112,11 +134,11 @@ previous one stays active.
 
 ### Where Shotshelf keeps things
 
-| | Windows | macOS |
-| :-- | :-- | :-- |
-| Settings | `%APPDATA%\com.mogginglabs.shotshelf\` | `~/Library/Application Support/com.mogginglabs.shotshelf/` |
-| Clipboard captures | `%APPDATA%\com.mogginglabs.shotshelf\clipboard\` | `~/Library/Application Support/com.mogginglabs.shotshelf/clipboard/` |
-| Video poster frames | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\posters\` | `~/Library/Caches/com.mogginglabs.shotshelf/posters/` |
+| | Windows | macOS | Linux |
+| :-- | :-- | :-- | :-- |
+| Settings | `%APPDATA%\com.mogginglabs.shotshelf\` | `~/Library/Application Support/com.mogginglabs.shotshelf/` | `~/.config/com.mogginglabs.shotshelf/` |
+| Clipboard captures | `%APPDATA%\com.mogginglabs.shotshelf\clipboard\` | `~/Library/Application Support/com.mogginglabs.shotshelf/clipboard/` | `~/.local/share/com.mogginglabs.shotshelf/clipboard/` |
+| Video poster frames | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\posters\` | `~/Library/Caches/com.mogginglabs.shotshelf/posters/` | `~/.cache/com.mogginglabs.shotshelf/posters/` |
 
 Deleting those folders costs you pins and thumbnails, nothing else. Your captures live wherever
 the OS put them and Shotshelf never moves or deletes them.

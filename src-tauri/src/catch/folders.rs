@@ -287,3 +287,51 @@ fn len_of(path: &Path) -> u64 {
 fn is_readable(path: &Path) -> bool {
     std::fs::File::open(path).is_ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ignores_half_written_and_sidecar_files() {
+        // Every one of these has actually turned up in a watched folder.
+        for name in [
+            "Screenshot.png.tmp",
+            "clip.mp4.part",
+            "shot.png.crdownload",
+            "~$draft.png",
+            "._resource-fork.png", // macOS AppleDouble
+            "backup.png~",
+        ] {
+            assert!(is_partial(Path::new(name)), "{name} should be ignored");
+        }
+    }
+
+    #[test]
+    fn accepts_the_names_the_os_actually_writes() {
+        for name in [
+            "Screenshot 2026-07-27 152233.png",
+            "Screenshot (2).png",
+            "Screen Recording 2026-07-27 at 15.22.33.mov",
+        ] {
+            assert!(!is_partial(Path::new(name)), "{name} should be caught");
+        }
+    }
+
+    #[test]
+    fn a_metadata_touch_is_not_a_new_capture() {
+        use notify::event::{DataChange, MetadataKind};
+
+        assert!(is_write(&EventKind::Create(notify::event::CreateKind::Any)));
+        assert!(is_write(&EventKind::Modify(ModifyKind::Data(
+            DataChange::Any
+        ))));
+        // Opening an old screenshot must not put it back on the shelf.
+        assert!(!is_write(&EventKind::Modify(ModifyKind::Metadata(
+            MetadataKind::Any
+        ))));
+        assert!(!is_write(&EventKind::Remove(
+            notify::event::RemoveKind::Any
+        )));
+    }
+}
