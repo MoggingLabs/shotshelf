@@ -52,6 +52,8 @@ export/
 target/
 src-tauri/target/
 src-tauri/gen/
+# ffmpeg sidecar: ~80 MB per platform, fetched by scripts/prepare-sidecar.mjs
+src-tauri/binaries/
 *.app
 *.dmg
 *.msi

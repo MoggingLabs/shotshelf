@@ -9,6 +9,7 @@
 //! registered, and none will be.
 
 mod catch;
+mod poster;
 mod share;
 mod tray;
 mod window;
@@ -21,12 +22,15 @@ pub fn run() {
             catch::catch_watch_dirs,
             share::prepare_drag,
             share::copy_capture,
+            poster::video_details,
+            poster::forget_video,
         ])
         // ── Adopted plugins — don't hand-roll what these already solve ──
         .plugin(tauri_plugin_fs::init()) // read captures off disk
         .plugin(tauri_plugin_positioner::init()) // edge/tray window placement
         .plugin(tauri_plugin_clipboard::init()) // clipboard images (phase 02)
         .plugin(tauri_plugin_drag::init()) // native drag-out (phase 04)
+        .plugin(tauri_plugin_shell::init()) // runs the bundled ffmpeg sidecar
         .setup(|app| {
             // macOS: `skipTaskbar` is Windows/Linux only. The Accessory
             // activation policy is what keeps Shotshelf out of the Dock and
@@ -38,6 +42,7 @@ pub fn run() {
 
             // Watch the OS capture folders + the clipboard. Emits `capture://new`.
             catch::start(app.handle(), &catch::overrides_from_env());
+            poster::allow_reading_posters(app.handle());
 
             if let Some(shelf) = app.get_webview_window(window::SHELF) {
                 // The window starts hidden (`"visible": false`): dock first,

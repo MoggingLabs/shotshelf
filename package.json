@@ -9,6 +9,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "sidecar": "node scripts/prepare-sidecar.mjs",
+    "postinstall": "node scripts/prepare-sidecar.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -19,6 +21,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",
+    "ffmpeg-static": "^5.3.0",
     "typescript": "^5.9.3",
     "vite": "^8.1.5"
   }

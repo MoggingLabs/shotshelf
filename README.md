@@ -72,7 +72,7 @@ platform toolchain Tauri v2 needs:
 | Webview | [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) (preinstalled on Windows 11) | WKWebView (built in) |
 
 ```bash
-npm install
+npm install            # also fetches the ffmpeg sidecar (~80 MB, one platform)
 npm run tauri dev      # dev build, frontend hot-reloads
 npm run tauri build    # release bundle (.msi/.exe on Windows, .dmg/.app on macOS)
 ```
@@ -122,6 +122,30 @@ The shelf holds **50** captures and scrolls; the 51st pushes the oldest off the 
 a tile reveals a **×** that takes it off the shelf — the file itself is never touched, moved
 or deleted. Recordings show a placeholder tile until poster frames land in v0.3.
 
+### Recordings
+
+A recording is just a file until you can see what's in it, so every video capture gets one
+frame pulled out with a bundled **ffmpeg 6.1.1** sidecar — seeking ~1 s in, because the opening
+frame of a screen recording is so often black. The tile then shows that frame plus the clip's
+**duration and file size**, with a play badge so it still reads as a recording. If ffmpeg can't
+decode the file, the tile keeps its film glyph and stays draggable.
+
+Poster frames are cached by source path **and** mtime, so relaunching reuses them and a
+re-recorded file gets a fresh one. They're deleted when the tile leaves the shelf. The source
+recording is never touched.
+
+| | Poster cache |
+| :-- | :-- |
+| **Windows** | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\posters` |
+| **macOS** | `~/Library/Caches/com.mogginglabs.shotshelf/posters` |
+
+The sidecar is ~80 MB per platform, so it's fetched at install time by
+`scripts/prepare-sidecar.mjs` (via `ffmpeg-static`) and git-ignored rather than committed — it
+still ends up inside the installer, so nothing is downloaded at runtime. Binaries are named
+`ffmpeg-<target-triple>`, with a `.exe` suffix on Windows. **Licensing:** those builds are
+GPL-3.0. Shotshelf runs ffmpeg as a separate process and doesn't link it, so the MIT licence
+here is unaffected, but any distributed build carries GPL obligations for that binary.
+
 ### Getting a capture out
 
 Press a tile and move: the capture leaves the shelf as a **real file**, dropped into Explorer,
@@ -150,6 +174,10 @@ platform (`http://asset.localhost/…` on Windows, `asset://localhost/…` on ma
   - [x] shelf UI — recent-first thumbnail strip, auto-shows on every capture
 - [x] **v0.2** native drag-out (the crux) via `tauri-plugin-drag`, with a clipboard-copy fallback
 - [ ] **v0.3** screen recordings (ffmpeg thumbs), settings/persistence, cross-platform parity, packaging
+  - [x] recordings — bundled ffmpeg poster frames, duration + size on the tile
+  - [ ] settings + persistence
+  - [ ] cross-platform parity pass
+  - [ ] packaging
 
 ## 🔐 Privacy — captures never leave your machine
 

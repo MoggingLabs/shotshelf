@@ -35,6 +35,7 @@ tauri-plugin-fs = "2"                                             # read capture
 tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }  # edge/tray placement
 tauri-plugin-clipboard = "2"                                      # clipboard images (phase 02)
 tauri-plugin-drag = "2"                                           # native drag-out (phase 04)
+tauri-plugin-shell = "2"                                          # runs the bundled ffmpeg sidecar
 
 # Folder watching for the catch engine: https://github.com/notify-rs/notify
 # The debouncer is notify-rs' own, so we don't hand-roll event coalescing.
