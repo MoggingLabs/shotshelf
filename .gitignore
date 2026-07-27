@@ -6,6 +6,12 @@ secrets/
 *.token
 *.tokens
 tokens.json
+# Updater + code-signing key material — never in the repo
+*.key
+*.p12
+*.pfx
+*.cer
+*.p8
 *.har
 storage-state.json
 cookies.txt

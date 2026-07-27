@@ -14,6 +14,7 @@ mod poster;
 mod settings;
 mod share;
 mod tray;
+mod update;
 mod window;
 
 use tauri::Manager;
@@ -38,6 +39,7 @@ pub fn run() {
         .plugin(tauri_plugin_drag::init()) // native drag-out (phase 04)
         .plugin(tauri_plugin_shell::init()) // runs the bundled ffmpeg sidecar
         .plugin(tauri_plugin_global_shortcut::Builder::new().build()) // show/hide hotkey
+        .plugin(tauri_plugin_updater::Builder::new().build()) // internal release feed
         .setup(|app| {
             // macOS: `skipTaskbar` is Windows/Linux only. The Accessory
             // activation policy is what keeps Shotshelf out of the Dock and
@@ -57,6 +59,10 @@ pub fn run() {
             if let Err(err) = hotkey::register(app.handle(), &current.hotkey) {
                 eprintln!("shotshelf: {err}");
             }
+
+            // The one and only network call Shotshelf makes: "is there a newer
+            // build?". No capture data, no telemetry.
+            update::check_on_launch(app.handle());
 
             // Watch the OS capture folders + the clipboard. Emits `capture://new`.
             catch::start(app.handle(), &catch::overrides_from_env());
