@@ -35,7 +35,7 @@ instead of fixing our filing habits.
 
 - **Catches** every new screenshot and screen recording automatically (watches the OS capture
   locations + clipboard).
-- **Holds** them on an always-on-top shelf pinned to a screen edge, newest first, as thumbnails.
+- **Holds** them in a popover that hangs off the tray icon, newest first, as thumbnails.
 - **Drags out** — grab an item off the shelf and drop it straight into an email, editor, or chat. No
   Finder/Explorer spelunking, no 4-second window.
 
@@ -77,10 +77,10 @@ npm run tauri dev      # dev build, frontend hot-reloads
 npm run tauri build    # release bundle (.msi/.exe on Windows, .dmg/.app on macOS)
 ```
 
-Identical commands on both OSes. The shelf docks to the right edge of the active monitor and has **no
-taskbar or Dock entry** by design — the tray icon (Windows) / menu-bar icon (macOS) shows, hides and
-quits it, and so does its right-click menu. Building the Rust side on its own (`cargo build` in
-`src-tauri/`) expects the frontend bundle to exist, so run `npm run build` first.
+Identical commands on both OSes. The shelf is a popover anchored to the tray icon (Windows) /
+menu-bar icon (macOS) and has **no taskbar or Dock entry** by design — that icon, its right-click
+menu, and the global hotkey are how you summon it. Building the Rust side on its own
+(`cargo build` in `src-tauri/`) expects the frontend bundle to exist, so run `npm run build` first.
 
 ```
 src/            frontend — vanilla TS + Vite, deliberately dependency-light
@@ -116,8 +116,15 @@ tell the two apart.
 
 ### The shelf
 
-Captures sit in a **two-column grid at 16:10**, grouped by day, newest first, in a 360 px
-window. The aspect ratio is the whole point: a screenshot keeps its meaning at the *top* —
+The shelf is a **popover anchored to the tray icon**, 360×420, not a window that sits on your
+screen. It opens on a tray click or the hotkey — focused, so Esc and clicking away dismiss it
+like any other popover — and when a capture lands it **peeks** for about four seconds without
+ever taking focus, then closes itself. Hovering it holds it open; dragging out of it will not
+dismiss it. A shelf that appears on every screenshot and *stays* is the thing people end up
+turning off, and a shelf that steals focus mid-sentence is the complaint Dropover's users made.
+
+Captures sit in a **two-column grid at 16:10**, grouped by day, newest first. The aspect ratio
+is the whole point: a screenshot keeps its meaning at the *top* —
 title bars, headers, the first line of a terminal — and the shelf's original 3.8:1 tiles
 cropped a 1080p capture to the middle 46%, throwing that away and rendering dark captures as
 empty holes. 16:10 is near enough to a screen's own shape that almost nothing is lost.
@@ -129,9 +136,8 @@ and size, because that is identity rather than chrome.
 
 ### Settings
 
-The gear in the title strip opens the whole surface: which **edge** and **monitor** the shelf
-docks to, how long captures **stay**, how many it **holds**, and the **hotkey**. That's the
-entire list, and it's meant to stay that way.
+The gear in the title strip opens the whole surface: how long captures **stay**, how many the
+shelf **holds**, and the **hotkey**. That's the entire list, and it's meant to stay that way.
 
 Everything lives in one hand-editable JSON file, on device, never synced:
 
@@ -152,8 +158,8 @@ and are the only shelf state that survives a restart; only their paths and a tim
 stored, never capture contents. Retention is in hours and accepts fractions, which is the only
 practical way to watch expiry work without waiting an hour.
 
-A monitor that's been unplugged since you chose it leaves the shelf where it already is, which
-is at least somewhere visible.
+The popover anchors itself to the tray icon each time it opens, so moving between monitors or
+rearranging displays needs no setting at all.
 
 ### Recordings
 

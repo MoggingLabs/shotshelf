@@ -6,6 +6,18 @@ use tauri::{
     AppHandle, Runtime,
 };
 
+/// Identifies the tray icon so the count can be written back onto it.
+const TRAY_ID: &str = "shotshelf";
+
+/// The positioner only learns where the tray icon is from a tray event, so
+/// until one has fired `Position::TrayCenter` puts the popover in the corner of
+/// the screen instead. This records when it becomes trustworthy.
+static TRAY_LOCATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn tray_located() -> bool {
+    TRAY_LOCATED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 use crate::window;
 
 pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
@@ -24,7 +36,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .cloned()
         .expect("shotshelf: no bundle icon configured in tauri.conf.json");
 
-    let tray = TrayIconBuilder::with_id("shotshelf")
+    let tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
         .tooltip("Shotshelf — the shelf that catches every capture")
         .menu(&menu)
@@ -36,9 +48,10 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            // Feeds the positioner the tray rectangle so later phases can use
-            // `Position::Tray*` placements.
+            // Feeds the positioner the tray rectangle, which is the only way it
+            // can place the popover under the icon.
             tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
+            TRAY_LOCATED.store(true, std::sync::atomic::Ordering::Relaxed);
 
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -58,4 +71,29 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     tray.build(app)?;
 
     Ok(())
+}
+
+/// The shelf is hidden most of the time, so the tray icon is where the count
+/// has to live.
+#[tauri::command]
+pub fn set_capture_count<R: Runtime>(app: AppHandle<R>, count: usize) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+
+    let label = match count {
+        0 => "Shotshelf — the shelf is empty".to_owned(),
+        1 => "Shotshelf — 1 capture".to_owned(),
+        many => format!("Shotshelf — {many} captures"),
+    };
+    let _ = tray.set_tooltip(Some(label));
+
+    // macOS can put text beside a menu bar icon; Windows has no equivalent, so
+    // there the tooltip is the only place the count can appear.
+    #[cfg(target_os = "macos")]
+    let _ = tray.set_title(if count == 0 {
+        None
+    } else {
+        Some(count.to_string())
+    });
 }

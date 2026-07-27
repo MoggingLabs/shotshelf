@@ -30,7 +30,9 @@ pub fn run() {
             settings::get_settings,
             settings::set_settings,
             settings::set_pinned,
-            settings::list_monitors,
+            tray::set_capture_count,
+            window::show_shelf,
+            window::hide_shelf,
         ])
         // ── Adopted plugins — don't hand-roll what these already solve ──
         .plugin(tauri_plugin_fs::init()) // read captures off disk
@@ -69,11 +71,13 @@ pub fn run() {
             poster::allow_reading_posters(app.handle());
 
             if let Some(shelf) = app.get_webview_window(window::SHELF) {
-                // The window starts hidden (`"visible": false`): dock first,
-                // then show, so it never flashes in the middle of the screen.
-                window::dock(&shelf, &current);
-                let _ = shelf.show();
+                window::apply_material(&shelf);
             }
+
+            // A menu-bar app that starts by showing nothing at all looks
+            // broken. Peek once, unfocused, and let it dismiss itself — the
+            // same behaviour as a capture landing.
+            window::peek(app.handle());
 
             Ok(())
         })

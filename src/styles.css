@@ -44,15 +44,16 @@ body {
   flex: none;
 }
 
+/* A popover floats clear of every edge, so it is rounded all the way round.
+   The backdrop is acrylic on Windows and vibrancy on macOS, applied natively;
+   this layer only tints it, which is why the alpha is low. */
 .shelf {
   display: flex;
   flex-direction: column;
   height: 100%;
   background: var(--panel);
-  border: 1px solid var(--stroke);
-  /* Docked flush to a screen edge — round only the exposed side. */
-  border-right: none;
-  border-radius: var(--radius) 0 0 var(--radius);
+  border: 1px solid var(--stroke-strong);
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
