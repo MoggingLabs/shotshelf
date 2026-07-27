@@ -107,6 +107,68 @@ body {
   background: rgba(255, 255, 255, 0.13);
 }
 
+.shelf__btn--on {
+  background: rgba(99, 102, 241, 0.85);
+  color: #fff;
+}
+
+/* ── Settings ──────────────────────────────────────────────────────────── */
+
+.settings {
+  flex: none;
+  padding: 10px 12px 12px;
+  border-bottom: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 11.5px;
+}
+
+.settings__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.settings__row > span {
+  flex: none;
+  width: 68px;
+  color: var(--muted);
+}
+
+.settings__row select,
+.settings__row input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font: inherit;
+}
+
+.settings__row input:focus-visible,
+.settings__row select:focus-visible {
+  outline: 1px solid var(--accent);
+}
+
+.settings__note:empty {
+  display: none;
+}
+
+.settings__note {
+  margin: 8px 0 0;
+  color: #fca5a5;
+  line-height: 1.45;
+}
+
+.settings__hint {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
 /* ── Shelf body ────────────────────────────────────────────────────────── */
 
 .shelf__items {
@@ -275,6 +337,23 @@ body {
 
 .tile__action:hover {
   background: rgba(99, 102, 241, 0.92);
+}
+
+/* A pinned capture keeps its control visible — it is a state, not a hover. */
+.tile__action--on {
+  background: rgba(245, 158, 11, 0.92);
+}
+
+.tile--pinned .tile__actions {
+  opacity: 1;
+}
+
+.tile--pinned .tile__action:not(.tile__action--on) {
+  opacity: 0;
+}
+
+.tile--pinned:hover .tile__action {
+  opacity: 1;
 }
 
 .tile__action--remove {

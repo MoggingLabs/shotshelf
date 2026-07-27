@@ -9,7 +9,9 @@
 //! registered, and none will be.
 
 mod catch;
+mod hotkey;
 mod poster;
+mod settings;
 mod share;
 mod tray;
 mod window;
@@ -24,6 +26,10 @@ pub fn run() {
             share::copy_capture,
             poster::video_details,
             poster::forget_video,
+            settings::get_settings,
+            settings::set_settings,
+            settings::set_pinned,
+            settings::list_monitors,
         ])
         // ── Adopted plugins — don't hand-roll what these already solve ──
         .plugin(tauri_plugin_fs::init()) // read captures off disk
@@ -31,6 +37,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard::init()) // clipboard images (phase 02)
         .plugin(tauri_plugin_drag::init()) // native drag-out (phase 04)
         .plugin(tauri_plugin_shell::init()) // runs the bundled ffmpeg sidecar
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build()) // show/hide hotkey
         .setup(|app| {
             // macOS: `skipTaskbar` is Windows/Linux only. The Accessory
             // activation policy is what keeps Shotshelf out of the Dock and
@@ -40,6 +47,17 @@ pub fn run() {
 
             tray::init(app.handle())?;
 
+            // Everything below reads settings, so they load first.
+            let stored = settings::load(app.handle());
+            let current = stored.get();
+            app.manage(stored);
+
+            // A shortcut another app already owns is worth saying out loud —
+            // the shelf still works, it just can't be summoned that way.
+            if let Err(err) = hotkey::register(app.handle(), &current.hotkey) {
+                eprintln!("shotshelf: {err}");
+            }
+
             // Watch the OS capture folders + the clipboard. Emits `capture://new`.
             catch::start(app.handle(), &catch::overrides_from_env());
             poster::allow_reading_posters(app.handle());
@@ -47,7 +65,7 @@ pub fn run() {
             if let Some(shelf) = app.get_webview_window(window::SHELF) {
                 // The window starts hidden (`"visible": false`): dock first,
                 // then show, so it never flashes in the middle of the screen.
-                window::dock(&shelf);
+                window::dock(&shelf, &current);
                 let _ = shelf.show();
             }
 

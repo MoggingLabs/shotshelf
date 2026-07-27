@@ -122,6 +122,34 @@ The shelf holds **50** captures and scrolls; the 51st pushes the oldest off the 
 a tile reveals a **×** that takes it off the shelf — the file itself is never touched, moved
 or deleted. Recordings show a placeholder tile until poster frames land in v0.3.
 
+### Settings
+
+The gear in the title strip opens the whole surface: which **edge** and **monitor** the shelf
+docks to, how long captures **stay**, how many it **holds**, and the **hotkey**. That's the
+entire list, and it's meant to stay that way.
+
+Everything lives in one hand-editable JSON file, on device, never synced:
+
+| | Settings file |
+| :-- | :-- |
+| **Windows** | `%APPDATA%\com.mogginglabs.shotshelf\settings.json` |
+| **macOS** | `~/Library/Application Support/com.mogginglabs.shotshelf/settings.json` |
+
+The default hotkey is **`CommandOrControl+Shift+S`** — Ctrl+Shift+S on Windows, ⌘⇧S on macOS.
+Worth knowing: a global shortcut takes that combination away from *every* app, and on macOS
+⌘⇧S is Save As almost everywhere, so it's the first thing to change if it gets in the way. If
+the combination is already taken the shelf still runs and says so in the log rather than failing
+to start; a shortcut that won't register is refused and the previous one stays active.
+
+**Retention** takes captures off the shelf, never off the disk — nothing here deletes, moves or
+modifies a capture. **Pinned** captures (the ★ on a tile) ignore retention and the item limit,
+and are the only shelf state that survives a restart; only their paths and a timestamp are
+stored, never capture contents. Retention is in hours and accepts fractions, which is the only
+practical way to watch expiry work without waiting an hour.
+
+A monitor that's been unplugged since you chose it leaves the shelf where it already is, which
+is at least somewhere visible.
+
 ### Recordings
 
 A recording is just a file until you can see what's in it, so every video capture gets one
@@ -175,7 +203,7 @@ platform (`http://asset.localhost/…` on Windows, `asset://localhost/…` on ma
 - [x] **v0.2** native drag-out (the crux) via `tauri-plugin-drag`, with a clipboard-copy fallback
 - [ ] **v0.3** screen recordings (ffmpeg thumbs), settings/persistence, cross-platform parity, packaging
   - [x] recordings — bundled ffmpeg poster frames, duration + size on the tile
-  - [ ] settings + persistence
+  - [x] settings + persistence — edge/monitor, retention, pinning, global hotkey
   - [ ] cross-platform parity pass
   - [ ] packaging
 

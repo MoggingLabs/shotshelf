@@ -14,6 +14,13 @@
         <span class="shelf__logo" data-tauri-drag-region></span>
         <span class="shelf__title" data-tauri-drag-region>Shotshelf</span>
         <span class="shelf__count" id="shelf-count" title="Captures on the shelf">0</span>
+        <button class="shelf__btn" id="shelf-settings" type="button" title="Settings">
+          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+            <circle cx="8" cy="8" r="2.4" fill="none" stroke="currentColor" stroke-width="1.5" />
+            <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.2 2.4" />
+          </svg>
+          <span class="sr-only">Settings</span>
+        </button>
         <button class="shelf__btn" id="shelf-hide" type="button" title="Hide shelf (tray icon brings it back)">
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
             <path d="M3 8h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
@@ -21,6 +28,39 @@
           <span class="sr-only">Hide shelf</span>
         </button>
       </header>
+
+      <section class="settings" id="settings-panel" hidden>
+        <label class="settings__row">
+          <span>Edge</span>
+          <select id="setting-edge">
+            <option value="left">Left</option>
+            <option value="right">Right</option>
+          </select>
+        </label>
+        <label class="settings__row">
+          <span>Monitor</span>
+          <select id="setting-monitor"></select>
+        </label>
+        <label class="settings__row">
+          <span>Keep for</span>
+          <select id="setting-retention">
+            <option value="">Forever</option>
+            <option value="1">1 hour</option>
+            <option value="8">8 hours</option>
+            <option value="24">24 hours</option>
+          </select>
+        </label>
+        <label class="settings__row">
+          <span>Max items</span>
+          <input id="setting-max" type="number" min="1" max="200" step="1" />
+        </label>
+        <label class="settings__row">
+          <span>Hotkey</span>
+          <input id="setting-hotkey" type="text" spellcheck="false" autocomplete="off" />
+        </label>
+        <p class="settings__note" id="settings-note"></p>
+        <p class="settings__hint">Pinned captures ignore “Keep for” and come back after a restart.</p>
+      </section>
 
       <main class="shelf__items" id="shelf-items" data-empty="true"></main>
 
