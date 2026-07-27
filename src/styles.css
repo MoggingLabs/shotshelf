@@ -19,6 +19,16 @@
   color-scheme: dark;
 }
 
+/* Windows rounds the window itself through DWM, because acrylic is painted
+   behind the page across the whole window rect and CSS cannot cut into it.
+   That radius is fixed at 8px — the Windows 11 flyout radius — so the panel
+   has to agree with it, or the gap between the two curves shows the backdrop
+   as a pale wedge in each corner. macOS keeps 14px, which is the radius
+   `apply_vibrancy` is given. */
+:root[data-os="windows"] {
+  --radius: 8px;
+}
+
 * {
   box-sizing: border-box;
   -webkit-user-select: none;

@@ -109,6 +109,12 @@ pub fn hide<R: Runtime>(app: &AppHandle<R>) {
     set_opened(false);
     let _ = shelf.hide();
 
+    // The front-end keeps its own "did you ask for this?" flag, and a close
+    // from the tray icon, the tray menu or the hotkey never passes through it.
+    // Without this it goes on believing the shelf is open and files every later
+    // capture away silently instead of popping the column.
+    let _ = shelf.emit("shelf://hidden", ());
+
     // Hiding the window alone leaves macOS treating Shotshelf as the active
     // app, so the app you were actually using does not get its focus back.
     #[cfg(target_os = "macos")]
@@ -143,6 +149,10 @@ pub fn apply_material<R: Runtime>(shelf: &WebviewWindow<R>) {
         eprintln!("shotshelf: no acrylic backdrop ({err}) — falling back to a solid panel");
     }
 
+    // Must follow the acrylic: it is the backdrop that needs clipping.
+    #[cfg(target_os = "windows")]
+    round_corners(shelf);
+
     #[cfg(target_os = "macos")]
     if let Err(err) = window_vibrancy::apply_vibrancy(
         shelf,
@@ -151,6 +161,45 @@ pub fn apply_material<R: Runtime>(shelf: &WebviewWindow<R>) {
         Some(14.0),
     ) {
         eprintln!("shotshelf: no vibrancy backdrop ({err}) — falling back to a solid panel");
+    }
+}
+
+/// Round the popover's corners at the window level, not in CSS.
+///
+/// `border-radius` cannot round this window. Acrylic is painted by the
+/// compositor across the whole window rectangle, *behind* the page, so the
+/// corners the page leaves transparent are filled in by the backdrop rather
+/// than by the desktop: measured, a 227,227,227 square wedge outside a 14px
+/// curve, which is precisely what "the corners look square" means.
+///
+/// DWM clips the window itself — backdrop included — so the rounding has to
+/// come from there. Its radius is fixed at 8px, matching every other Windows 11
+/// flyout, so the CSS panel is told to use 8px too (`[data-os="windows"]`);
+/// mismatched radii would leave a thinner version of the same wedge.
+///
+/// Windows 10 has no rounded windows and fails this call with E_INVALIDARG.
+/// That is expected rather than worth reporting: the CSS radius is the fallback
+/// and acrylic there is a dark tint, so the artefact is far less visible.
+#[cfg(target_os = "windows")]
+fn round_corners<R: Runtime>(shelf: &WebviewWindow<R>) {
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    };
+
+    let Ok(hwnd) = shelf.hwnd() else {
+        return;
+    };
+
+    let preference = DWMWCP_ROUND;
+    // SAFETY: `hwnd` is a live top-level window owned by this process, and the
+    // pointer and size describe the DWORD the attribute is documented to take.
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            std::ptr::from_ref(&preference).cast(),
+            std::mem::size_of_val(&preference) as u32,
+        );
     }
 }
 

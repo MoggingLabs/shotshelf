@@ -27,6 +27,14 @@ function el<T extends HTMLElement>(selector: string): T {
 }
 
 const shelfWindow = getCurrentWindow();
+
+// Windows rounds the window through DWM at a fixed 8px, so the panel's own
+// radius has to match it there — see `window::round_corners`. The user agent is
+// enough to tell the two apart and costs no dependency.
+if (navigator.userAgent.includes("Windows")) {
+  document.documentElement.dataset["os"] = "windows";
+}
+
 const mark = el<HTMLElement>("#shelf-mark");
 const alert = el<HTMLElement>("#shelf-alert");
 const root = el<HTMLElement>(".shelf");
@@ -63,11 +71,20 @@ let launchTimer: number | undefined;
  */
 let opened = false;
 
-function dismiss(): void {
+/**
+ * The window is down. Front-end state only — this must not ask Rust to hide
+ * anything, because `hide()` emits `shelf://hidden` and calling back would
+ * re-enter it on every emit, the same loop `adoptBrowse` exists to avoid.
+ */
+function adoptHidden(): void {
   window.clearTimeout(launchTimer);
   opened = false;
   // Whatever shape it was in, the next capture gets the column.
   setMode("column");
+}
+
+function dismiss(): void {
+  adoptHidden();
   void invoke("hide_shelf");
 }
 
@@ -155,6 +172,10 @@ void invoke<string[]>("catch_watch_dirs")
 // Rust shows the window when the tray is clicked or the hotkey fires; this
 // only reshapes the front-end to match.
 void listen("shelf://opened", () => adoptBrowse());
+
+// And the other direction: closing from the tray, its menu or the hotkey hides
+// the window in Rust without the front-end ever hearing about it.
+void listen("shelf://hidden", () => adoptHidden());
 
 /** The alert strip stays out of the way until there is something to say. */
 function say(message: string): void {
