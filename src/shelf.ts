@@ -9,6 +9,7 @@
 
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { currentSettings, persistPinned, type Settings } from "./settings";
 
 export type CaptureKind = "image" | "video";
 
@@ -23,10 +24,12 @@ export interface Capture {
 interface ShelfItem extends Capture {
   id: string;
   node: HTMLElement;
+  /** Pinned captures ignore retention and survive a restart. */
+  pinned: boolean;
 }
 
-/** How many captures the shelf holds before the oldest falls off the end. */
-const MAX_ITEMS = 50;
+/** How often expired captures are swept off the shelf. */
+const SWEEP_MS = 15_000;
 /** How long a freshly caught tile stays highlighted. */
 const HIGHLIGHT_MS = 1400;
 /** Pointer travel before a press on a tile becomes a drag rather than a click. */
@@ -57,26 +60,77 @@ export function mountShelf(listEl: HTMLElement, countEl: HTMLElement): void {
   list = listEl;
   count = countEl;
   showEmptyState();
+  window.setInterval(sweep, SWEEP_MS);
 }
 
-export function addCapture(capture: Capture): void {
+/** Put pinned captures back after a restart, oldest first so order survives. */
+export function restorePinned(settings: Settings): void {
+  for (const item of [...settings.pinned].sort((a, b) => a.ts - b.ts)) {
+    addCapture(item, { pinned: true, highlight: false });
+  }
+}
+
+/** Re-apply limits when the settings change; retention is swept on a timer. */
+export function applySettings(): void {
+  trim();
+  sweep();
+}
+
+export function addCapture(
+  capture: Capture,
+  options: { pinned?: boolean; highlight?: boolean } = {},
+): void {
   const id = `${capture.ts}:${capture.path}`;
   if (items.some((item) => item.id === id)) return;
 
   if (items.length === 0) list.replaceChildren();
 
-  const node = tile(capture);
-  items.unshift({ ...capture, id, node });
+  const pinned = options.pinned ?? false;
+  const node = tile(capture, pinned);
+  items.unshift({ ...capture, id, node, pinned });
   list.prepend(node);
 
-  // Highlight briefly so the eye lands on what just arrived.
-  node.classList.add("tile--new");
-  window.setTimeout(() => node.classList.remove("tile--new"), HIGHLIGHT_MS);
+  if (options.highlight ?? true) {
+    // Highlight briefly so the eye lands on what just arrived.
+    node.classList.add("tile--new");
+    window.setTimeout(() => node.classList.remove("tile--new"), HIGHLIGHT_MS);
+  }
 
-  while (items.length > MAX_ITEMS) items.pop()?.node.remove();
+  trim();
 
   list.scrollTop = 0;
   updateCount();
+}
+
+/**
+ * Drop the oldest unpinned captures once the shelf is over its limit. Pinned
+ * ones are never trimmed — that is the whole point of pinning them.
+ */
+function trim(): void {
+  const { maxItems } = currentSettings();
+
+  for (let index = items.length - 1; index >= 0 && items.length > maxItems; index -= 1) {
+    const item = items[index];
+    if (!item || item.pinned) continue;
+    items.splice(index, 1);
+    item.node.remove();
+  }
+
+  if (items.length === 0) showEmptyState();
+  else updateCount();
+}
+
+/**
+ * Retention only ever takes captures off the shelf. The files stay exactly
+ * where the OS wrote them.
+ */
+function sweep(): void {
+  const { retentionHours } = currentSettings();
+  if (retentionHours === null) return;
+
+  const cutoff = Date.now() - retentionHours * 3_600_000;
+  const expired = items.filter((item) => !item.pinned && item.ts < cutoff);
+  for (const item of expired) removeItem(item.id);
 }
 
 /**
@@ -97,6 +151,35 @@ function removeItem(id: string): void {
 
   if (items.length === 0) showEmptyState();
   else updateCount();
+
+  void savePins();
+}
+
+/** Pins are the only shelf state worth surviving a restart. */
+function savePins(): Promise<void> {
+  return persistPinned(
+    items
+      .filter((item) => item.pinned)
+      .map(({ path, kind, ts }) => ({ path, kind, ts })),
+  );
+}
+
+function togglePin(id: string, button: HTMLButtonElement): void {
+  const item = items.find((candidate) => candidate.id === id);
+  if (!item) return;
+
+  item.pinned = !item.pinned;
+  paintPin(button, item.pinned);
+  item.node.classList.toggle("tile--pinned", item.pinned);
+  void savePins();
+}
+
+function paintPin(button: HTMLButtonElement, pinned: boolean): void {
+  button.textContent = pinned ? "★" : "☆";
+  button.title = pinned
+    ? "Pinned — kept until you unpin it"
+    : "Pin to keep this past the retention window";
+  button.classList.toggle("tile__action--on", pinned);
 }
 
 // Count and layout both key off how many items are on the shelf, so they are
@@ -132,17 +215,18 @@ function emptyState(): HTMLElement {
   return wrap;
 }
 
-function tile(capture: Capture): HTMLElement {
+function tile(capture: Capture, pinned: boolean): HTMLElement {
   const name = fileName(capture.path);
 
   const el = document.createElement("article");
   el.className = "tile";
   el.title = capture.path;
+  el.classList.toggle("tile--pinned", pinned);
 
   el.append(
     capture.kind === "video" ? videoThumb() : imageThumb(capture.path, name),
     caption(name, capture.ts),
-    actions(capture, name),
+    actions(capture, name, pinned),
   );
 
   if (capture.kind === "video") {
@@ -336,11 +420,24 @@ function caption(name: string, ts: number): HTMLElement {
   return el;
 }
 
-function actions(capture: Capture, name: string): HTMLElement {
+function actions(capture: Capture, name: string, pinned: boolean): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "tile__actions";
-  wrap.append(copyButton(capture, name), removeButton(capture, name));
+  wrap.append(
+    pinButton(`${capture.ts}:${capture.path}`, pinned),
+    copyButton(capture, name),
+    removeButton(capture, name),
+  );
   return wrap;
+}
+
+function pinButton(id: string, pinned: boolean): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.className = "tile__action";
+  button.type = "button";
+  paintPin(button, pinned);
+  button.addEventListener("click", () => togglePin(id, button));
+  return button;
 }
 
 /** For the apps that take a paste but refuse a file drop. */

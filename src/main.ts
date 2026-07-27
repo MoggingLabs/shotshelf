@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { addCapture, mountShelf, type Capture } from "./shelf";
+import { addCapture, applySettings, mountShelf, restorePinned, type Capture } from "./shelf";
+import { initSettings } from "./settings";
 
 function el<T extends HTMLElement>(selector: string): T {
   const node = document.querySelector<T>(selector);
@@ -32,6 +33,14 @@ void listen<Capture>("capture://new", ({ payload }) => {
   // whatever you just captured.
   void shelfWindow.show();
 });
+
+// Settings first: the shelf reads its limits from them, and pinned captures
+// have to be back before anything new lands on top.
+void initSettings(() => applySettings())
+  .then((settings) => restorePinned(settings))
+  .catch((error: unknown) => {
+    console.error("[shotshelf] could not load settings", error);
+  });
 
 void invoke<string[]>("catch_watch_dirs")
   .then((dirs) => {
