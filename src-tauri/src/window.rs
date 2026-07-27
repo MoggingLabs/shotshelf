@@ -133,6 +133,11 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) {
 /// Frosted glass behind the popover — acrylic on Windows, vibrancy on macOS.
 /// Cosmetic only: a failure here leaves a solid panel, which still works.
 pub fn apply_material<R: Runtime>(shelf: &WebviewWindow<R>) {
+    // Linux has no equivalent backdrop, so neither branch below compiles there
+    // and the window is left to the CSS panel alone.
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let _ = shelf;
+
     #[cfg(target_os = "windows")]
     if let Err(err) = window_vibrancy::apply_acrylic(shelf, Some((16, 18, 26, 190))) {
         eprintln!("shotshelf: no acrylic backdrop ({err}) — falling back to a solid panel");

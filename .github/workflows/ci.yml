@@ -1,9 +1,11 @@
 name: CI
 
-# Shotshelf ships on Windows and macOS, and most of the per-OS code is behind
-# `cfg` gates that only the matching host compiles. Building on both is the only
-# way to know the macOS branches (activation policy, template tray icon,
-# `defaults read` screenshot location) still hold together.
+# Most of the per-OS code sits behind `cfg` gates that only the matching host
+# compiles, so a green build on one OS says nothing about the others. Building
+# on all three is the only way to know the macOS branches (activation policy,
+# template tray icon, `defaults read` screenshot location) and the Linux ones
+# still hold together. This is not theoretical: the first Linux run caught an
+# unused parameter in `apply_material`, which has no backdrop branch there.
 
 on:
   push:
@@ -92,6 +94,6 @@ jobs:
         run: cargo build --manifest-path src-tauri/Cargo.toml
 
 # Runners come with what Tauri v2 needs: MSVC + WebView2 on Windows, the Xcode
-# command line tools on macOS. No Linux job — Shotshelf targets Windows and
-# macOS only. Installer bundling (.msi/.dmg) arrives with phase 08; this
-# workflow proves the app compiles and links on both, nothing more.
+# command line tools on macOS. Linux needs the apt step above. This workflow
+# proves the app compiles, lints and links on all three — installer bundling
+# lives in release.yml, which ships Windows and macOS only.
