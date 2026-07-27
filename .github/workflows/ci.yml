@@ -30,9 +30,27 @@ jobs:
             name: Windows
           - os: macos-latest
             name: macOS
+          - os: ubuntu-latest
+            name: Linux
 
     steps:
       - uses: actions/checkout@v7
+
+      # Tauri on Linux is GTK + WebKit, and the tray needs AppIndicator. None
+      # of it ships on a bare runner. Compile-verification only: nobody has
+      # actually run Shotshelf on a Linux desktop.
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf \
+            build-essential
 
       - uses: actions/setup-node@v7
         with:

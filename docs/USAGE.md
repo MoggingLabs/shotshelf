@@ -52,12 +52,19 @@ screen.
 - The icon's tooltip tells you how many captures are on the shelf. On macOS the count also sits
   beside the icon.
 
+**Windows 11 hides new tray icons.** The first time you run Shotshelf its icon goes into the
+overflow flyout behind the **^** chevron, not onto the taskbar itself. That is a deliberate
+Windows restriction — an app cannot promote its own icon — so drag it out of the flyout onto
+the taskbar once and it stays there. Until you do, the popover still works; you just have to
+open the flyout to click it, or use the hotkey.
+
 **Where it watches:**
 
 | | Capture folders | Clipboard-only captures |
 | :-- | :-- | :-- |
 | **Windows** | `%UserProfile%\Pictures\Screenshots`, `%UserProfile%\Videos\Captures` (Game Bar), `%UserProfile%\Videos\Screen Recordings` (Snipping Tool), and the OneDrive copy of Screenshots | Win+Shift+S |
 | **macOS** | wherever `defaults read com.apple.screencapture location` points, otherwise `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
+| **Linux** | `~/Pictures/Screenshots` (GNOME, XDG portal) and `~/Pictures` (Spectacle, Flameshot), plus `~/Videos` and `~/Videos/Screencasts` | the clipboard watch applies here too |
 
 Folders that don't exist are skipped. The status line at the bottom of the shelf tells you how
 many it's watching.
