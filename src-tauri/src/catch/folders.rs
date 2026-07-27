@@ -31,7 +31,14 @@ const SETTLE_TICK: Duration = Duration::from_millis(350);
 /// Screenshots are written in one go, so one unchanged size is enough.
 const IMAGE_STABLE_TICKS: u32 = 1;
 /// Recordings grow while they record; require a real pause before believing it.
-const VIDEO_STABLE_TICKS: u32 = 3;
+///
+/// This has to outlast an encoder *stalling*, not just writing slowly. ffmpeg
+/// lays down a 48-byte header, spends a second or more encoding with the file
+/// untouched, then flushes everything at once — and a shorter window read that
+/// pause as "finished", shelving a recording that was still 48 bytes long. A
+/// capture caught mid-write drags out truncated, so this errs slow: ~2.8s of
+/// genuine silence before a recording counts as done.
+const VIDEO_STABLE_TICKS: u32 = 8;
 /// How long a vanished file is kept around before being forgotten.
 const GONE_GRACE: Duration = Duration::from_secs(5);
 /// A file that is still empty this long after its first event is not a capture

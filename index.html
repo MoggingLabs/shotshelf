@@ -11,20 +11,13 @@
          `data-tauri-drag-region` is what makes it draggable without decorations. -->
     <div class="shelf">
       <header class="shelf__bar" data-tauri-drag-region>
-        <span class="shelf__logo" data-tauri-drag-region></span>
-        <span class="shelf__title" data-tauri-drag-region>Shotshelf</span>
-        <span class="shelf__count" id="shelf-count" title="Captures on the shelf">0</span>
+        <span class="shelf__mark" id="shelf-mark" data-tauri-drag-region></span>
+        <span class="shelf__title" id="shelf-count" data-tauri-drag-region>Shelf</span>
+        <span class="shelf__grow" data-tauri-drag-region></span>
         <button class="shelf__btn" id="shelf-settings" type="button" title="Settings">
-          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-            <circle cx="8" cy="8" r="2.4" fill="none" stroke="currentColor" stroke-width="1.5" />
-            <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.2 2.4" />
-          </svg>
           <span class="sr-only">Settings</span>
         </button>
-        <button class="shelf__btn" id="shelf-hide" type="button" title="Hide shelf (tray icon brings it back)">
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-            <path d="M3 8h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-          </svg>
+        <button class="shelf__btn" id="shelf-hide" type="button" title="Hide the shelf — the tray icon brings it back">
           <span class="sr-only">Hide shelf</span>
         </button>
       </header>
@@ -64,10 +57,8 @@
 
       <main class="shelf__items" id="shelf-items" data-empty="true"></main>
 
-      <footer class="shelf__status">
-        <span class="shelf__dot" id="shelf-dot"></span>
-        <span class="shelf__status-text" id="shelf-status-text">Starting the catch engine…</span>
-      </footer>
+      <!-- Only appears when something actually needs saying. -->
+      <p class="shelf__alert" id="shelf-alert" hidden></p>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

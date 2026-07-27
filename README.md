@@ -116,11 +116,16 @@ tell the two apart.
 
 ### The shelf
 
-Tiles are the full width of the strip (298 px in the default 320 px window) by 78 px tall,
-cropped with `object-fit: cover` so any aspect ratio stays recognisable, newest at the top.
+Captures sit in a **two-column grid at 16:10**, grouped by day, newest first, in a 360 px
+window. The aspect ratio is the whole point: a screenshot keeps its meaning at the *top* —
+title bars, headers, the first line of a terminal — and the shelf's original 3.8:1 tiles
+cropped a 1080p capture to the middle 46%, throwing that away and rendering dark captures as
+empty holes. 16:10 is near enough to a screen's own shape that almost nothing is lost.
+
 The shelf holds **50** captures and scrolls; the 51st pushes the oldest off the end. Hovering
-a tile reveals a **×** that takes it off the shelf — the file itself is never touched, moved
-or deleted. Recordings show a placeholder tile until poster frames land in v0.3.
+a tile reveals pin, copy and remove controls — removing takes it off the shelf, and the file
+itself is never touched, moved or deleted. Recordings keep a permanent badge with their length
+and size, because that is identity rather than chrome.
 
 ### Settings
 

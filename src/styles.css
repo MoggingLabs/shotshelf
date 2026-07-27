@@ -3,13 +3,19 @@
    desktop through: that is what gives the shelf its rounded, floating edge. */
 
 :root {
-  --panel: rgba(18, 20, 27, 0.93);
+  --panel: rgba(20, 22, 30, 0.94);
+  --raised: rgba(255, 255, 255, 0.07);
+  --raised-hover: rgba(255, 255, 255, 0.12);
   --stroke: rgba(255, 255, 255, 0.09);
-  --text: #e7e9ee;
+  --stroke-strong: rgba(255, 255, 255, 0.16);
+  --text: #e9ebf0;
   --muted: #8b91a1;
   --accent: #6366f1;
   --accent-2: #8b5cf6;
+  --live: #34d399;
+  --danger: #ef4444;
   --radius: 14px;
+  --tile-radius: 9px;
   color-scheme: dark;
 }
 
@@ -23,7 +29,6 @@ html,
 body {
   height: 100%;
   margin: 0;
-  /* Transparent window: the panel below draws the only visible surface. */
   background: transparent;
   overflow: hidden;
   color: var(--text);
@@ -34,13 +39,18 @@ body {
   cursor: default;
 }
 
+.icon {
+  display: block;
+  flex: none;
+}
+
 .shelf {
   display: flex;
   flex-direction: column;
   height: 100%;
   background: var(--panel);
   border: 1px solid var(--stroke);
-  /* Docked flush to the right screen edge — round only the exposed side. */
+  /* Docked flush to a screen edge — round only the exposed side. */
   border-right: none;
   border-radius: var(--radius) 0 0 var(--radius);
   overflow: hidden;
@@ -52,36 +62,37 @@ body {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 38px;
-  padding: 0 6px 0 12px;
-  border-bottom: 1px solid var(--stroke);
+  gap: 9px;
+  height: 40px;
+  padding: 0 8px 0 13px;
 }
 
-.shelf__logo {
-  width: 9px;
-  height: 9px;
+/* Doubles as the catch-engine indicator: it goes green once watching. */
+.shelf__mark {
+  width: 8px;
+  height: 8px;
   flex: none;
-  border-radius: 3px;
-  background: linear-gradient(140deg, var(--accent), var(--accent-2));
+  border-radius: 50%;
+  background: var(--muted);
+  transition: background 160ms ease-out, box-shadow 160ms ease-out;
+}
+
+.shelf__mark--live {
+  background: var(--live);
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.14);
 }
 
 .shelf__title {
+  overflow: hidden;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.shelf__count {
-  margin-left: auto;
-  min-width: 22px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
-  color: var(--muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
+.shelf__grow {
+  flex: 1;
 }
 
 .shelf__btn {
@@ -96,154 +107,93 @@ body {
   background: transparent;
   color: var(--muted);
   cursor: default;
+  transition: background 90ms ease-out, color 90ms ease-out;
 }
 
 .shelf__btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--raised);
   color: var(--text);
-}
-
-.shelf__btn:active {
-  background: rgba(255, 255, 255, 0.13);
 }
 
 .shelf__btn--on {
-  background: rgba(99, 102, 241, 0.85);
+  background: var(--accent);
   color: #fff;
-}
-
-/* ── Settings ──────────────────────────────────────────────────────────── */
-
-.settings {
-  flex: none;
-  padding: 10px 12px 12px;
-  border-bottom: 1px solid var(--stroke);
-  background: rgba(255, 255, 255, 0.03);
-  font-size: 11.5px;
-}
-
-.settings__row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 7px;
-}
-
-.settings__row > span {
-  flex: none;
-  width: 68px;
-  color: var(--muted);
-}
-
-.settings__row select,
-.settings__row input {
-  flex: 1;
-  min-width: 0;
-  padding: 3px 6px;
-  border: 1px solid var(--stroke);
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.35);
-  color: var(--text);
-  font: inherit;
-}
-
-.settings__row input:focus-visible,
-.settings__row select:focus-visible {
-  outline: 1px solid var(--accent);
-}
-
-.settings__note:empty {
-  display: none;
-}
-
-.settings__note {
-  margin: 8px 0 0;
-  color: #fca5a5;
-  line-height: 1.45;
-}
-
-.settings__hint {
-  margin: 8px 0 0;
-  color: var(--muted);
-  font-size: 10.5px;
-  line-height: 1.45;
 }
 
 /* ── Shelf body ────────────────────────────────────────────────────────── */
 
 .shelf__items {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
+  padding: 4px 12px 12px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
 .shelf__items[data-empty="true"] {
+  display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .shelf__items::-webkit-scrollbar {
-  width: 8px;
+  width: 9px;
 }
 
 .shelf__items::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
+  border: 3px solid transparent;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.16);
   background-clip: content-box;
 }
 
-.empty {
-  padding: 16px 20px;
-  text-align: center;
+.shelf__items::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.26);
+  background-clip: content-box;
 }
 
-.empty__frame {
-  width: 74px;
-  height: 74px;
-  margin: 0 auto 14px;
-  display: grid;
-  place-items: center;
-  border: 1.5px dashed rgba(255, 255, 255, 0.15);
-  border-radius: 18px;
-  font-size: 28px;
-  opacity: 0.85;
-}
-
-.empty__title {
-  margin: 0 0 6px;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.empty__hint {
-  margin: 0;
+/* A wall of identical tiles is hard to read; dates give the eye a foothold. */
+.group__label {
+  margin: 10px 0 7px;
   color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.55;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.group:first-child .group__label {
+  margin-top: 4px;
+}
+
+.group__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
 }
 
 /* ── Capture tiles ─────────────────────────────────────────────────────── */
 
 .tile {
   position: relative;
-  flex: none;
-  height: 78px;
-  border: 1px solid var(--stroke);
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.35);
+  /* Near enough to a screen's own shape that captures arrive barely cropped. */
+  aspect-ratio: 16 / 10;
+  border-radius: var(--tile-radius);
+  /* Lighter than the panel, so a dark capture still reads as a tile and not
+     as a hole in the shelf. */
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--stroke);
   overflow: hidden;
+  transition: box-shadow 110ms ease-out, transform 110ms ease-out;
+}
+
+.tile:hover {
+  box-shadow: inset 0 0 0 1px var(--stroke-strong), 0 4px 14px rgba(0, 0, 0, 0.45);
 }
 
 .tile__thumb {
   display: block;
   width: 100%;
   height: 100%;
-  /* Screenshots are every shape; crop to the tile rather than letterbox. */
   object-fit: cover;
   /* The native drag carries the file out; the webview's own image drag would
      only get in its way. */
@@ -253,56 +203,59 @@ body {
 .tile__thumb--glyph {
   display: grid;
   place-items: center;
-  font-size: 26px;
+  color: var(--muted);
 }
 
 .tile__thumb--missing {
-  color: var(--muted);
-  font-size: 20px;
+  color: #f0a5a5;
 }
 
-/* Filename sits over the thumbnail so the tile stays all preview. */
-.tile__caption {
+/* The picture is the identity — the filename only earns space on hover. */
+.tile__label {
   position: absolute;
   right: 0;
   bottom: 0;
   left: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 14px 8px 5px;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0));
-  font-size: 11px;
+  padding: 16px 8px 6px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0));
+  color: #fff;
+  font-size: 10.5px;
+  opacity: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: opacity 110ms ease-out;
 }
 
-.tile__name {
+.tile:hover .tile__label {
+  opacity: 1;
+}
+
+/* A recording says so permanently: that is identity, not chrome. */
+.tile__badge {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 12px);
+  padding: 2px 6px 2px 5px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.66);
+  color: #fff;
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tile__badge-text {
   overflow: hidden;
-  flex: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tile__time {
-  flex: none;
-  color: rgba(255, 255, 255, 0.62);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Keeps a recording readable as a recording once it looks like a still. */
-.tile__play {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-size: 9px;
-  padding-left: 2px;
+.tile:hover .tile__badge {
+  opacity: 0;
 }
 
 .tile__actions {
@@ -310,7 +263,7 @@ body {
   top: 5px;
   right: 5px;
   display: flex;
-  gap: 4px;
+  gap: 3px;
   opacity: 0;
   transition: opacity 90ms ease-out;
 }
@@ -327,55 +280,59 @@ body {
   height: 21px;
   padding: 0;
   border: none;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.6);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.62);
   color: #fff;
-  font-size: 13px;
-  line-height: 1;
   cursor: default;
+  transition: background 90ms ease-out;
 }
 
 .tile__action:hover {
-  background: rgba(99, 102, 241, 0.92);
+  background: var(--accent);
 }
 
-/* A pinned capture keeps its control visible — it is a state, not a hover. */
+.tile__action--remove:hover {
+  background: var(--danger);
+}
+
 .tile__action--on {
-  background: rgba(245, 158, 11, 0.92);
+  background: #f59e0b;
 }
 
+.tile__action--ok {
+  background: var(--live);
+}
+
+.tile__action--bad {
+  background: var(--danger);
+}
+
+/* A pinned tile keeps its star showing — it is a state, not a hover. */
 .tile--pinned .tile__actions {
   opacity: 1;
 }
 
 .tile--pinned .tile__action:not(.tile__action--on) {
   opacity: 0;
+  transition: opacity 90ms ease-out;
 }
 
 .tile--pinned:hover .tile__action {
   opacity: 1;
 }
 
-.tile__action--remove {
-  font-size: 15px;
-}
-
-.tile__action--remove:hover {
-  background: rgba(220, 38, 38, 0.9);
-}
-
 /* The OS draws the drag image; fading the tile shows where it came from. */
 .tile--dragging {
-  opacity: 0.5;
+  opacity: 0.45;
+  transform: scale(0.97);
 }
 
-/* A freshly caught tile flashes once so the eye lands on it. */
 @keyframes tile-land {
   from {
-    box-shadow: 0 0 0 2px var(--accent);
+    box-shadow: inset 0 0 0 2px var(--accent);
   }
   to {
-    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+    box-shadow: inset 0 0 0 1px var(--stroke);
   }
 }
 
@@ -384,43 +341,121 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tile--new {
+  .tile--new,
+  .tile--dragging {
     animation: none;
+    transition: none;
   }
 }
 
-/* ── Status strip ──────────────────────────────────────────────────────── */
+/* ── Empty state ───────────────────────────────────────────────────────── */
 
-.shelf__status {
+.empty {
+  padding: 16px 24px;
+  text-align: center;
+}
+
+.empty__frame {
+  width: 62px;
+  height: 62px;
+  margin: 0 auto 14px;
+  display: grid;
+  place-items: center;
+  border: 1.5px dashed var(--stroke-strong);
+  border-radius: 16px;
+  color: var(--muted);
+}
+
+.empty__title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.empty__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+/* ── Settings ──────────────────────────────────────────────────────────── */
+
+.settings {
   flex: none;
+  padding: 10px 13px 13px;
+  border-top: 1px solid var(--stroke);
+  border-bottom: 1px solid var(--stroke);
+  background: rgba(0, 0, 0, 0.22);
+  font-size: 11.5px;
+}
+
+.settings__row {
   display: flex;
   align-items: center;
-  gap: 7px;
-  height: 26px;
-  padding: 0 12px;
-  border-top: 1px solid var(--stroke);
+  gap: 9px;
+  margin-bottom: 7px;
+}
+
+.settings__row > span {
+  flex: none;
+  width: 66px;
+  color: var(--muted);
+}
+
+.settings__row select,
+.settings__row input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 7px;
+  border: 1px solid var(--stroke);
+  border-radius: 7px;
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+}
+
+.settings__row select:hover,
+.settings__row input:hover {
+  background: var(--raised-hover);
+}
+
+.settings__row input:focus-visible,
+.settings__row select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.settings__note:empty {
+  display: none;
+}
+
+.settings__note {
+  margin: 9px 0 0;
+  color: #fca5a5;
+  line-height: 1.45;
+}
+
+.settings__hint {
+  margin: 9px 0 0;
   color: var(--muted);
   font-size: 10.5px;
+  line-height: 1.45;
 }
 
-.shelf__dot {
-  width: 6px;
-  height: 6px;
+/* ── Alerts ────────────────────────────────────────────────────────────── */
+/* Only rendered when something actually needs saying, rather than a status
+   strip permanently spending 4% of the window on "everything is fine". */
+
+.shelf__alert {
   flex: none;
-  border-radius: 50%;
-  background: var(--muted);
-}
-
-/* The catch engine is running. */
-.shelf__dot--live {
-  background: #34d399;
-  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.13);
-}
-
-.shelf__status-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin: 0;
+  padding: 8px 13px;
+  border-top: 1px solid var(--stroke);
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  font-size: 10.5px;
+  line-height: 1.45;
 }
 
 .sr-only {
