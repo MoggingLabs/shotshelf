@@ -41,7 +41,6 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "createUpdaterArtifacts": true,
     "category": "Utility",
     "copyright": "© MoggingLabs",
     "publisher": "MoggingLabs",

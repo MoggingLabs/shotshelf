@@ -222,7 +222,10 @@ round-trip to Apple's notary service before Gatekeeper will open it.
 
 ### The update feed
 
-`bundle.createUpdaterArtifacts` is on, so each build also emits a `.sig` next to the installer.
+Update artifacts (and their `.sig` files) are produced **only when `TAURI_SIGNING_PRIVATE_KEY` is
+set** — an unsigned one is rejected by every installed app, and Tauri refuses to build one
+without the key. A build without it still produces perfectly good installers.
+
 The app asks the endpoint in `tauri.conf.json`, with `{{target}}`, `{{arch}}` and
 `{{current_version}}` substituted:
 
