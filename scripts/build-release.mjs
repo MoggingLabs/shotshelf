@@ -22,8 +22,33 @@
 
 import { spawnSync } from "node:child_process";
 
+// Every variable that makes Tauri try to sign something.
+const SIGNING_VARS = [
+  "WINDOWS_CERT_THUMBPRINT",
+  "APPLE_SIGNING_IDENTITY",
+  "APPLE_CERTIFICATE",
+  "APPLE_CERTIFICATE_PASSWORD",
+  "APPLE_ID",
+  "APPLE_PASSWORD",
+  "APPLE_TEAM_ID",
+  "APPLE_API_KEY",
+  "APPLE_API_ISSUER",
+  "APPLE_API_KEY_PATH",
+  "TAURI_SIGNING_PRIVATE_KEY",
+  "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
+];
+
 const unsigned = process.argv.includes("--unsigned");
-const env = process.env;
+const env = { ...process.env };
+
+// GitHub Actions passes an *unset* secret as an empty string, and Tauri reads
+// "present but empty" as "sign with this" — then dies on the empty material
+// (`failed to import keychain certificate`, `Missing comment in secret key`).
+// Absent and empty have to mean the same thing here.
+for (const name of SIGNING_VARS) {
+  if (env[name] === "" || (unsigned && env[name] !== undefined)) delete env[name];
+}
+
 const args = ["tauri", "build"];
 const notes = [];
 
@@ -68,5 +93,5 @@ if (!env["TAURI_SIGNING_PRIVATE_KEY"]) {
 
 for (const note of notes) console.log(`[release] ${note}`);
 
-const result = spawnSync("npm", ["run", ...args], { stdio: "inherit", shell: true });
+const result = spawnSync("npm", ["run", ...args], { stdio: "inherit", shell: true, env });
 process.exit(result.status ?? 1);
