@@ -250,3 +250,71 @@ pub(crate) fn now_ms() -> u64 {
         .map(|since| since.as_millis() as u64)
         .unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_by_extension_regardless_of_case() {
+        assert_eq!(kind_of(Path::new("a.PNG")), Some(CaptureKind::Image));
+        assert_eq!(kind_of(Path::new("a.jpeg")), Some(CaptureKind::Image));
+        assert_eq!(kind_of(Path::new("a.MP4")), Some(CaptureKind::Video));
+        assert_eq!(kind_of(Path::new("a.mov")), Some(CaptureKind::Video));
+        // Not captures: a half-written file and something with no extension.
+        assert_eq!(kind_of(Path::new("a.png.tmp")), None);
+        assert_eq!(kind_of(Path::new("notes")), None);
+    }
+
+    #[test]
+    fn a_path_only_fires_once_inside_the_dedupe_window() {
+        let sink = CaptureSink::default();
+        let path = Path::new("/captures/shot.png");
+
+        assert!(sink.claim(path), "first sighting should fire");
+        assert!(
+            !sink.claim(path),
+            "a second event for the same file must not"
+        );
+    }
+
+    #[test]
+    fn one_screenshot_silences_exactly_one_clipboard_echo() {
+        let sink = CaptureSink::default();
+        *lock(&sink.folder_echo) = Some(Instant::now());
+
+        assert!(
+            sink.take_folder_echo(Duration::from_secs(4)),
+            "the clipboard copy of a Win+PrtSc is an echo"
+        );
+        // Win+PrtSc followed straight away by a real Win+Shift+S must still be
+        // caught, so the marker is consumed rather than left standing.
+        assert!(!sink.take_folder_echo(Duration::from_secs(4)));
+    }
+
+    #[test]
+    fn a_stale_echo_marker_does_not_swallow_a_later_capture() {
+        let sink = CaptureSink::default();
+        *lock(&sink.folder_echo) = Some(Instant::now() - Duration::from_secs(30));
+
+        assert!(!sink.take_folder_echo(Duration::from_secs(4)));
+    }
+
+    #[test]
+    fn our_own_clipboard_write_is_not_a_capture() {
+        let sink = CaptureSink::default();
+
+        sink.expect_own_clipboard_write(Duration::from_secs(3));
+        assert!(sink.take_own_clipboard_write(), "the copy we just made");
+        assert!(!sink.take_own_clipboard_write(), "and only that one");
+    }
+
+    #[test]
+    fn an_expired_self_write_warning_is_ignored() {
+        let sink = CaptureSink::default();
+
+        // Warning already in the past: a clipboard change now is genuinely new.
+        sink.expect_own_clipboard_write(Duration::ZERO);
+        assert!(!sink.take_own_clipboard_write());
+    }
+}

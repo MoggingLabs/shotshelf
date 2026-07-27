@@ -21,6 +21,12 @@ use tauri::Manager;
 
 pub fn run() {
     tauri::Builder::default()
+        // Two Shotshelves would both watch the same folders, both catch every
+        // capture, and both write the settings file. A second launch just
+        // brings the shelf that is already running to the front.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            window::open(app);
+        }))
         .invoke_handler(tauri::generate_handler![
             catch::catch_watch_dirs,
             share::prepare_drag,
@@ -69,6 +75,7 @@ pub fn run() {
             // Watch the OS capture folders + the clipboard. Emits `capture://new`.
             catch::start(app.handle(), &catch::overrides_from_env());
             poster::allow_reading_posters(app.handle());
+            poster::prune_cache(app.handle());
 
             if let Some(shelf) = app.get_webview_window(window::SHELF) {
                 window::apply_material(&shelf);

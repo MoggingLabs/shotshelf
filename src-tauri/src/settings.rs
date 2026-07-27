@@ -169,6 +169,65 @@ fn sanitise(mut settings: Settings) -> Settings {
     settings
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_utf8_bom_does_not_cost_you_your_settings() {
+        // Notepad and PowerShell's `Set-Content -Encoding utf8` both write one,
+        // and it silently reverted a whole settings file to defaults.
+        let raw = "\u{feff}{\"maxItems\":7}";
+        let parsed: Settings = serde_json::from_str(strip_bom(raw)).expect("BOM must be tolerated");
+        assert_eq!(parsed.max_items, 7);
+    }
+
+    #[test]
+    fn missing_keys_fall_back_to_defaults() {
+        let parsed: Settings = serde_json::from_str("{}").expect("an empty object is valid");
+        assert_eq!(parsed.max_items, 50);
+        assert_eq!(parsed.hotkey, DEFAULT_HOTKEY);
+    }
+
+    #[test]
+    fn keys_from_an_older_version_are_ignored_rather_than_fatal() {
+        // `edge` and `monitor` existed before the shelf became a popover.
+        let raw = r#"{"edge":"left","monitor":"DISPLAY1","maxItems":9}"#;
+        let parsed: Settings = serde_json::from_str(raw).expect("old files must still load");
+        assert_eq!(parsed.max_items, 9);
+    }
+
+    #[test]
+    fn hand_edited_nonsense_is_clamped_rather_than_obeyed() {
+        let absurd = Settings {
+            max_items: 100_000,
+            retention_hours: Some(-4.0),
+            hotkey: "   ".to_owned(),
+            ..Settings::default()
+        };
+
+        let safe = sanitise(absurd);
+        assert_eq!(safe.max_items, 200, "a shelf cannot hold 100k items");
+        assert_eq!(
+            safe.retention_hours, None,
+            "negative retention is no retention"
+        );
+        assert_eq!(
+            safe.hotkey, DEFAULT_HOTKEY,
+            "an empty shortcut is no shortcut"
+        );
+    }
+
+    #[test]
+    fn a_shelf_that_holds_nothing_is_not_a_shelf() {
+        let none = sanitise(Settings {
+            max_items: 0,
+            ..Settings::default()
+        });
+        assert_eq!(none.max_items, 1);
+    }
+}
+
 #[tauri::command]
 pub fn get_settings(store: tauri::State<'_, SettingsStore>) -> Settings {
     store.get()

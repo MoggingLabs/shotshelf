@@ -15,6 +15,7 @@
 
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { dayKey, dayLabel, fileName, formatBytes, formatDuration } from "./format.ts";
 import { icon, solidIcon } from "./icons";
 import { currentSettings, persistPinned, type Settings } from "./settings";
 
@@ -123,20 +124,6 @@ export function addCapture(
 // A shelf of forty identical tiles is a wall. Dating them gives the eye
 // somewhere to rest and makes "the one from yesterday" findable.
 
-function dayKey(ts: number): string {
-  const date = new Date(ts);
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-}
-
-function dayLabel(ts: number): string {
-  const today = new Date();
-  const midnight = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-
-  if (ts >= midnight) return "Today";
-  if (ts >= midnight - 86_400_000) return "Yesterday";
-  return new Date(ts).toLocaleDateString([], { day: "numeric", month: "long" });
-}
-
 function gridFor(ts: number): HTMLElement {
   const key = dayKey(ts);
   const existing = groups.get(key);
@@ -186,7 +173,7 @@ function trim(): void {
     const item = items[index];
     if (!item || item.pinned) continue;
     items.splice(index, 1);
-    item.node.remove();
+    detach(item);
   }
 
   pruneEmptyGroups();
@@ -209,6 +196,22 @@ function sweep(): void {
 }
 
 /**
+ * The single place a capture leaves the shelf.
+ *
+ * Both routes out — the × and falling off the end of the item cap — have to
+ * clean up the same way. They didn't: trimming dropped the tile and left the
+ * recording's cached poster frame behind forever, because the cleanup lived in
+ * one caller instead of here.
+ */
+function detach(item: ShelfItem): void {
+  item.node.remove();
+  // The poster frame is ours; the recording is not. Only the cache is cleared.
+  if (item.kind === "video") {
+    void invoke("forget_video", { path: item.path }).catch(() => {});
+  }
+}
+
+/**
  * Take a capture off the shelf. The file on disk is deliberately untouched —
  * the shelf is a view of your captures, not their owner.
  */
@@ -217,12 +220,7 @@ function removeItem(id: string): void {
   if (index === -1) return;
 
   const [removed] = items.splice(index, 1);
-  removed?.node.remove();
-
-  // The poster frame is ours; the recording is not. Only the cache is cleared.
-  if (removed?.kind === "video") {
-    void invoke("forget_video", { path: removed.path }).catch(() => {});
-  }
+  if (removed) detach(removed);
 
   pruneEmptyGroups();
   if (items.length === 0) showEmptyState();
@@ -413,26 +411,6 @@ function describeSize(details: VideoDetails): string {
   return details.durationMs === null ? size : `${formatDuration(details.durationMs)} · ${size}`;
 }
 
-function formatDuration(ms: number): string {
-  const seconds = Math.round(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-
-  const units = ["kB", "MB", "GB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-
-  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit] ?? "GB"}`;
-}
-
 // ── Actions ──────────────────────────────────────────────────────────────
 
 function actions(capture: Capture, name: string, pinned: boolean): HTMLElement {
@@ -542,7 +520,3 @@ async function beginDrag(node: HTMLElement, capture: Capture): Promise<void> {
   }
 }
 
-function fileName(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] ?? path;
-}
