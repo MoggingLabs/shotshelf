@@ -31,7 +31,8 @@ export interface Capture {
 
 interface ShelfItem extends Capture {
   id: string;
-  node: HTMLElement;
+  /** The tile currently representing this capture, if a view is showing it. */
+  node?: HTMLElement;
   /** Pinned captures ignore retention and survive a restart. */
   pinned: boolean;
 }
@@ -51,8 +52,26 @@ interface DragSource {
 
 /** How often expired captures are swept off the shelf. */
 const SWEEP_MS = 15_000;
-/** How long a freshly caught tile stays highlighted. */
-const HIGHLIGHT_MS = 1400;
+/**
+ * How long a capture stays in the auto-popup column.
+ *
+ * It only leaves the *column* — the capture is still on the shelf when you open
+ * it from the tray. This timer decides how long the popup is in your way, not
+ * how long you keep anything.
+ */
+const COLUMN_MS = 60_000;
+/** How often the column checks whether a card's minute is up. */
+const COLUMN_TICK_MS = 1000;
+
+/** Card geometry, mirrored in the CSS. Used to size the column window. */
+const CARD_HEIGHT = 99;
+const CARD_GAP = 9;
+const COLUMN_PADDING = 24;
+/** Beyond this the column scrolls rather than growing off the screen. */
+const COLUMN_MAX_CARDS = 5;
+
+/** Which shape the popover is currently in. */
+type Mode = "browse" | "column";
 /** Pointer travel before a press on a tile becomes a drag rather than a click. */
 const DRAG_THRESHOLD_PX = 6;
 /** How long the copy button confirms itself. */
@@ -68,22 +87,105 @@ let count: HTMLElement;
 /** An OS drag steals focus; the popover must not read that as a dismissal. */
 let dragging = false;
 
+let mode: Mode = "browse";
+/** Captures currently showing in the auto-popup column, newest first. */
+const column: { id: string; expires: number }[] = [];
+/** While true the column's timers stand still — you are clearly still using it. */
+let columnHeld = false;
+let columnChanged: () => void = () => {};
+
 export function isDragging(): boolean {
   return dragging;
 }
 
-export function mountShelf(listEl: HTMLElement, countEl: HTMLElement): void {
+export function currentMode(): Mode {
+  return mode;
+}
+
+export function columnIsEmpty(): boolean {
+  return column.length === 0;
+}
+
+/** Window height the column needs for what it is holding. */
+export function columnHeight(): number {
+  const cards = Math.min(Math.max(column.length, 1), COLUMN_MAX_CARDS);
+  return cards * CARD_HEIGHT + (cards - 1) * CARD_GAP + COLUMN_PADDING;
+}
+
+/** Hovering or focusing the column stops its cards ageing out under you. */
+export function holdColumn(held: boolean): void {
+  if (columnHeld === held) return;
+  columnHeld = held;
+  // Push every deadline forward by the time spent held, rather than letting
+  // cards expire the instant the pointer leaves.
+  if (!held) for (const entry of column) entry.expires = Date.now() + COLUMN_MS;
+}
+
+export function setMode(next: Mode): void {
+  if (mode === next) return;
+  mode = next;
+  if (next === "browse") column.length = 0;
+  render();
+}
+
+/**
+ * `onColumnChange` fires when the auto-popup column gains or loses a card, so
+ * the window can be resized or dismissed. It is a callback rather than a poll:
+ * the column is empty almost all the time, and a timer that asks "anything to
+ * do?" every second forever is exactly what a 24/7 tray app should not have.
+ */
+export function mountShelf(
+  listEl: HTMLElement,
+  countEl: HTMLElement,
+  onColumnChange: () => void,
+): void {
   list = listEl;
   count = countEl;
+  columnChanged = onColumnChange;
   showEmptyState();
   window.setInterval(sweep, SWEEP_MS);
+  window.setInterval(ageColumn, COLUMN_TICK_MS);
+}
+
+/**
+ * A capture landed. It joins the shelf, and it joins the column that pops up
+ * to show it — those are different lifetimes: leaving the column costs you
+ * nothing but the popup.
+ */
+export function noteCapture(capture: Capture): void {
+  addCapture(capture, { view: false });
+
+  const id = `${capture.ts}:${capture.path}`;
+  if (!column.some((entry) => entry.id === id)) {
+    column.unshift({ id, expires: Date.now() + COLUMN_MS });
+    column.splice(COLUMN_MAX_CARDS * 3);
+  }
+
+  mode = "column";
+  render();
+}
+
+/** Drop cards whose minute is up. Returns true if the column emptied. */
+function ageColumn(): void {
+  if (mode !== "column" || columnHeld || dragging) return;
+
+  const now = Date.now();
+  const before = column.length;
+  for (let index = column.length - 1; index >= 0; index -= 1) {
+    if ((column[index]?.expires ?? 0) <= now) column.splice(index, 1);
+  }
+
+  if (column.length === before) return;
+  render();
+  columnChanged();
 }
 
 /** Put pinned captures back after a restart, oldest first so order survives. */
 export function restorePinned(settings: Settings): void {
   for (const item of [...settings.pinned].sort((a, b) => a.ts - b.ts)) {
-    addCapture(item, { pinned: true, highlight: false });
+    addCapture(item, { pinned: true, view: false });
   }
+  render();
 }
 
 /** Re-apply limits when the settings change; retention is swept on a timer. */
@@ -94,30 +196,67 @@ export function applySettings(): void {
 
 export function addCapture(
   capture: Capture,
-  options: { pinned?: boolean; highlight?: boolean } = {},
+  options: { pinned?: boolean; view?: boolean } = {},
 ): void {
   const id = `${capture.ts}:${capture.path}`;
   if (items.some((item) => item.id === id)) return;
 
-  if (items.length === 0) {
-    list.replaceChildren();
-    groups.clear();
-  }
-
-  const pinned = options.pinned ?? false;
-  const node = tile(capture, pinned);
-  items.unshift({ ...capture, id, node, pinned });
-  gridFor(capture.ts).prepend(node);
-
-  if (options.highlight ?? true) {
-    node.classList.add("tile--new");
-    window.setTimeout(() => node.classList.remove("tile--new"), HIGHLIGHT_MS);
-  }
-
+  items.unshift({ ...capture, id, pinned: options.pinned ?? false });
   trim();
 
-  list.scrollTop = 0;
+  if (options.view ?? true) render();
+}
+
+/**
+ * Rebuild whichever view is showing.
+ *
+ * Both views are rebuilt wholesale rather than patched. The column holds at
+ * most a handful of cards, and the browse grid is only rebuilt when you open
+ * it or a capture lands while it is on screen — which is rare, because the
+ * popover is hidden nearly all the time. Two incremental paths would be two
+ * places to get pin state and day grouping subtly wrong.
+ */
+function render(): void {
+  if (mode === "column") renderColumn();
+  else renderBrowse();
   updateCount();
+}
+
+function renderColumn(): void {
+  list.dataset["view"] = "column";
+  list.dataset["empty"] = "false";
+
+  const cards = column
+    .map((entry) => items.find((item) => item.id === entry.id))
+    .filter((item): item is ShelfItem => item !== undefined);
+
+  const grid = document.createElement("div");
+  grid.className = "group__grid";
+  for (const item of cards) {
+    item.node = tile(item, item.pinned);
+    grid.append(item.node);
+  }
+
+  list.replaceChildren(grid);
+  list.scrollTop = 0;
+}
+
+function renderBrowse(): void {
+  list.dataset["view"] = "browse";
+  groups.clear();
+
+  if (items.length === 0) {
+    showEmptyState();
+    return;
+  }
+
+  list.replaceChildren();
+  // Newest first, so appending into each day's grid keeps the order and
+  // gridFor puts newer days above older ones.
+  for (const item of items) {
+    item.node = tile(item, item.pinned);
+    gridFor(item.ts).append(item.node);
+  }
 }
 
 // ── Day grouping ─────────────────────────────────────────────────────────
@@ -177,7 +316,7 @@ function trim(): void {
   }
 
   pruneEmptyGroups();
-  if (items.length === 0) showEmptyState();
+  if (items.length === 0 && mode === "browse") showEmptyState();
   else updateCount();
 }
 
@@ -204,7 +343,7 @@ function sweep(): void {
  * one caller instead of here.
  */
 function detach(item: ShelfItem): void {
-  item.node.remove();
+  item.node?.remove();
   // The poster frame is ours; the recording is not. Only the cache is cleared.
   if (item.kind === "video") {
     void invoke("forget_video", { path: item.path }).catch(() => {});
@@ -222,8 +361,12 @@ function removeItem(id: string): void {
   const [removed] = items.splice(index, 1);
   if (removed) detach(removed);
 
+  // Taking a card off the shelf takes it out of the popup column too.
+  const queued = column.findIndex((entry) => entry.id === id);
+  if (queued !== -1) column.splice(queued, 1);
+
   pruneEmptyGroups();
-  if (items.length === 0) showEmptyState();
+  if (items.length === 0 && mode === "browse") showEmptyState();
   else updateCount();
 
   void savePins();
@@ -243,7 +386,7 @@ function togglePin(id: string, button: HTMLButtonElement): void {
   item.pinned = !item.pinned;
   button.classList.toggle("tile__action--on", item.pinned);
   button.title = pinLabel(item.pinned);
-  item.node.classList.toggle("tile--pinned", item.pinned);
+  item.node?.classList.toggle("tile--pinned", item.pinned);
   void savePins();
 }
 
@@ -267,6 +410,7 @@ function updateCount(): void {
 
 function showEmptyState(): void {
   groups.clear();
+  list.dataset["view"] = "browse";
   list.replaceChildren(emptyState());
   updateCount();
 }

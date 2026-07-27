@@ -82,9 +82,8 @@ pub fn run() {
             }
 
             // A menu-bar app that starts by showing nothing at all looks
-            // broken. Peek once, unfocused, and let it dismiss itself — the
-            // same behaviour as a capture landing.
-            window::peek(app.handle());
+            // broken. Open it once so it can be found, then let it behave.
+            window::open(app.handle());
 
             Ok(())
         })
