@@ -14,7 +14,7 @@
       {
         "label": "main",
         "title": "Shotshelf",
-        "width": 320,
+        "width": 360,
         "height": 640,
         "resizable": false,
         "maximizable": false,
@@ -42,7 +42,7 @@
     "active": true,
     "targets": "all",
     "category": "Utility",
-    "copyright": "© MoggingLabs",
+    "copyright": "Â© MoggingLabs",
     "publisher": "MoggingLabs",
     "externalBin": ["binaries/ffmpeg"],
     "shortDescription": "The shelf that catches every capture.",

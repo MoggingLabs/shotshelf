@@ -63,16 +63,20 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
 
 - **Drag out** — press a tile and move. The capture leaves as a real file you can drop into
   Explorer, Finder, an email, a chat box or an editor. It's a copy: the original stays put.
-- **Copy** (⧉ on hover) — for apps that take a paste but refuse a file drop. Images go on the
-  clipboard as pixels, recordings as a file reference.
-- **Pin** (☆ / ★ on hover) — pinned captures ignore the retention window and the item limit,
-  and are the only ones still on the shelf after a restart.
-- **Remove** (× on hover) — takes it off the shelf. **It never deletes the file.**
+- **Copy** — for apps that take a paste but refuse a file drop. Images go on the clipboard as
+  pixels, recordings as a file reference.
+- **Pin** (the star) — pinned captures ignore the retention window and the item limit, and are
+  the only ones still on the shelf after a restart. A pinned tile keeps its star showing.
+- **Remove** (the cross) — takes it off the shelf. **It never deletes the file.**
+
+Those three appear on a tile when you hover it.
 - **Show/hide** — the tray icon, its right-click menu, or the global hotkey
   (`Ctrl+Shift+S` on Windows, `⌘⇧S` on macOS by default).
 
-Recordings show a frame from themselves plus their length and size. If a recording can't be
-decoded the tile keeps a film glyph and still drags out fine.
+Recordings show a frame from themselves plus a badge with their length and size. If a recording
+can't be decoded the tile keeps a film icon and still drags out fine.
+
+Captures are grouped by day, so "the one from yesterday" stays findable once the shelf fills up.
 
 ---
 
