@@ -51,18 +51,17 @@ for (const name of SIGNING_VARS) {
 
 const args = ["tauri", "build"];
 const notes = [];
+/** Merged into tauri.conf.json at build time so nothing sensitive is committed. */
+const configOverride = {};
 
 if (unsigned) {
   notes.push("--unsigned given: skipping all signing");
 } else if (process.platform === "win32") {
   if (env["WINDOWS_CERT_THUMBPRINT"]) {
     // Merged rather than committed, so the thumbprint stays out of the repo.
-    args.push(
-      "--config",
-      JSON.stringify({
-        bundle: { windows: { certificateThumbprint: env["WINDOWS_CERT_THUMBPRINT"] } },
-      }),
-    );
+    configOverride.bundle = {
+      windows: { certificateThumbprint: env["WINDOWS_CERT_THUMBPRINT"] },
+    };
     notes.push("Authenticode: signing with WINDOWS_CERT_THUMBPRINT");
   } else {
     notes.push("Authenticode: WINDOWS_CERT_THUMBPRINT unset — artifacts will be UNSIGNED");
@@ -85,10 +84,19 @@ if (unsigned) {
   );
 }
 
-if (!env["TAURI_SIGNING_PRIVATE_KEY"]) {
-  notes.push(
-    "Updater: TAURI_SIGNING_PRIVATE_KEY unset — update artifacts will be unsigned and rejected by installed apps",
-  );
+// Updater artifacts are only worth producing when they can be signed: an
+// unsigned one is rejected by every installed app. Tauri also refuses to build
+// them without the key, so this is switched on here rather than in the
+// committed config.
+if (env["TAURI_SIGNING_PRIVATE_KEY"]) {
+  configOverride.bundle = { ...configOverride.bundle, createUpdaterArtifacts: true };
+  notes.push("Updater: signing update artifacts with TAURI_SIGNING_PRIVATE_KEY");
+} else {
+  notes.push("Updater: TAURI_SIGNING_PRIVATE_KEY unset — installers only, no update artifacts");
+}
+
+if (Object.keys(configOverride).length > 0) {
+  args.push("--config", JSON.stringify(configOverride));
 }
 
 for (const note of notes) console.log(`[release] ${note}`);
