@@ -61,6 +61,11 @@ fn spawn_worker<R: Runtime>(app: AppHandle<R>, rx: mpsc::Receiver<()>, sink: Arc
             // A burst of changes still only needs one look at the clipboard.
             while rx.try_recv().is_ok() {}
 
+            // A copy the user made *from* the shelf is not a new capture.
+            if sink.take_own_clipboard_write() {
+                continue;
+            }
+
             let bytes = match read_image(&app) {
                 Ok(Some(bytes)) => bytes,
                 Ok(None) => continue, // text, files, or nothing at all
