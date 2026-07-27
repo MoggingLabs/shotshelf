@@ -64,6 +64,12 @@ const groups = new Map<string, HTMLElement>();
 
 let list: HTMLElement;
 let count: HTMLElement;
+/** An OS drag steals focus; the popover must not read that as a dismissal. */
+let dragging = false;
+
+export function isDragging(): boolean {
+  return dragging;
+}
 
 export function mountShelf(listEl: HTMLElement, countEl: HTMLElement): void {
   list = listEl;
@@ -257,6 +263,8 @@ function updateCount(): void {
       ? "Shelf"
       : `${items.length} capture${items.length === 1 ? "" : "s"}`;
   list.dataset["empty"] = String(items.length === 0);
+  // The popover is hidden most of the time, so the tray icon carries the count.
+  void invoke("set_capture_count", { count: items.length }).catch(() => {});
 }
 
 function showEmptyState(): void {
@@ -514,7 +522,11 @@ function armDrag(node: HTMLElement, capture: Capture, start: PointerEvent): void
  */
 async function beginDrag(node: HTMLElement, capture: Capture): Promise<void> {
   node.classList.add("tile--dragging");
-  const done = () => node.classList.remove("tile--dragging");
+  dragging = true;
+  const done = () => {
+    node.classList.remove("tile--dragging");
+    dragging = false;
+  };
 
   try {
     const source = await invoke<DragSource>("prepare_drag", {

@@ -22,16 +22,6 @@ use crate::catch::CaptureKind;
 /// worth changing if it gets in the way. It is a setting for that reason.
 pub const DEFAULT_HOTKEY: &str = "CommandOrControl+Shift+S";
 
-/// Which screen edge the shelf docks to. The shelf is a tall narrow strip, so
-/// only the two vertical edges make sense for it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum Edge {
-    Left,
-    #[default]
-    Right,
-}
-
 /// A pinned capture, restored onto the shelf on the next launch.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PinnedItem {
@@ -43,10 +33,6 @@ pub struct PinnedItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
-    pub edge: Edge,
-    /// Monitor name to dock to. `None`, or a monitor that has since been
-    /// unplugged, falls back to wherever the shelf already is.
-    pub monitor: Option<String>,
     /// Unpinned captures leave the shelf after this long. `None` keeps them
     /// until the shelf is closed. Fractional values are honoured, which is the
     /// only practical way to exercise expiry without waiting an hour.
@@ -60,8 +46,6 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            edge: Edge::default(),
-            monitor: None,
             retention_hours: None,
             max_items: 50,
             hotkey: DEFAULT_HOTKEY.to_owned(),
@@ -207,34 +191,10 @@ pub fn set_settings<R: Runtime>(
         crate::hotkey::rebind(&app, &previous.hotkey, &candidate.hotkey)?;
     }
 
-    let stored = store.replace(candidate);
-
-    if let Some(shelf) = app.get_webview_window(crate::window::SHELF) {
-        crate::window::dock(&shelf, &stored);
-    }
-
-    Ok(stored)
+    Ok(store.replace(candidate))
 }
 
 #[tauri::command]
 pub fn set_pinned(store: tauri::State<'_, SettingsStore>, pinned: Vec<PinnedItem>) {
     store.set_pinned(pinned);
-}
-
-/// The monitors the shelf could be docked to, for the settings surface.
-#[tauri::command]
-pub fn list_monitors<R: Runtime>(app: AppHandle<R>) -> Vec<String> {
-    let Some(shelf) = app.get_webview_window(crate::window::SHELF) else {
-        return Vec::new();
-    };
-
-    shelf
-        .available_monitors()
-        .map(|monitors| {
-            monitors
-                .into_iter()
-                .filter_map(|monitor| monitor.name().cloned())
-                .collect()
-        })
-        .unwrap_or_default()
 }

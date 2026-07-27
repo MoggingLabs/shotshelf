@@ -38,6 +38,7 @@ tauri-plugin-drag = "2"                                           # native drag-
 tauri-plugin-shell = "2"                                          # runs the bundled ffmpeg sidecar
 tauri-plugin-global-shortcut = "2"                                # show/hide hotkey (phase 06)
 tauri-plugin-updater = "2"                                        # in-place updates from the internal feed
+window-vibrancy = "0.8"                                           # acrylic / vibrancy behind the popover
 
 # Folder watching for the catch engine: https://github.com/notify-rs/notify
 # The debouncer is notify-rs' own, so we don't hand-roll event coalescing.

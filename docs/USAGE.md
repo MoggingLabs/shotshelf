@@ -42,8 +42,15 @@ already written.
 ## First run
 
 Shotshelf lives in the tray (Windows) / menu bar (macOS). It has no taskbar or Dock entry by
-design. The shelf docks to the right edge of your screen and shows an empty state until you
-take your first capture.
+design — the shelf is a **popover that hangs off that icon**, not a window that sits on your
+screen.
+
+- **Click the icon**, or press the hotkey, to open it. It closes when you click away or press Esc.
+- **When a capture lands** it peeks for about four seconds and closes itself. It never takes
+  focus, so it can't swallow what you're typing. Hover it and it stays open for as long as you
+  want it.
+- The icon's tooltip tells you how many captures are on the shelf. On macOS the count also sits
+  beside the icon.
 
 **Where it watches:**
 
@@ -86,8 +93,6 @@ The gear in the title strip opens everything there is:
 
 | Setting | What it does |
 | :-- | :-- |
-| **Edge** | Which side of the screen the shelf docks to |
-| **Monitor** | Which display. An unplugged monitor leaves the shelf where it is |
 | **Keep for** | How long unpinned captures stay. Removing them never touches the files |
 | **Max items** | How many unpinned captures the shelf holds |
 | **Hotkey** | The global show/hide shortcut |
@@ -149,6 +154,7 @@ screenshots and recordings are untouched by any of this.
 | The hotkey does nothing | Another app already owns that combination; change it in settings |
 | A recording shows a film glyph, not a frame | ffmpeg couldn't decode that file. The tile still drags out |
 | A tile shows ⚠ | The file has been moved or deleted since it was caught |
-| The shelf is nowhere to be seen | Click the tray/menu-bar icon, or press the hotkey |
+| The shelf is nowhere to be seen | It's a popover — click the tray/menu-bar icon, or press the hotkey |
+| It closes while you're still using it | Hover it to hold it open; it only auto-closes a peek |
 
 Shotshelf logs to standard output. To see it, run the installed binary from a terminal.
