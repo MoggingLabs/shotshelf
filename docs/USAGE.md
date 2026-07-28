@@ -95,6 +95,11 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
 - **Pin** (the star) — pinned captures ignore the retention window and the item limit, and are
   the only ones still on the shelf after a restart. A pinned tile keeps its star showing.
 - **Remove** (the cross) — takes it off the shelf. **It never deletes the file.**
+- **Pick several** — click one, then ctrl-click (⌘-click) others, or shift-click for a range.
+  Dragging any one of them carries them all, in the order you picked them.
+- **Compare** — pick exactly two and a Compare button appears in the title strip. It puts them
+  side by side with whatever changed outlined, as a single new capture you can drag out. The
+  first one you picked is the "before".
 
 Those three appear on a tile when you hover it.
 - **Show/hide** — the tray icon, its right-click menu, or the global hotkey
@@ -104,6 +109,26 @@ Recordings show a frame from themselves plus a badge with their length and size.
 can't be decoded the tile keeps a film icon and still drags out fine.
 
 Captures are grouped by day, so "the one from yesterday" stays findable once the shelf fills up.
+
+### The credential warning
+
+Screenshots of a working machine routinely contain an API key, a `.env`, or a customer's email
+address — and a drag-out is very often into a chat window on someone else's server. Shotshelf
+reads each screenshot **on your machine** and puts an amber marker on the card if it finds
+something that looks like a credential, naming the kind without ever showing the value.
+
+Three things worth knowing:
+
+- **It never stops you.** Dragging, copying and pinning a flagged capture all work exactly as
+  they always did. It is a second look, not a lock.
+- **It is Windows-only for now.** Windows has a text recogniser built into the OS; macOS and
+  Linux do not have one wired up yet. Where it is unavailable the shelf says so in the tooltip
+  on the status dot, so an unchecked capture is never mistaken for a checked one.
+- **No marker does not mean "safe".** It means nothing matched. Text recognition on a
+  screenshot is imperfect, and the patterns only cover credentials with recognisable shapes.
+
+Nothing about this leaves your machine — the checking happens locally, and the recognised text
+never leaves Rust.
 
 ---
 
@@ -115,7 +140,16 @@ The gear in the title strip opens everything there is:
 | :-- | :-- |
 | **Keep for** | How long unpinned captures stay. Removing them never touches the files |
 | **Max items** | How many unpinned captures the shelf holds |
+| **Send smaller copies** | Hand over a copy no larger than 1568px on its long edge, instead of the original |
 | **Hotkey** | The global show/hide shortcut |
+
+**About "Send smaller copies".** Off by default. Every vision model resizes what it is given
+to roughly 1568px before it looks at it, so when you are feeding a chat those extra pixels are
+uploaded and then discarded — turning this on costs nothing and saves time and tokens. It is
+off by default because a drag-out is also how captures reach design tools and bug reports, and
+quietly handing you a smaller file than the one you asked for is not a decision Shotshelf
+should make for you. Your original is never modified either way; the smaller copy is a
+separate file, and it keeps the original's name so a drop still produces the file you expect.
 
 Settings are one JSON file you can also edit by hand:
 
@@ -137,10 +171,18 @@ previous one stays active.
 | :-- | :-- | :-- | :-- |
 | Settings | `%APPDATA%\com.mogginglabs.shotshelf\` | `~/Library/Application Support/com.mogginglabs.shotshelf/` | `~/.config/com.mogginglabs.shotshelf/` |
 | Clipboard captures | `%APPDATA%\com.mogginglabs.shotshelf\clipboard\` | `~/Library/Application Support/com.mogginglabs.shotshelf/clipboard/` | `~/.local/share/com.mogginglabs.shotshelf/clipboard/` |
+| Comparisons | `%APPDATA%\com.mogginglabs.shotshelf\edits\` | `~/Library/Application Support/com.mogginglabs.shotshelf/edits/` | `~/.local/share/com.mogginglabs.shotshelf/edits/` |
 | Video poster frames | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\posters\` | `~/Library/Caches/com.mogginglabs.shotshelf/posters/` | `~/.cache/com.mogginglabs.shotshelf/posters/` |
+| Smaller copies for sending | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\handoff\` | `~/Library/Caches/com.mogginglabs.shotshelf/handoff/` | `~/.cache/com.mogginglabs.shotshelf/handoff/` |
 
-Deleting those folders costs you pins and thumbnails, nothing else. Your captures live wherever
-the OS put them and Shotshelf never moves or deletes them.
+**Two of those hold picture data**, so they are worth knowing about if you care where copies of
+your screen end up. `edits` holds comparisons you made — they are captures in their own right,
+which is why they are kept rather than cached. `handoff` holds smaller copies made for sending,
+and only if you turned that setting on; it keeps the 60 most recent and is safe to delete at any
+time.
+
+Deleting these folders costs you pins, thumbnails, and any comparisons you have not dragged out
+yet. Your captures live wherever the OS put them and Shotshelf never moves or deletes them.
 
 ---
 

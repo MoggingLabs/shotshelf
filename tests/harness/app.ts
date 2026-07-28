@@ -77,6 +77,7 @@ export interface BootOptions {
     retentionHours: number | null;
     maxItems: number;
     hotkey: string;
+    downscaleExports: boolean;
     pinned: { path: string; kind: "image" | "video"; ts: number }[];
   }>;
 }
@@ -89,6 +90,7 @@ export async function bootShelf(page: Page, options: BootOptions = {}): Promise<
           retentionHours: null,
           maxItems: 50,
           hotkey: "CommandOrControl+Shift+S",
+          downscaleExports: false,
           pinned: [],
           ...settings,
         },

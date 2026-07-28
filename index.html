@@ -48,6 +48,13 @@
           <input id="setting-max" type="number" min="1" max="200" step="1" />
         </label>
         <label class="settings__row">
+          <span
+            title="Vision models resize what they are given to about 1568px anyway, so this costs nothing when you are feeding a chat. Off by default because a drag-out also feeds design tools and bug reports."
+            >Send smaller copies</span
+          >
+          <input id="setting-downscale" type="checkbox" />
+        </label>
+        <label class="settings__row">
           <span>Hotkey</span>
           <input id="setting-hotkey" type="text" spellcheck="false" autocomplete="off" />
         </label>

@@ -115,6 +115,7 @@ export function installTauriMock(): void {
       retentionHours: null,
       maxItems: 50,
       hotkey: "CommandOrControl+Shift+S",
+      downscaleExports: false,
       pinned: [],
     },
     "set_pinned": null,

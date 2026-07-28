@@ -37,7 +37,12 @@ instead of fixing our filing habits.
   locations + clipboard).
 - **Holds** them in a popover in the corner of your screen, newest first, as thumbnails.
 - **Drags out** — grab an item off the shelf and drop it straight into an email, editor, or chat. No
-  Finder/Explorer spelunking, no 4-second window.
+  Finder/Explorer spelunking, no 4-second window. Pick several and they go together, in order.
+- **Reads them locally** — recognises the text in a screenshot on your machine, and warns you on
+  the card if it looks like you are about to send a credential. Windows only for now; where it is
+  unavailable the shelf says so rather than letting an unchecked capture look checked.
+- **Compares two** — pick a before and an after and get one image with what changed outlined,
+  which is the unit that actually carries meaning when you are iterating with a model.
 
 One job, done well. No accounts, no cloud, no 15 settings.
 

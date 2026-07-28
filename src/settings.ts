@@ -21,6 +21,16 @@ export interface Settings {
   retentionHours: number | null;
   maxItems: number;
   hotkey: string;
+  /**
+   * Hand over a smaller copy of a capture instead of the original.
+   *
+   * Declared here as well as in Rust because it is load-bearing on both
+   * sides: it was shipped typed only in Rust, and survived a settings save
+   * purely because the payload is spread from the raw response. The first
+   * caller to build a `Settings` from this interface would have silently
+   * reset it.
+   */
+  downscaleExports: boolean;
   pinned: PinnedItem[];
 }
 
@@ -32,6 +42,7 @@ const DEFAULTS: Settings = {
   retentionHours: null,
   maxItems: 50,
   hotkey: "CommandOrControl+Shift+S",
+  downscaleExports: false,
   pinned: [],
 };
 
@@ -64,6 +75,9 @@ export async function initSettings(
   }));
   bind<HTMLInputElement>("#setting-max", (input) => ({ maxItems: Number(input.value) }));
   bind<HTMLInputElement>("#setting-hotkey", (input) => ({ hotkey: input.value.trim() }));
+  bind<HTMLInputElement>("#setting-downscale", (input) => ({
+    downscaleExports: input.checked,
+  }));
 
   fill();
 
@@ -133,4 +147,5 @@ function fill(): void {
 
   el<HTMLInputElement>("#setting-max").value = String(current.maxItems);
   el<HTMLInputElement>("#setting-hotkey").value = current.hotkey;
+  el<HTMLInputElement>("#setting-downscale").checked = current.downscaleExports;
 }
