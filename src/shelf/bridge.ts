@@ -140,5 +140,20 @@ export async function browseShelf(): Promise<void> {
  * Returns the new capture's path.
  */
 export function saveEdit(source: string, png: Uint8Array): Promise<string> {
-  return invoke<string>("save_edit", { source, png: [...png] });
+  // Sent as a raw body, not as JSON.
+  //
+  // `{ png: [...png] }` turned a 5 MB PNG into a five-million-element JS array
+  // and roughly 20 MB of JSON text for serde to parse back — on the one path
+  // holding work the user cannot afford to lose, and scaling with exactly the
+  // captures most worth annotating. At the 64 MiB ceiling the command
+  // documents, that shape builds a quarter-gigabyte of string in the webview
+  // before Rust sees a byte, which is also why the ceiling could not protect
+  // the memory it named.
+  //
+  // Tauri takes a `Uint8Array` as the whole payload and transfers it as bytes.
+  // Everything else then has to travel as a header, and a header must be
+  // ASCII — hence the encoding, undone in `webview_path::from_header`.
+  return invoke<string>("save_edit", png, {
+    headers: { "x-shotshelf-source": encodeURIComponent(source) },
+  });
 }

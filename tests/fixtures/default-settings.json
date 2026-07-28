@@ -3,5 +3,6 @@
   "maxItems": 50,
   "hotkey": "CommandOrControl+Shift+S",
   "downscaleExports": false,
+  "checkForUpdates": true,
   "pinned": []
 }

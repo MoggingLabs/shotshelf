@@ -33,6 +33,14 @@ export interface Settings {
    * reset it.
    */
   downscaleExports: boolean;
+  /**
+   * Ask the release feed whether a newer build exists, at launch.
+   *
+   * The only network call Shotshelf makes. Off means it opens no socket at
+   * all, which is the point of offering the switch to someone who chose this
+   * app for being local-only.
+   */
+  checkForUpdates: boolean;
   pinned: PinnedItem[];
 }
 
@@ -45,6 +53,7 @@ export const DEFAULTS: Settings = {
   maxItems: 50,
   hotkey: "CommandOrControl+Shift+S",
   downscaleExports: false,
+  checkForUpdates: true,
   pinned: [],
 };
 

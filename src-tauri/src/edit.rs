@@ -117,9 +117,23 @@ pub async fn compare_captures<R: Runtime>(
 #[tauri::command]
 pub async fn save_edit<R: Runtime>(
     app: AppHandle<R>,
-    source: String,
-    png: Vec<u8>,
+    request: tauri::ipc::Request<'_>,
 ) -> Result<String, String> {
+    // The PNG arrives as the request body rather than as a JSON array of
+    // integers. See `bridge.ts` for why; the short version is that the JSON
+    // shape cost roughly four bytes of string per byte of image, and the size
+    // ceiling below could not apply until all of it had already been built.
+    let tauri::ipc::InvokeBody::Raw(png) = request.body() else {
+        return Err("the edited capture did not arrive as bytes".to_owned());
+    };
+
+    let source = request
+        .headers()
+        .get("x-shotshelf-source")
+        .and_then(|value| value.to_str().ok())
+        .map(percent_decode)
+        .ok_or_else(|| "the edit did not say which capture it came from".to_owned())?;
+
     // Absolute, but not required to still exist. The source is taken only for
     // its name and the pixels are already in hand; refusing to write because
     // the original has since gone would discard the annotation to protect a
@@ -143,7 +157,7 @@ pub async fn save_edit<R: Runtime>(
         ));
     }
 
-    write_edit(&app, &source, "edited", &png)
+    write_edit(&app, &source, "edited", png)
 }
 
 /// Write a new capture beside the shelf's own data, and hand back its path.
@@ -231,6 +245,34 @@ fn safe_stem(source: &Path) -> String {
     } else {
         stem
     }
+}
+
+/// Undo `encodeURIComponent` for a value that travelled as a header.
+///
+/// Headers must be ASCII, and a capture path is not — accented folder names
+/// and non-Latin scripts are ordinary. Hand-written rather than taking a
+/// dependency for fifteen lines: this decodes exactly what `bridge.ts`
+/// encodes, and anything malformed is left as written rather than guessed at,
+/// because the result is used only as a *name*.
+fn percent_decode(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).ok();
+            if let Some(byte) = hex.and_then(|hex| u8::from_str_radix(hex, 16).ok()) {
+                out.push(byte);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// A filename nothing is using yet.

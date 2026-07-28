@@ -20,10 +20,19 @@
  * is evaluated in the page, not in the test process.
  */
 
-/** A command name and the arguments it was called with. */
+/** A command name and what it was called with. */
 interface RecordedCall {
   cmd: string;
   args: Record<string, unknown>;
+  /**
+   * The raw payload, for commands that send bytes rather than JSON.
+   *
+   * `save_edit` ships a PNG as the request body — a JSON array of integers
+   * cost about four bytes of string per byte of image — so its arguments
+   * travel as headers instead.
+   */
+  body?: Uint8Array;
+  headers?: Record<string, string>;
 }
 
 /** The controls a test gets, exposed on `window.__shotshelf__`. */
@@ -63,7 +72,11 @@ interface TestHooks {
  * TypeScript is concerned it does not exist until we put it there.
  */
 interface TauriInternals {
-  invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>;
+  invoke(
+    cmd: string,
+    args?: Record<string, unknown> | Uint8Array | ArrayBuffer,
+    options?: { headers?: Record<string, string> },
+  ): Promise<unknown>;
   transformCallback(callback: (payload: unknown) => void, once?: boolean): number;
   unregisterCallback(id: number): void;
   convertFileSrc(path: string, protocol?: string): string;
@@ -145,23 +158,40 @@ export function installTauriMock(): void {
     }
   }
 
-  function invoke(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  function invoke(
+    cmd: string,
+    args: Record<string, unknown> | Uint8Array | ArrayBuffer = {},
+    options?: { headers?: Record<string, string> },
+  ): Promise<unknown> {
+    // A raw payload is the whole body; anything else it needs rides in headers.
+    const raw =
+      args instanceof Uint8Array
+        ? args
+        : args instanceof ArrayBuffer
+          ? new Uint8Array(args)
+          : undefined;
+    const named = raw ? {} : (args as Record<string, unknown>);
     // Event plumbing is part of the runtime, not part of the app's contract,
     // so it is handled here rather than recorded as an app call.
     if (cmd === "plugin:event|listen") {
-      const event = args["event"] as string;
-      const id = args["handler"] as number;
+      const event = named["event"] as string;
+      const id = named["handler"] as number;
       listeners.set(event, [...(listeners.get(event) ?? []), id]);
       return Promise.resolve(id);
     }
     if (cmd === "plugin:event|unlisten") {
-      const event = args["event"] as string;
-      const id = args["eventId"] as number;
+      const event = named["event"] as string;
+      const id = named["eventId"] as number;
       listeners.set(event, (listeners.get(event) ?? []).filter((entry) => entry !== id));
       return Promise.resolve(null);
     }
 
-    calls.push({ cmd, args });
+    calls.push({
+      cmd,
+      args: named,
+      ...(raw ? { body: raw } : {}),
+      ...(options?.headers ? { headers: options.headers } : {}),
+    });
 
     // Two commands emit `shelf://opened` from Rust, and the front-end depends
     // on it: `window::open` and `window::preview` both set the "opened" flag,
@@ -172,7 +202,7 @@ export function installTauriMock(): void {
     // shelf kept rendering its column shape around a full-size editor, which
     // hid the alert strip and left the column's expiry timer running — and no
     // browser test could see it while the harness had the same gap.
-    if ((cmd === "show_shelf" && args["focus"] === true) || cmd === "preview_shelf") {
+    if ((cmd === "show_shelf" && named["focus"] === true) || cmd === "preview_shelf") {
       queueMicrotask(() => {
         emitTo("shelf://opened", null);
       });
@@ -186,7 +216,7 @@ export function installTauriMock(): void {
     const declared = responses.get(cmd);
     if (declared) {
       if (declared.kind === "value") return Promise.resolve(declared.value);
-      if (declared.kind === "from-args") return Promise.resolve(declared.answer(args));
+      if (declared.kind === "from-args") return Promise.resolve(declared.answer(named));
       if (declared.kind === "error") return Promise.reject(new Error(declared.message));
       return new Promise(() => {});
     }

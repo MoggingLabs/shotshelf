@@ -257,6 +257,10 @@ yet. Your captures live wherever the OS put them and Shotshelf never moves or de
 
 ## Updates
 
+Set `checkForUpdates` to `false` in the settings file and Shotshelf makes no network request at
+all — not even this one.
+
+
 On launch Shotshelf asks the internal feed whether a newer version exists. If one does, it says
 so once and does nothing else — nothing is downloaded and nothing is replaced. Installing is
 your decision, taken by fetching the installer yourself. If the feed is unreachable — you're

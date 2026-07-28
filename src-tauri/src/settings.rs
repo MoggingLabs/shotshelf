@@ -22,6 +22,11 @@ use crate::catch::CaptureKind;
 /// worth changing if it gets in the way. It is a setting for that reason.
 pub const DEFAULT_HOTKEY: &str = "CommandOrControl+Shift+S";
 
+/// serde needs a function for a non-`false` default.
+const fn yes() -> bool {
+    true
+}
+
 /// A pinned capture, restored onto the shelf on the next launch.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PinnedItem {
@@ -50,6 +55,12 @@ pub struct Settings {
     /// trust. The original is what was asked for until you say otherwise.
     #[serde(default)]
     pub downscale_exports: bool,
+    /// Ask the release feed whether a newer build exists, at launch.
+    ///
+    /// On by default, and the only network call the app makes. Off means the
+    /// app opens no socket at all, which is the point of offering it.
+    #[serde(default = "yes")]
+    pub check_for_updates: bool,
     pub pinned: Vec<PinnedItem>,
 }
 
@@ -60,6 +71,7 @@ impl Default for Settings {
             max_items: 50,
             hotkey: DEFAULT_HOTKEY.to_owned(),
             downscale_exports: false,
+            check_for_updates: true,
             pinned: Vec::new(),
         }
     }

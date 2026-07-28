@@ -26,7 +26,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 /// What kind of thing was found, in rough order of how alarming it is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SecretKind {
     /// A private key block. Nothing else looks like this; it is never a
@@ -60,7 +60,7 @@ impl SecretKind {
 }
 
 /// One thing worth looking at before this capture leaves the machine.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Finding {
     pub kind: SecretKind,
@@ -191,6 +191,7 @@ const MAX_FINDINGS: usize = 50;
 #[must_use]
 pub fn scan(text: &str) -> Vec<Finding> {
     let mut findings: Vec<Finding> = Vec::new();
+    let mut seen: std::collections::HashSet<Finding> = std::collections::HashSet::new();
 
     for pattern in PATTERNS.iter() {
         for hit in pattern.regex.find_iter(text) {
@@ -201,17 +202,26 @@ pub fn scan(text: &str) -> Vec<Finding> {
                 severity: pattern.kind.severity(),
             };
             // The same key printed twice on one screen is one problem.
-            if !findings.contains(&finding) {
+            //
+            // Through a set rather than a linear scan of the vec: the scan was
+            // O(n) per hit over a list bounded only *after* both loops closed,
+            // so the case the ceiling exists for — a screenshot of a contact
+            // list, thousands of distinct addresses — was also the case that
+            // made it quadratic. Keyed on the whole finding, so two different
+            // tokens that mask to the same preview stay two findings.
+            if seen.insert(finding.clone()) {
                 findings.push(finding);
+                if findings.len() >= MAX_FINDINGS {
+                    break;
+                }
             }
         }
     }
 
     // Reverse severity: the worst thing is what you see first.
     findings.sort_by_key(|finding| std::cmp::Reverse(finding.severity));
-    // Truncated *after* sorting, so what survives is the most serious of what
-    // was found rather than whichever pattern happened to run first.
-    findings.truncate(MAX_FINDINGS);
+    // Already bounded above; the sort decides *which* of the bounded set is
+    // shown first, worst thing at the top.
     findings
 }
 

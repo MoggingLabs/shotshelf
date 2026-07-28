@@ -131,9 +131,10 @@ async function savedPng(page: import("@playwright/test").Page): Promise<number[]
     .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("save_edit").length))
     .toBeGreaterThan(0);
 
-  return page.evaluate(
-    () => window.__shotshelf__.callsTo("save_edit").at(-1)?.args["png"] as number[],
-  );
+  // The PNG travels as the request body, not as a JSON array of integers.
+  return page.evaluate(() => [
+    ...(window.__shotshelf__.callsTo("save_edit").at(-1)?.body ?? []),
+  ]);
 }
 
 /** Drag on the canvas, in canvas coordinates. */
@@ -196,8 +197,12 @@ test("a mark is saved as a new capture, leaving the original alone", async ({ pa
   await page.locator("#editor-save").click();
 
   const png = await savedPng(page);
-  const call = await page.evaluate(() => window.__shotshelf__.callsTo("save_edit").at(-1)?.args);
-  expect(call?.["source"]).toBe(FIXTURE.wide);
+  // The source rides in a header now, percent-encoded because a header is
+  // ASCII and a capture path is not.
+  const headers = await page.evaluate(
+    () => window.__shotshelf__.callsTo("save_edit").at(-1)?.headers,
+  );
+  expect(decodeURIComponent(headers?.["x-shotshelf-source"] ?? "")).toBe(FIXTURE.wide);
   // Real PNG bytes, composited in the page rather than re-rendered in Rust.
   expect(png.length).toBeGreaterThan(100);
   expect(png.slice(0, 4)).toEqual([0x89, 0x50, 0x4e, 0x47]);
@@ -236,12 +241,10 @@ test("a redaction destroys the pixels rather than drawing over them", async ({ p
   // canvas is whatever fits, and a hard-coded width samples the wrong pixel.
   const covered = await page.evaluate(
     async ({ width, height }: { width: number; height: number }) => {
-      const bytes = window.__shotshelf__.callsTo("save_edit").at(-1)?.args["png"] as
-        | number[]
-        | undefined;
+      const bytes = window.__shotshelf__.callsTo("save_edit").at(-1)?.body;
       if (!bytes?.length) throw new Error("nothing was saved");
 
-      const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
+      const blob = new Blob([new Uint8Array(bytes).slice()], { type: "image/png" });
       const bitmap = await createImageBitmap(blob);
       const canvas = document.createElement("canvas");
       canvas.width = bitmap.width;

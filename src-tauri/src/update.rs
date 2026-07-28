@@ -12,6 +12,10 @@
 //! only check. Installing is the user's decision, taken by running the
 //! installer they choose to download.
 //!
+//! It can be turned off. An app that talks to exactly one endpoint, once, on
+//! behalf of a user who chose it for being local-only should let that user
+//! decline even that — `checkForUpdates` in the settings file, on by default.
+//!
 //! Releases are signed, and the plugin verifies that signature — but it does
 //! so inside `download`, which this never calls. Nothing is verified here
 //! because nothing is fetched here: the check reads a manifest and reports a
@@ -25,15 +29,29 @@ use tauri_plugin_updater::UpdaterExt;
 /// Event carrying the version that is available, for the shelf to mention.
 pub const UPDATE_EVENT: &str = "update://available";
 
+/// How long the feed has to answer before the check gives up.
+const CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// Look for a newer build in the background at startup.
 ///
 /// Deliberately quiet: an unreachable feed is the normal case on a laptop that
 /// is offline, and it must never stop the shelf from doing its job.
-pub fn check_on_launch<R: Runtime>(app: &AppHandle<R>) {
+pub fn check_on_launch<R: Runtime>(app: &AppHandle<R>, wanted: bool) {
+    if !wanted {
+        println!("shotshelf: update check is off");
+        return;
+    }
+
     let app = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        match app.updater() {
+        // A deadline, because the plugin's default is none.
+        //
+        // The feed is an internal hostname, so off the network the lookup
+        // fails fast — but a host that accepts a connection and then says
+        // nothing would leave this task alive for the life of the app.
+        let updater = app.updater_builder().timeout(CHECK_TIMEOUT).build();
+        match updater {
             Ok(updater) => match updater.check().await {
                 Ok(Some(update)) => {
                     println!(

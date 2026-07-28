@@ -35,9 +35,15 @@ pub struct VideoDetails {
     pub bytes: u64,
 }
 
-/// Keep at most this many cached frames. A shelf capped at 200 items cannot
-/// legitimately need more, so anything beyond it is an orphan.
-const POSTER_CACHE_LIMIT: usize = 200;
+/// Keep at most this many cached frames.
+///
+/// Sized against what the shelf can actually hold, which is more than the item
+/// cap: pins are exempt from it, so `max_items` (up to 200) plus `MAX_PINNED`
+/// (500) is 700 tiles. The old number was 200, justified by "a shelf capped at
+/// 200 items cannot legitimately need more" — which was simply wrong about
+/// pins, and meant a shelf with many pinned recordings evicted frames that
+/// were still on screen and re-derived them with ffmpeg every half hour.
+const POSTER_CACHE_LIMIT: usize = 750;
 
 /// Drop the oldest cached frames. Called on a timer from `lib.rs`.
 ///
@@ -270,7 +276,12 @@ async fn run_ffmpeg<R: Runtime>(
     match tokio::time::timeout(FRAME_TIMEOUT, collect).await {
         Ok(stderr) => Ok(parse_duration(&String::from_utf8_lossy(&stderr))),
         Err(_) => {
+            // Killed and then given a moment to actually die. `kill` only
+            // signals; without the pause the caller went straight on to decide
+            // whether to publish the staging file, which the dying process may
+            // still have been writing into.
             let _ = child.kill();
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             Err("ffmpeg took too long on this recording".to_owned())
         }
     }

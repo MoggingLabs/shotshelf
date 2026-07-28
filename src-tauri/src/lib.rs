@@ -105,8 +105,9 @@ pub fn run() {
             }
 
             // The one and only network call Shotshelf makes: "is there a newer
-            // build?". No capture data, no telemetry.
-            update::check_on_launch(app.handle());
+            // build?". No capture data, no telemetry, and the user can decline
+            // even this.
+            update::check_on_launch(app.handle(), current.check_for_updates);
 
             // Watch the OS capture folders + the clipboard. Emits `capture://new`.
             catch::start(app.handle(), &catch::overrides_from_env());

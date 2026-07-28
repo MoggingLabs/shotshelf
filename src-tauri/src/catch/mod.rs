@@ -120,7 +120,22 @@ impl CaptureSink {
             // outside the app, unredacted, and untouched by any retention
             // setting. The capture beside it gets masked previews and a
             // careful `Findings` split; this went out in plaintext.
-            Ok(()) => println!("shotshelf: caught {:?} {}", kind, capture.path),
+            // Neither the path nor the title.
+            //
+            // The title left this line because a terminal titles itself with
+            // its command line; a capture's *path* carries client and project
+            // names just as readily, and on macOS and Linux stdout is
+            // collected into the journal — on disk, outside the app, untouched
+            // by any retention setting. The name is enough to follow the
+            // pipeline; the folder it sits in is not this log's business.
+            Ok(()) => println!(
+                "shotshelf: caught {:?} {}",
+                kind,
+                std::path::Path::new(&capture.path)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+            ),
             Err(err) => eprintln!("shotshelf: could not emit {CAPTURE_EVENT}: {err}"),
         }
     }
