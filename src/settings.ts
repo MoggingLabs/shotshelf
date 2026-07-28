@@ -173,21 +173,10 @@ async function save(patch: Partial<Settings>): Promise<void> {
   // Same rule as `persistPinned`: this sends the whole settings object,
   // `pinned` included, so writing it before the stored one was read would
   // replace the user's pins with an empty list.
-  //
-  // Not covered end-to-end. The panel is now wired before the read so this is
-  // genuinely reachable, but driving it from a spec proved unreliable and a
-  // test that cannot be trusted is worse than an honest note. Its sibling in
-  // `persistPinned` is covered by `shelf.spec.ts`, and the two share one rule.
   if (!loaded) {
     note().textContent = "Settings could not be loaded, so they cannot be saved.";
     return;
   }
-  // Same rule as `persistPinned`: this sends the whole settings object,
-  // `pinned` included, so writing it before the stored one was read would
-  // replace the user's pins with an empty list.
-  // Same rule as `persistPinned`: this sends the whole settings object,
-  // `pinned` included, so writing it before the stored one was read would
-  // replace the user's pins with an empty list.
 
   try {
     // The Rust side returns what it actually stored, so any clamping — or a

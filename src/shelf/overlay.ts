@@ -23,7 +23,16 @@ export class Overlay<T> {
   #live: T | undefined;
   #opening = false;
   #ticket = 0;
-  #abandoned = false;
+  /**
+   * The ticket of the open that was abandoned, if any.
+   *
+   * A bare flag was instance-wide, and any later `show` or `close` reset it —
+   * so an open parked on a slow picture could be discarded, superseded by a
+   * new one, and then resolve to find the flag cleared and hand the window
+   * back *under the surface now on screen*. The ticket makes the answer
+   * belong to the open that asked.
+   */
+  #abandonedTicket: number | undefined;
   readonly #teardown: (live: T) => void;
   readonly #restore: () => void;
 
@@ -60,8 +69,8 @@ export class Overlay<T> {
     return this.#ticket;
   }
 
-  #wasAbandoned(): boolean {
-    return this.#abandoned;
+  #wasAbandoned(token: number): boolean {
+    return this.#abandonedTicket === token;
   }
 
   /** Whether the open holding `token` has since been superseded. */
@@ -88,7 +97,6 @@ export class Overlay<T> {
     if (this.isOpen) return false;
 
     this.#opening = true;
-    this.#abandoned = false;
     this.#ticket += 1;
     const mine = this.#ticket;
     const stale = (): boolean => this.stale(mine);
@@ -96,10 +104,9 @@ export class Overlay<T> {
     try {
       const built = await build(stale);
       if (stale()) {
-        // Read through a call: `#abandoned` is set false a few lines above and
-        // flipped by `discard()` from outside this frame, which narrowing does
-        // not model — it concluded the branch was dead.
-        if (!this.#wasAbandoned()) this.#restore();
+        // Asked about *this* open. A discard of some earlier open is not a
+        // reason to withhold the window from this one.
+        if (!this.#wasAbandoned(mine)) this.#restore();
         return false;
       }
       this.#live = built;
@@ -125,7 +132,6 @@ export class Overlay<T> {
   close(): boolean {
     const pending = this.#opening;
     this.#ticket += 1;
-    this.#abandoned = false;
     this.#opening = false;
 
     const live = this.#live;
@@ -145,8 +151,9 @@ export class Overlay<T> {
    * peeked window never takes focus, so Escape could not reach it either.
    */
   discard(): void {
+    // Recorded against the open being abandoned, not as a mode.
+    this.#abandonedTicket = this.#ticket;
     this.#ticket += 1;
-    this.#abandoned = true;
     this.#opening = false;
 
     const live = this.#live;

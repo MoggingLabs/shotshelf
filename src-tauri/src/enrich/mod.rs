@@ -22,19 +22,23 @@ use serde::Serialize;
 
 /// What Shotshelf worked out about a capture on its own.
 ///
-/// **`text` never leaves this process.** The recognised text is the capture's
-/// full contents in characters — every token, every address, verbatim — and
-/// the whole point of masking a finding is that the value does not spread.
-/// Handing the front-end the masked preview *and* the unmasked text alongside
-/// it would defeat the exercise entirely, so the command that serves the
-/// webview returns [`Findings`] and this stays in Rust.
+/// **The recognised text never reaches this struct.** It is the capture's full
+/// contents in characters — every token, every address, verbatim — and the
+/// whole point of masking a finding is that the value does not spread. It is
+/// scanned inside `describe` and dropped there; what survives is the masked
+/// findings and whether the capture could be read.
 #[derive(Clone, Debug, Default)]
 pub struct Enrichment {
-    /// Text recognised in the capture, if the platform can.
+    /// Whether the capture could be read at all.
     ///
-    /// Kept for what has to happen on this side of the boundary — scanning
-    /// today, searching the shelf later.
-    pub text: Option<String>,
+    /// A `bool`, not the text. The text was kept here on the reasoning that
+    /// scanning needed it — but `describe` scans a local before this struct
+    /// exists, and the only read of the field anywhere was `.is_some()`. So a
+    /// whole screenshot's worth of recognised characters was retained to
+    /// answer one question, in the module whose entire purpose is not letting
+    /// that text spread. When the shelf becomes searchable this comes back as
+    /// a field with a reader.
+    pub read: bool,
     /// Anything in that text worth a second look before the capture leaves.
     pub secrets: Vec<secrets::Finding>,
 }
@@ -60,7 +64,7 @@ pub struct Findings {
 impl From<Enrichment> for Findings {
     fn from(enrichment: Enrichment) -> Self {
         Self {
-            scanned: enrichment.text.is_some(),
+            scanned: enrichment.read,
             secrets: enrichment.secrets,
         }
     }
@@ -76,10 +80,9 @@ pub fn describe(path: &std::path::Path) -> Enrichment {
         return Enrichment::default();
     };
 
-    let findings = secrets::scan(&text);
     Enrichment {
-        text: Some(text),
-        secrets: findings,
+        read: true,
+        secrets: secrets::scan(&text),
     }
 }
 
@@ -92,7 +95,7 @@ mod tests {
         // Every platform without OCR takes this path, as does every
         // unreadable file. It has to be ordinary, not exceptional.
         let enrichment = describe(std::path::Path::new("/nonexistent/capture.png"));
-        assert!(enrichment.text.is_none());
+        assert!(!enrichment.read);
         assert!(enrichment.secrets.is_empty());
     }
 
@@ -111,7 +114,7 @@ mod tests {
         // Empty text is a real answer — a screenshot of a blank editor — and
         // it must not collapse into "could not look".
         let findings = Findings::from(Enrichment {
-            text: Some(String::new()),
+            read: true,
             secrets: Vec::new(),
         });
         assert!(findings.scanned);
@@ -126,7 +129,7 @@ mod tests {
         // nothing else asserts it.
         let text = "export GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789";
         let enrichment = Enrichment {
-            text: Some(text.to_owned()),
+            read: true,
             secrets: secrets::scan(text),
         };
         assert!(

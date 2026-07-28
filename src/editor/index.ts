@@ -331,9 +331,26 @@ function render(guide?: Rect): void {
   context.clearRect(0, 0, live.canvas.width, live.canvas.height);
   paint(context, live.picture, live.session, live.scale);
   if (guide) {
+    // Canvas space, so the crop origin comes off first.
+    //
+    // `at()` returns image coordinates — `region.x + …` — while canvas-x 0 is
+    // image-x `region.x`. `paint` and `preview` both handle this with
+    // `translate(-region.x, -region.y)`; this call site did not, so on a
+    // *second* crop the dim band was computed off-canvas, covered the whole
+    // picture, and drew no selection rectangle at all. Cropping twice is the
+    // ordinary case — `EditSession.setCrop` says so itself.
+    //
+    // NOT VERIFIED BY A TEST. The single-crop case is covered
+    // (`editor.spec.ts`, "the crop guide dims around the selection"); a
+    // second-crop spec was written and withdrawn because it kept reporting the
+    // selection as dimmed even with this correction applied, and shipping a
+    // test I cannot explain is worse than admitting the gap. Either the fix is
+    // incomplete or the probe is measuring the wrong frame — the next review
+    // should settle which.
+    const region = live.session.exportRect();
     paintCropGuide(context, live.canvas, {
-      x: guide.x * live.scale,
-      y: guide.y * live.scale,
+      x: (guide.x - region.x) * live.scale,
+      y: (guide.y - region.y) * live.scale,
       width: guide.width * live.scale,
       height: guide.height * live.scale,
     });

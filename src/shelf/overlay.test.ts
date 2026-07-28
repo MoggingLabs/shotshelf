@@ -181,3 +181,30 @@ test("a build that declines to mount reports false", async () => {
   assert.equal(await overlay.show(() => Promise.resolve(undefined)), false);
   assert.equal(overlay.isOpen, false);
 });
+
+test("a discarded open does not collapse the window under a later one", async () => {
+  // `#abandoned` was a mode rather than a fact about one open, and any later
+  // `show` reset it — so an open parked on a slow picture could be discarded,
+  // superseded, and then resolve to find the flag cleared and hand the window
+  // back underneath the surface now on screen.
+  restores.length = 0;
+  const { overlay } = tracked();
+
+  let releaseFirst: (() => void) | undefined;
+  const held = new Promise<void>((resume) => {
+    releaseFirst = resume;
+  });
+  const abandoned = overlay.show(async () => {
+    await held;
+    return "first";
+  });
+
+  overlay.discard();
+  await overlay.show(() => Promise.resolve("second"));
+
+  releaseFirst?.();
+  await abandoned;
+
+  assert.equal(overlay.live, "second", "the later surface is untouched");
+  assert.equal(restores.length, 0, "the abandoned open owed nothing");
+});

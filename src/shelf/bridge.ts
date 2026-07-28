@@ -152,7 +152,7 @@ export function saveEdit(source: string, png: Uint8Array): Promise<string> {
   //
   // Tauri takes a `Uint8Array` as the whole payload and transfers it as bytes.
   // Everything else then has to travel as a header, and a header must be
-  // ASCII — hence the encoding, undone in `webview_path::from_header`.
+  // ASCII — hence the encoding, undone by `percent_decode` in `edit.rs`.
   return invoke<string>("save_edit", png, {
     headers: { "x-shotshelf-source": encodeURIComponent(source) },
   });

@@ -100,15 +100,29 @@ pub async fn video_details<R: Runtime>(
     // to go straight to `fs::metadata`, with none of the checking its
     // siblings in `share.rs` and `edit.rs` do.
     let source = existing_file(&app, &path)?;
-    let meta = std::fs::metadata(&source).map_err(|err| err.to_string())?;
-    let bytes = meta.len();
 
-    let key = cache_key(&source, &meta);
-    let dir = poster_dir(&app)?;
+    // The filesystem prelude runs on a blocking worker, not on the runtime.
+    //
+    // `metadata`, `create_dir_all` and a `read_dir` over up to 750 cache
+    // entries, once per video tile — and the shelf builds every tile at once.
+    // `edit.rs` was moved off the runtime for exactly this, and this function
+    // was named in the same finding; only one of the two was fixed then.
+    let lookup_app = app.clone();
+    let lookup_source = source.clone();
+    let (bytes, key, dir, hit) = tauri::async_runtime::spawn_blocking(move || {
+        let meta = std::fs::metadata(&lookup_source).map_err(|err| err.to_string())?;
+        let bytes = meta.len();
+        let key = cache_key(&lookup_source, &meta);
+        let dir = poster_dir(&lookup_app)?;
+        // Keyed on path *and* mtime, so a re-recorded file gets a fresh frame
+        // but relaunching the app reuses what is already there.
+        let hit = cached(&dir, key);
+        Ok::<_, String>((bytes, key, dir, hit))
+    })
+    .await
+    .map_err(|err| err.to_string())??;
 
-    // Keyed on path *and* mtime, so a re-recorded file gets a fresh frame but
-    // relaunching the app reuses what is already there.
-    if let Some((poster, duration_ms)) = cached(&dir, key) {
+    if let Some((poster, duration_ms)) = hit {
         return Ok(VideoDetails {
             poster: Some(poster.to_string_lossy().into_owned()),
             duration_ms,
@@ -307,9 +321,17 @@ fn frame_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
 }
 
 fn has_frame(target: &Path) -> bool {
-    std::fs::metadata(target)
-        .map(|meta| meta.len() > 0)
-        .unwrap_or(false)
+    // A JPEG, not merely a non-empty file.
+    //
+    // Length alone published whatever a killed ffmpeg had managed to write:
+    // the timeout kills the process, but a truncated file is still non-empty,
+    // and the rename that follows caches it under path+mtime for that file's
+    // life. Two bytes of magic is the difference between "a frame" and
+    // "something was there".
+    let Ok(bytes) = std::fs::read(target) else {
+        return false;
+    };
+    bytes.len() > 2 && bytes[0] == 0xFF && bytes[1] == 0xD8
 }
 
 /// ffmpeg reports `Duration: 00:00:12.34, start: ...` on stderr. A stream with
