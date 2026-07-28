@@ -49,6 +49,12 @@ What that leaves unverified, specifically:
 - The asset-protocol scope, which is what confines every file Rust will read, copy, scan or hand
   to a drag. Its logic is checked against Tauri's implementation; it has never actually refused
   anything at runtime.
+- **The catch engine** — the folder watchers and the clipboard watcher. This is the app's one
+  job, and on Windows the clipboard path is how Win+Shift+S captures arrive.
+- **Native drag-out**, which is the feature the whole thing exists for.
+- **On-device text recognition**, which is FFI into `Windows.Media.Ocr` and macOS Vision, and
+  which the credential warning depends on.
+- **Reading the foreground window**, which is a Win32 `unsafe` block.
 - Window chrome — DWM corner rounding, acrylic and vibrancy backdrops.
 - The tray icon and menu, the global hotkey, and single-instance behaviour.
 - The bundled ffmpeg sidecar as packaged.

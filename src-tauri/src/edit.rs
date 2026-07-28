@@ -73,7 +73,9 @@ pub async fn compare_captures<R: Runtime>(
     let after_path = existing_file(&app, &after)?;
     let name_source = after_path.clone();
 
-    // One comparison at a time from the same pool the sizing uses: this decodes
+    // Rate-limited from the same pool the sizing uses — two at once, not one:
+    // the single-comparison guarantee is `Shelf.#comparing` in the front end.
+    // This decodes
     // two capped images and allocates a composite larger than both, so several
     // at once is gigabytes.
     let permit = crate::share::sizing_limit()
@@ -157,32 +159,11 @@ fn write_edit<R: Runtime>(
 ) -> Result<String, String> {
     let dir = edits_dir(app)?;
 
-    // The stem is a *name*, never a path.
-    //
-    // `PathBuf::join` truncates its base when the pushed component carries a
-    // Windows prefix, so a source of `C:\dir\D:evil.png` has a `file_stem` of
-    // `D:evil`, and joining that to the edits directory produced a
-    // drive-relative path outside it. `create_new` meant it could only ever
-    // create, never overwrite — but "cannot overwrite" is not the same as
-    // "cannot escape".
-    let stem = source
-        .file_stem()
-        .map_or_else(
-            || "capture".to_owned(),
-            |stem| stem.to_string_lossy().into_owned(),
-        )
-        .replace([':', '/', '\\'], "_");
-    let stem = if stem.trim().is_empty() {
-        "capture".to_owned()
-    } else {
-        stem
-    };
-
     // Created exclusively rather than probed-then-written. `unique` checking
     // `!exists()` and writing afterwards is a race the doc below says this
     // function exists to prevent: two comparisons started by a double click
     // both picked the same name and the second silently overwrote the first.
-    let mut target = unique(&dir, &stem, kind);
+    let mut target = target_for(&dir, source, kind);
     loop {
         match std::fs::OpenOptions::new()
             .write(true)
@@ -204,13 +185,52 @@ fn write_edit<R: Runtime>(
             }
             // Someone else took this name between the probe and the create.
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                target = unique(&dir, &stem, kind);
+                target = target_for(&dir, source, kind);
             }
             Err(err) => return Err(err.to_string()),
         }
     }
 
     Ok(target.to_string_lossy().into_owned())
+}
+
+/// Where an edit of `source` should be written, inside `dir`.
+///
+/// The whole naming decision in one place, so a test can assert the property
+/// that matters — the result stays inside `dir` — against the code that ships
+/// rather than a copy of it. Splitting the sanitiser out and testing *that*
+/// was not enough: it left nothing checking that `write_edit` still called it.
+fn target_for(dir: &Path, source: &Path, kind: &str) -> PathBuf {
+    unique(dir, &safe_stem(source), kind)
+}
+
+/// The source's name, reduced to something that is only ever a name.
+///
+/// `PathBuf::join` truncates its base when the pushed component carries a
+/// Windows prefix, so a source of `C:\dir\D:evil.png` has a `file_stem` of
+/// `D:evil`, and joining that to the edits directory produced a drive-relative
+/// path outside it. `create_new` meant it could only ever create, never
+/// overwrite — but "cannot overwrite" is not the same as "cannot escape".
+///
+/// A named function rather than four lines inline, so the regression test can
+/// call the code that ships instead of a copy of it. The previous test
+/// re-implemented this `replace` in its own body and asserted against that,
+/// which left it green when the real call was deleted.
+fn safe_stem(source: &Path) -> String {
+    let stem = source
+        .file_stem()
+        .map_or_else(
+            || "capture".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        )
+        .replace([':', '/', '\\'], "_");
+
+    // All-dots is a relative path in disguise, and an empty stem names nothing.
+    if stem.trim().is_empty() || stem.chars().all(|c| c == '.') {
+        "capture".to_owned()
+    } else {
+        stem
+    }
 }
 
 /// A filename nothing is using yet.
@@ -241,16 +261,19 @@ mod tests {
         // a Windows prefix, so `C:\dir\D:evil.png` produced a `file_stem` of
         // `D:evil` and wrote to `D:evil (edited).png` — outside the edits
         // directory entirely. Separators go the same way for the same reason.
+        //
+        // Calls `safe_stem`, the function that ships. This test used to
+        // re-implement the `replace` in its own body and assert against its own
+        // copy, so deleting the real call left it green — a regression test
+        // that could not fail, guarding a path escape.
         let dir = std::env::temp_dir().join("shotshelf-stem-test");
-        for hostile in ["C:/dir/D:evil.png", "/dir/../../evil.png", "/dir/a/b.png"] {
-            let stem = std::path::Path::new(hostile)
-                .file_stem()
-                .map_or_else(
-                    || "capture".to_owned(),
-                    |s| s.to_string_lossy().into_owned(),
-                )
-                .replace([':', '/', '\\'], "_");
-            let target = dir.join(format!("{stem} (edited).png"));
+        for hostile in [
+            "C:/dir/D:evil.png",
+            "/dir/../../evil.png",
+            "/dir/a/b.png",
+            "/dir/..png",
+        ] {
+            let target = target_for(&dir, Path::new(hostile), "edited");
             assert!(
                 target.starts_with(&dir),
                 "{hostile} escaped to {}",

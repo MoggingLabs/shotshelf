@@ -184,7 +184,10 @@ pub fn prune<R: Runtime>(app: &AppHandle<R>) {
         return;
     }
 
-    // Oldest first, so the ones dropped are the ones least recently handed out.
+    // Oldest *created* first. Not true LRU: a cache hit returns before this
+    // directory is touched, so a capture dragged daily still ages out on the
+    // timestamp it was written with. Acceptable for a cache whose miss costs a
+    // re-encode, and stated rather than implied.
     folders.sort_unstable_by_key(|(modified, _)| *modified);
     for (_, path) in folders.iter().take(folders.len() - CACHE_LIMIT) {
         let _ = std::fs::remove_dir_all(path);

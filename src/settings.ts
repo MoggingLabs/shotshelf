@@ -58,11 +58,45 @@ export function currentSettings(): Settings {
   return current;
 }
 
+/**
+ * Whether the stored settings were ever read.
+ *
+ * Load-bearing, because everything that *writes* settings replaces the whole
+ * list it is given. The webview starts running while Rust's `setup` hook is
+ * still going — Tauri builds config windows before it — so `get_settings` can
+ * land before the store is managed and come back an error. When it did, this
+ * module kept `DEFAULTS`, which has `pinned: []`, `restorePinned` never ran,
+ * and the shelf showed no pins. Pinning anything then sent a one-element list
+ * to `set_pinned`, which replaced the file. Every previous pin was gone, and
+ * the only thing the user had seen was "running on defaults".
+ */
+let loaded = false;
+
+/** How many times to re-ask before giving up. The race is milliseconds wide. */
+const LOAD_ATTEMPTS = 5;
+const LOAD_RETRY_MS = 120;
+
+async function readStored(): Promise<Settings> {
+  let last: unknown;
+  for (let attempt = 0; attempt < LOAD_ATTEMPTS; attempt += 1) {
+    try {
+      return await invoke<Settings>("get_settings");
+    } catch (error) {
+      // Almost always "state not managed" — start-up has not reached
+      // `app.manage` yet. Worth re-asking rather than losing the user's pins.
+      last = error;
+      await new Promise((resume) => setTimeout(resume, LOAD_RETRY_MS));
+    }
+  }
+  throw last instanceof Error ? last : new Error(String(last));
+}
+
 export async function initSettings(
   onChange: (settings: Settings) => void,
 ): Promise<Settings> {
   announce = onChange;
-  current = await invoke<Settings>("get_settings");
+  current = await readStored();
+  loaded = true;
 
   el<HTMLButtonElement>("#shelf-settings").addEventListener("click", toggle);
 
@@ -86,6 +120,16 @@ export function settingsOpen(): boolean {
 
 /** Pins are edited from the tiles, not from this panel. */
 export async function persistPinned(pinned: PinnedItem[]): Promise<void> {
+  // Refuses to write a list built on defaults.
+  //
+  // `set_pinned` replaces the stored list outright, so writing while the real
+  // one was never read destroys it. Better to lose this session's pin than
+  // every pin the user has.
+  if (!loaded) {
+    console.error("[shotshelf] not saving pins: settings were never loaded");
+    return;
+  }
+
   current = { ...current, pinned };
   try {
     await invoke("set_pinned", { pinned });
@@ -93,6 +137,7 @@ export async function persistPinned(pinned: PinnedItem[]): Promise<void> {
     console.error("[shotshelf] could not save pinned captures", error);
   }
 }
+
 
 function toggle(): void {
   const open = panel().hasAttribute("hidden");
@@ -110,6 +155,14 @@ function bind<T extends HTMLElement & { value: string }>(
 }
 
 async function save(patch: Partial<Settings>): Promise<void> {
+  // Same rule as `persistPinned`: this sends the whole settings object,
+  // `pinned` included, so writing it before the stored one was read would
+  // replace the user's pins with an empty list.
+  if (!loaded) {
+    note().textContent = "Settings could not be loaded, so they cannot be saved.";
+    return;
+  }
+
   try {
     // The Rust side returns what it actually stored, so any clamping — or a
     // rejected shortcut — is reflected rather than assumed.

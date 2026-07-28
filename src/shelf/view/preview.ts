@@ -15,41 +15,24 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import { browseShelf, previewShelf } from "../bridge.ts";
+import { OverlayTicket } from "../overlay-ticket.ts";
 import type { ShelfItem } from "../types.ts";
 
 /** The preview currently on screen, if any. */
 let open: { id: string; node: HTMLElement } | undefined;
 /**
- * Set while one is being opened.
+ * Opening, superseding and abandoning, shared with the editor.
  *
- * `open` is undefined for the whole span between measuring the picture and
- * mounting it, so it cannot answer "is one opening?" — and holding Space put a
- * keydown in every one of those spans, stacking a preview per press.
+ * This module used to keep its own copy of these three flags and the rules
+ * around them. The copies drifted: the editor learned to clear `opening` when
+ * a close cancels an open in flight, and this one did not — so a capture that
+ * never decoded wedged the shelf for the session.
  */
-let opening = false;
-/**
- * Set when something closes the quick look while an open is still in flight.
- *
- * `open` is only set at the very end, so a close arriving before that bailed
- * on `!open` and did nothing at all — and the preview then appeared anyway,
- * after the keystroke meant to prevent it. `hidePreview` reports the cancel as
- * a close so the same keystroke does not also dismiss the popover behind it.
- */
-let openTicket = 0;
-/**
- * Why the in-flight open was invalidated.
- *
- * The ticket says *that* it was superseded; it does not say by what, and the
- * two cases need opposite endings. Backing out owes the browse window back.
- * The window being put away owes nothing — restoring there puts an
- * always-on-top window the user just dismissed back on screen, focused, which
- * is the exact thing `discard*` exists to avoid.
- */
-let abandoned = false;
+const lifetime = new OverlayTicket();
 
 /** Whether a quick look is on screen, or about to be. */
 export function previewIsOpen(): boolean {
-  return open !== undefined || opening;
+  return open !== undefined || lifetime.opening;
 }
 
 /** Which capture it is showing, so the shelf can tell when that one leaves. */
@@ -64,16 +47,14 @@ export function previewedId(): string | undefined {
  * preview of a video, and playing one is a media player, not a shelf.
  */
 export async function showPreview(item: ShelfItem, host: HTMLElement): Promise<void> {
-  if (item.kind === "video" || opening) return;
+  if (item.kind === "video" || lifetime.opening) return;
   teardown();
 
-  opening = true;
-  abandoned = false;
-  const ticket = ++openTicket;
+  const ticket = lifetime.begin();
   try {
     await mount(ticket, item, host);
   } finally {
-    opening = false;
+    lifetime.finish();
   }
 }
 
@@ -84,13 +65,13 @@ async function mount(ticket: number, item: ShelfItem, host: HTMLElement): Promis
   const picture = new Image();
   picture.src = convertFileSrc(item.path);
   const aspect = await naturalAspect(picture);
-  if (ticket !== openTicket) return;
+  if (lifetime.stale(ticket)) return;
 
   await previewShelf(aspect);
   // Cancelled while Rust was resizing: the window has already grown, so the
   // close that cancelled this still owes the restore it could not do.
-  if (ticket !== openTicket) {
-    if (!abandoned) void browseShelf();
+  if (lifetime.stale(ticket)) {
+    if (!lifetime.abandoned) void browseShelf();
     return;
   }
 
@@ -115,9 +96,7 @@ async function mount(ticket: number, item: ShelfItem, host: HTMLElement): Promis
  * to dismissing the popover behind it.
  */
 export function hidePreview(): boolean {
-  const pending = opening;
-  openTicket += 1;
-  abandoned = false;
+  const pending = lifetime.close();
   if (!open) return pending;
 
   teardown();
@@ -134,8 +113,7 @@ export function hidePreview(): boolean {
  * full-size screenshot painted over it.
  */
 export function discardPreview(): void {
-  openTicket += 1;
-  abandoned = true;
+  lifetime.discard();
   teardown();
 }
 
@@ -157,11 +135,25 @@ function naturalAspect(picture: HTMLImageElement): Promise<number> {
   }
 
   return new Promise((resolve) => {
+    // Neither `load` nor `error` is guaranteed to fire — a file on a
+    // disconnected share, or one still being written. Without a deadline the
+    // open never ends, `opening` stays true, and the shelf stops answering
+    // Space and Escape for the rest of the session. The editor's `load` has
+    // carried this for a round; this one did not.
+    const giveUp = window.setTimeout(() => resolve(16 / 9), MEASURE_TIMEOUT_MS);
+    const settle = (aspect: number): void => {
+      window.clearTimeout(giveUp);
+      resolve(aspect);
+    };
+
     picture.addEventListener(
       "load",
-      () => resolve(picture.naturalWidth / Math.max(picture.naturalHeight, 1)),
+      () => settle(picture.naturalWidth / Math.max(picture.naturalHeight, 1)),
       { once: true },
     );
-    picture.addEventListener("error", () => resolve(16 / 9), { once: true });
+    picture.addEventListener("error", () => settle(16 / 9), { once: true });
   });
 }
+
+/** How long to wait for a capture to report its shape before assuming one. */
+const MEASURE_TIMEOUT_MS = 15_000;

@@ -228,3 +228,28 @@ test("a card with no context falls back to the filename", async ({ page }) => {
 
   await expect(page.locator(".tile__label")).toHaveText("wide.png");
 });
+
+test("a pin is not saved when the stored settings could never be read", async ({ page }) => {
+  // Tauri builds the window before Rust's setup hook finishes, so
+  // `get_settings` can land before the store is managed. When it failed, the
+  // front-end kept its defaults — which have no pins — `restorePinned` never
+  // ran, and the first pin after that sent a one-element list to `set_pinned`,
+  // which replaces the stored list outright. Every previous pin, gone, with
+  // nothing said but "running on defaults".
+  await page.addInitScript(() => {
+    window.__shotshelfStubs__ = { get_settings: { __rejects__: "state not managed" } };
+  });
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+
+  await expect(page.locator("#shelf-alert")).toHaveText(/Settings could not be loaded/);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.locator(".tile__action").first().click();
+
+  // The pin is applied on screen; it is simply not written over the file we
+  // could not read.
+  await expect(page.locator(".tile--pinned")).toHaveCount(1);
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("set_pinned").length)).toBe(0);
+});

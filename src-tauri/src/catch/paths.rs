@@ -22,21 +22,43 @@ pub fn resolve_watch_dirs<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf])
         overrides.to_vec()
     };
 
+    settle(candidates)
+}
+
+/// Turn a candidate list into the folders actually watched.
+///
+/// Split from `resolve_watch_dirs` so the create-and-filter rule can be tested
+/// without an `AppHandle` — the rule is where the interesting decisions are,
+/// and it had no coverage while it was inlined above `defaults()`.
+fn settle(candidates: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut seen = HashSet::new();
     candidates
         .into_iter()
-        // Created if it is missing rather than filtered out.
+        // Created if it is missing — but only where the *parent* is already
+        // there, which is the whole of the rule.
         //
         // `Pictures\Screenshots` does not exist on a Windows machine until the
-        // first Win+PrtSc, so filtering on `is_dir()` meant a fresh install
-        // reported "no capture folders found", watched nothing, and stayed
-        // that way until it was restarted — the app's one job failing on first
-        // run for the most ordinary user there is. Creating an empty folder
-        // the OS is about to create anyway is the least surprising fix; if it
-        // cannot be created, the filter below still drops it.
+        // first Win+PrtSc, so filtering on `is_dir()` alone meant a fresh
+        // install reported "no capture folders found", watched nothing, and
+        // stayed that way until it was restarted — the app's one job failing
+        // on first run for the most ordinary user there is.
+        //
+        // The first attempt at that used `create_dir_all` on every candidate,
+        // and the candidate list is full of *guesses*: on a machine that has
+        // never used OneDrive it invented `%USERPROFILE%\OneDrive\Pictures\
+        // Screenshots`, parents and all, from an app whose pitch is that it
+        // does not touch your things — and `allow_reading_captures` then
+        // granted the asset scope over a directory Shotshelf had made up.
+        //
+        // Requiring the parent turns "create the leaf the OS is about to
+        // create anyway" into exactly that: `Pictures` exists, so
+        // `Pictures\Screenshots` is created; `OneDrive` does not, so nothing
+        // is. `create_dir` rather than `create_dir_all` for the same reason —
+        // it cannot build a tree.
         .inspect(|dir| {
-            if !dir.exists() {
-                let _ = std::fs::create_dir_all(dir);
+            let parent_is_there = dir.parent().is_some_and(Path::is_dir);
+            if parent_is_there && !dir.exists() {
+                let _ = std::fs::create_dir(dir);
             }
         })
         .filter(|dir| dir.is_dir())
@@ -144,4 +166,47 @@ fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
     }
 
     dirs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_capture_folder_is_created_only_beside_an_existing_parent() {
+        // The leaf the OS is about to create anyway: yes. A speculative tree
+        // on a machine that has never used OneDrive: no — an earlier version
+        // called `create_dir_all` on every candidate and invented exactly
+        // that, then granted the asset scope over it.
+        let root = std::env::temp_dir().join("shotshelf-watch-create-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("Pictures")).expect("a real parent");
+
+        let leaf = root.join("Pictures").join("Screenshots");
+        let invented = root.join("OneDrive").join("Pictures").join("Screenshots");
+
+        let watched = settle(vec![leaf.clone(), invented.clone()]);
+
+        assert!(
+            leaf.is_dir(),
+            "the leaf beside an existing parent is created"
+        );
+        assert!(!invented.exists(), "a speculative tree is left alone");
+        assert!(!root.join("OneDrive").exists(), "and so is its root");
+        assert_eq!(watched, vec![leaf]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_same_folder_named_twice_is_watched_once() {
+        let root = std::env::temp_dir().join("shotshelf-watch-dedupe-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("Pictures")).expect("a real dir");
+
+        let dir = root.join("Pictures");
+        assert_eq!(settle(vec![dir.clone(), dir.clone()]).len(), 1);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

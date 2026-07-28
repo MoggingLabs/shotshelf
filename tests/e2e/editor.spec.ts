@@ -72,6 +72,38 @@ async function overflow(page: import("@playwright/test").Page): Promise<{
   });
 }
 
+/**
+ * The canvas pixel under a rendered coordinate.
+ *
+ * The honest way to ask whether a mark is still there. Counting editors or
+ * save calls answers a different question — a *replaced* editor is still one
+ * editor — which is how two tests here passed with the fix they guarded
+ * reverted.
+ */
+async function inkAt(
+  page: import("@playwright/test").Page,
+  x: number,
+  y: number,
+): Promise<(number | undefined)[]> {
+  return page.evaluate(
+    ({ x, y }) => {
+      const canvas = document.querySelector<HTMLCanvasElement>(".editor__canvas");
+      const context = canvas?.getContext("2d");
+      if (!canvas || !context) throw new Error("no canvas");
+      const box = canvas.getBoundingClientRect();
+      // Rendered coordinates to backing-store pixels.
+      const data = context.getImageData(
+        Math.round((x / box.width) * canvas.width),
+        Math.round((y / box.height) * canvas.height),
+        1,
+        1,
+      ).data;
+      return [data[0], data[1], data[2], data[3]];
+    },
+    { x, y },
+  );
+}
+
 /** What the user's pointer would actually reach at the centre of `selector`. */
 async function hitTest(
   page: import("@playwright/test").Page,
@@ -246,32 +278,13 @@ test("undo takes back the last mark", async ({ page }) => {
   // Counting saves asserted only that *a* save happened — it passed with undo
   // doing nothing at all — and the round trip through `toBlob` made it flaky
   // under a loaded runner. This looks at the pixels the mark is made of.
-  const inkAt = async (x: number, y: number): Promise<(number | undefined)[]> =>
-    page.evaluate(
-      ({ x, y }) => {
-        const canvas = document.querySelector<HTMLCanvasElement>(".editor__canvas");
-        const context = canvas?.getContext("2d");
-        if (!canvas || !context) throw new Error("no canvas");
-        const box = canvas.getBoundingClientRect();
-        // Rendered coordinates to backing-store pixels.
-        const data = context.getImageData(
-          Math.round((x / box.width) * canvas.width),
-          Math.round((y / box.height) * canvas.height),
-          1,
-          1,
-        ).data;
-        return [data[0], data[1], data[2], data[3]];
-      },
-      { x, y },
-    );
-
-  const clean = await inkAt(25, 25);
+  const clean = await inkAt(page, 25, 25);
   await drag(page, [25, 25], [150, 90]);
-  const marked = await inkAt(25, 25);
+  const marked = await inkAt(page, 25, 25);
   expect(marked).not.toEqual(clean);
 
   await page.locator("#editor-undo").click();
-  const undone = await inkAt(25, 25);
+  const undone = await inkAt(page, 25, 25);
   expect(undone).toEqual(clean);
 });
 
@@ -442,6 +455,7 @@ test("a save that fails says so where the user can see it", async ({ page }) => 
   // the overlay that had just been stretched across the panel.
   await openEditor(page);
   await drag(page, [30, 25], [170, 95]);
+  const marked = await inkAt(page, 30, 25);
   await page.evaluate(() => window.__shotshelf__.reject("save_edit", "the disk is full"));
 
   await page.locator("#editor-save").click();
@@ -458,8 +472,11 @@ test("a save that fails says so where the user can see it", async ({ page }) => 
   // that is painted out of existence.
   await expect(alert).toBeVisible();
   expect(await hitTest(page, "#shelf-alert")).toBe(true);
-  // And the marks are still there to try again with.
+  // And the *marks* are still there to try again with, which is what the
+  // message promises. Asserting the frame count alone would pass with the
+  // session cleared out from under it.
   await expect(page.locator(".editor")).toHaveCount(1);
+  expect(await inkAt(page, 30, 25)).toEqual(marked);
 });
 
 test("the canvas fits the stage it is given, on both axes", async ({ page }) => {
@@ -645,9 +662,16 @@ test("the edit control is out of reach while the editor is open", async ({ page 
   // rather than replacing. Dispatched programmatically because Playwright
   // will not click a hidden element even with `force`, which is itself the
   // first lock working.
+  //
+  // Asserted on the *mark*, not on the editor count. An earlier version
+  // checked that one editor existed with Undo visible — which a replacement
+  // editor satisfies exactly, so it passed with the refuse-guard reverted.
+  // That guard is the half of the fix which does not depend on remembering to
+  // hide the button, and it was the half nothing checked.
+  const marked = await inkAt(page, 30, 25);
   await page.evaluate(() => document.querySelector<HTMLButtonElement>("#shelf-edit")?.click());
   await expect(page.locator(".editor")).toHaveCount(1);
-  await expect(page.locator("#editor-undo")).toBeVisible();
+  expect(await inkAt(page, 30, 25)).toEqual(marked);
 });
 
 test("a save still in flight cannot tear down a later editor", async ({ page }) => {

@@ -144,6 +144,17 @@ pub async fn describe_capture<R: Runtime>(
     // And no more than a few at a time. OCR is the slowest thing this app
     // does; a semaphore keeps a burst of tiles from becoming a burst of
     // engines, without making the shelf wait for any of them.
+    //
+    // The permit is held *here* rather than moved into the worker, and that is
+    // the whole point. Linux's tesseract has a deadline and a kill; the Windows
+    // and macOS recognisers are FFI calls into `RecognizeAsync().get()` and
+    // `performRequests`, which block with no cancellable API — there is no
+    // honest way to stop that thread. What there is a way to do is stop it
+    // taking the app with it: if the permit lives in the worker, two wedged
+    // captures exhaust the semaphore for good and credential scanning is
+    // silently dead for the session. Held out here, the permit is released the
+    // moment this returns, and the cost of a wedge is one leaked thread rather
+    // than a feature that never works again.
     let permit = scan_limit()
         .clone()
         .acquire_owned()
@@ -153,13 +164,20 @@ pub async fn describe_capture<R: Runtime>(
     let for_worker = source.clone();
     // A blocking worker rather than the async runtime that also serves the
     // shelf's other commands.
-    let findings = tauri::async_runtime::spawn_blocking(move || {
-        let findings = Findings::from(enrich::describe(&for_worker));
-        drop(permit);
-        findings
-    })
-    .await
-    .map_err(|err| err.to_string())?;
+    let worker =
+        tauri::async_runtime::spawn_blocking(move || Findings::from(enrich::describe(&for_worker)));
+
+    let findings = match tokio::time::timeout(SCAN_TIMEOUT, worker).await {
+        Ok(joined) => joined.map_err(|err| err.to_string())?,
+        Err(_) => {
+            drop(permit);
+            return Err(format!(
+                "reading {} took too long",
+                source.file_name().unwrap_or_default().to_string_lossy()
+            ));
+        }
+    };
+    drop(permit);
 
     if let Ok(mut cache) = scan_cache().lock() {
         // Bounded: a shelf that has seen thousands of captures in one session
@@ -175,6 +193,12 @@ pub async fn describe_capture<R: Runtime>(
 
 /// How many scans to remember before starting over.
 const SCAN_CACHE_LIMIT: usize = 500;
+
+/// How long one capture may be read for before the caller gives up on it.
+///
+/// Generous: OCR on a dense 4K screenshot is genuinely slow. It exists so a
+/// recogniser that never returns costs one tile rather than the feature.
+const SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// How many captures may be *sized* at once.
 ///

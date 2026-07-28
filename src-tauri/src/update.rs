@@ -12,9 +12,12 @@
 //! only check. Installing is the user's decision, taken by running the
 //! installer they choose to download.
 //!
-//! The payload is signed, and the signature is verified by the updater plugin
-//! against the public key in `tauri.conf.json` — that remains true and is what
-//! makes the *offer* trustworthy, but a valid signature is not consent.
+//! Releases are signed, and the plugin verifies that signature — but it does
+//! so inside `download`, which this never calls. Nothing is verified here
+//! because nothing is fetched here: the check reads a manifest and reports a
+//! version string. The signature matters to whoever installs the build, not to
+//! this file, and saying otherwise would claim a protection this code does not
+//! apply.
 
 use tauri::{AppHandle, Emitter, Runtime};
 use tauri_plugin_updater::UpdaterExt;

@@ -17,6 +17,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { browseShelf, previewShelf, saveEdit } from "../shelf/bridge.ts";
 import type { ShelfItem } from "../shelf/types.ts";
 import { paint, paintCropGuide } from "./draw.ts";
+import { OverlayTicket } from "../shelf/overlay-ticket.ts";
 import { EditSession, type Rect, type Tool } from "./session.ts";
 
 /**
@@ -56,40 +57,19 @@ interface Live {
 
 let live: Live | undefined;
 /**
- * Set the instant an open begins, cleared when it finishes.
+ * Opening, superseding and abandoning — the same rules the quick look uses.
  *
- * `live` cannot answer "is one opening?" — it is undefined for the whole
- * window between the first await and the last, and holding `e` down puts a
- * keydown in every one of those windows. Five presses produced five stacked
- * editors, only the last of which anything tracked.
+ * These were written out here and again in `view/preview.ts`, in identical
+ * code with identical comments, and then diverged: three fixes landed here
+ * and none reached the copy. `OverlayTicket` exists so the next fix cannot
+ * land in only one of them.
  */
-let opening = false;
-/**
- * Bumped by every open and every close, so an open in flight can tell whether
- * it is still the one being waited for.
- *
- * `opening` made `editorIsOpen()` true before there was anything to close, so
- * the close paths bailed on `!live` and the keystroke went nowhere — except on
- * Escape, where it fell through to dismissing the popover, and the editor then
- * mounted itself into a window that was no longer on screen. An open now
- * unwinds when it notices, and the close reports that it consumed the key.
- */
-let openTicket = 0;
-/**
- * Why the in-flight open was invalidated.
- *
- * The ticket says *that* it was superseded; it does not say by what, and the
- * two cases need opposite endings. Backing out owes the browse window back.
- * The window being put away owes nothing — restoring there puts an
- * always-on-top window the user just dismissed back on screen, focused, which
- * is the exact thing `discard*` exists to avoid.
- */
-let abandoned = false;
+const lifetime = new OverlayTicket();
 /** Guards the save the same way; a double click wrote two files. */
 let saving = false;
 
 export function editorIsOpen(): boolean {
-  return live !== undefined || opening;
+  return live !== undefined || lifetime.opening;
 }
 
 /** Open the editor on a capture. Recordings have nothing to annotate. */
@@ -106,15 +86,13 @@ export async function openEditor(
   // guard existed twice on the keyboard path and on neither click path. The
   // control is hidden while an overlay is up now; this is the half that does
   // not depend on remembering to hide it.
-  if (item.kind === "video" || opening || live) return;
+  if (item.kind === "video" || lifetime.opening || live) return;
 
-  opening = true;
-  abandoned = false;
-  const ticket = ++openTicket;
+  const ticket = lifetime.begin();
   try {
     await open(ticket, item, host, callbacks);
   } finally {
-    opening = false;
+    lifetime.finish();
   }
 }
 
@@ -125,7 +103,7 @@ async function open(
   callbacks: EditorHost,
 ): Promise<void> {
   const picture = await load(convertFileSrc(item.path));
-  if (ticket !== openTicket) return;
+  if (lifetime.stale(ticket)) return;
   if (!picture) {
     // The Edit control is offered for any single picked capture, including one
     // whose file has since gone — an emptied Recycle Bin, a cleared temp
@@ -139,8 +117,8 @@ async function open(
   // Cancelled while Rust was resizing. The window has grown by now, so the
   // close that cancelled this is still owed the restore it could not do
   // against an editor that did not exist yet.
-  if (ticket !== openTicket) {
-    if (!abandoned) void browseShelf();
+  if (lifetime.stale(ticket)) {
+    if (!lifetime.abandoned) void browseShelf();
     return;
   }
 
@@ -189,14 +167,7 @@ async function open(
  * mounted into a window that was no longer on screen.
  */
 export function closeEditor(): boolean {
-  const pending = opening;
-  openTicket += 1;
-  abandoned = false;
-  // Cleared here, not left to the open's `finally`. `editorIsOpen()` reports
-  // `opening`, and the keydown handler routes on it — so a cancelled open that
-  // stayed "opening" until its 15-second deadline left the whole shelf
-  // keyboard dead, with Escape itself swallowed by this function.
-  opening = false;
+  const pending = lifetime.close();
   if (!live) return pending;
 
   teardown();
@@ -214,9 +185,7 @@ export function closeEditor(): boolean {
  * peeked window never takes focus, so Escape could not reach it either.
  */
 export function discardEditor(): void {
-  openTicket += 1;
-  abandoned = true;
-  opening = false;
+  lifetime.discard();
   teardown();
 }
 
@@ -261,7 +230,7 @@ async function saveEditedCapture(callbacks: EditorHost): Promise<void> {
   // and opened a different capture tore that second editor down and took its
   // marks with it. The ticket exists to answer "is this still the operation
   // being waited for"; the save was the one async path not asking.
-  const ticket = openTicket;
+  const ticket = lifetime.current;
 
   saving = true;
   try {
@@ -281,7 +250,7 @@ async function saveEditedCapture(callbacks: EditorHost): Promise<void> {
     // The file is written either way — it is the user's work and it is on
     // disk. Only the editor this save started in is closed, and only if it is
     // still the one on screen.
-    if (ticket === openTicket) closeEditor();
+    if (!lifetime.stale(ticket)) closeEditor();
     callbacks.saved(path);
   } catch (error) {
     // The editor deliberately stays open: the marks are still there, and

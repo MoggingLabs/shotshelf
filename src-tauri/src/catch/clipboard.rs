@@ -149,8 +149,13 @@ pub(super) fn capture_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
         .map(|dir| dir.join("clipboard"))
 }
 
-/// Clipboard captures have no file of their own, so give them one. Phase 06
-/// adds the retention policy that cleans this folder up.
+/// Clipboard captures have no file of their own, so give them one.
+///
+/// Nothing prunes this folder, and that is deliberate rather than pending: a
+/// clipboard capture is an original with no copy anywhere else, so an
+/// automatic sweep here would be the only thing in the app that destroys a
+/// capture. It grows until the user clears it, and the usage guide says so
+/// plainly in the uninstall section.
 fn write_capture<R: Runtime>(app: &AppHandle<R>, bytes: &[u8]) -> Result<PathBuf, String> {
     let dir = capture_dir(app).ok_or("no app data directory")?;
     std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;

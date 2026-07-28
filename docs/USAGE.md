@@ -81,7 +81,7 @@ open the flyout to click it, or use the hotkey.
 | **macOS** | wherever `defaults read com.apple.screencapture location` points, otherwise `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
 | **Linux** | `~/Pictures/Screenshots` (GNOME, XDG portal) and `~/Pictures` (Spectacle, Flameshot), plus `~/Videos` and `~/Videos/Screencasts` | the clipboard watch applies here too |
 
-Folders that don't exist are skipped. The dot in the title strip turns green once it is watching, and its tooltip tells you how
+A capture folder that does not exist yet is created, but only where its parent already does — so `Pictures\Screenshots` appears on a machine that has never taken a screenshot, and nothing is invented inside a OneDrive folder you do not have. The dot in the title strip turns green once it is watching, and its tooltip tells you how
 many it's watching.
 
 Take a screenshot. Within about a second the shelf appears with a thumbnail of it.
@@ -236,8 +236,8 @@ previous one stays active.
 | | Windows | macOS | Linux |
 | :-- | :-- | :-- | :-- |
 | Settings | `%APPDATA%\com.mogginglabs.shotshelf\` | `~/Library/Application Support/com.mogginglabs.shotshelf/` | `~/.config/com.mogginglabs.shotshelf/` |
-| Clipboard captures | `%APPDATA%\com.mogginglabs.shotshelf\clipboard\` | `~/Library/Application Support/com.mogginglabs.shotshelf/clipboard/` | `~/.local/share/com.mogginglabs.shotshelf/clipboard/` |
-| Comparisons and edits | `%APPDATA%\com.mogginglabs.shotshelf\edits\` | `~/Library/Application Support/com.mogginglabs.shotshelf/edits/` | `~/.local/share/com.mogginglabs.shotshelf/edits/` |
+| Clipboard captures | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\clipboard\` | `~/Library/Application Support/com.mogginglabs.shotshelf/clipboard/` | `~/.local/share/com.mogginglabs.shotshelf/clipboard/` |
+| Comparisons and edits | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\edits\` | `~/Library/Application Support/com.mogginglabs.shotshelf/edits/` | `~/.local/share/com.mogginglabs.shotshelf/edits/` |
 | Video poster frames | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\posters\` | `~/Library/Caches/com.mogginglabs.shotshelf/posters/` | `~/.cache/com.mogginglabs.shotshelf/posters/` |
 | Smaller copies for sending | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\handoff\` | `~/Library/Caches/com.mogginglabs.shotshelf/handoff/` | `~/.cache/com.mogginglabs.shotshelf/handoff/` |
 
@@ -286,8 +286,9 @@ Then, if you want its leftovers gone too:
   Shotshelf is the only place they exist.** `edits` holds the annotated copies and comparisons you
   made. Neither is a cache and neither is pruned; drag out anything you still want first.
 
-Your screenshots and recordings in Pictures, Desktop and Videos are untouched by any of this —
-Shotshelf never wrote to those folders and does not delete from them on the way out.
+Your screenshots and recordings in Pictures, Desktop and Videos are untouched by any of this.
+Shotshelf never writes a *file* into a watched folder and never deletes from one; the only thing
+it creates there is an empty capture folder that was missing, and those are left behind.
 
 ---
 

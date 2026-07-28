@@ -120,7 +120,7 @@ pub async fn video_details<R: Runtime>(
     // shared staging name let the second ffmpeg truncate the file the first
     // had finished, whereupon the first's `rename` published a partial JPEG.
     // `handoff.rs` documents this exact race and solves it with a nonce; this
-    // module predates that pass and never received it.
+    // module predates that pass and did not receive it until now.
     static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let ticket = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let staged = dir.join(format!("{key:016x}.{ticket}.staging.jpg"));
@@ -212,7 +212,7 @@ async fn run_ffmpeg<R: Runtime>(
 
     // No more than a few at a time, and never forever.
     //
-    // OCR next door got both of these — a semaphore of 2 and a 20-second
+    // The scan path got both of these — a semaphore of 2 (in `share.rs`) and a
     // deadline — and this did not, though it spawns an external process per
     // tile and the shelf builds every tile at once. A malformed container that
     // wedges ffmpeg held a task for the life of the app.
