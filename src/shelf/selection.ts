@@ -16,10 +16,6 @@ export class Selection {
   /** Where a range selection counts from. */
   #anchor: string | undefined;
 
-  get size(): number {
-    return this.#picked.size;
-  }
-
   has(id: string): boolean {
     return this.#picked.has(id);
   }

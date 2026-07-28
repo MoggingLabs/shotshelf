@@ -99,7 +99,6 @@ export async function markSecrets(tile: HTMLElement, path: string): Promise<void
  * that claims to have been checked.
  */
 function markUnscanned(tile: HTMLElement): void {
-  tile.classList.add("tile--unscanned");
   const el = document.createElement("span");
   el.className = "tile__unscanned";
   el.title = "This capture could not be read, so it was not checked for credentials.";

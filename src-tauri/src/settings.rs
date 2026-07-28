@@ -169,12 +169,29 @@ fn strip_bom(raw: &str) -> &str {
     raw.strip_prefix('\u{feff}').unwrap_or(raw)
 }
 
+/// Written to a neighbour and renamed into place.
+///
+/// `fs::write` truncates and then writes, so a crash or a full disk between
+/// the two leaves a truncated file — which `load` correctly degrades to
+/// defaults, silently costing the user every pin. This is the one file whose
+/// loss is visible, and it was the only one in the crate written without
+/// staging: `handoff.rs` and `poster.rs` both stage-then-rename and both
+/// explain why.
 fn write(path: &PathBuf, settings: &Settings) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(settings)?;
-    std::fs::write(path, json)
+
+    let staged = path.with_extension("json.part");
+    std::fs::write(&staged, json)?;
+    // A rename is atomic, so the settings file is either the old one or the
+    // new one — never half of either.
+    if let Err(err) = std::fs::rename(&staged, path) {
+        let _ = std::fs::remove_file(&staged);
+        return Err(err);
+    }
+    Ok(())
 }
 
 /// Keep hand-edited files from producing a shelf that holds nothing or never
@@ -189,6 +206,14 @@ const MAX_PINNED: usize = 500;
 
 fn sanitise(mut settings: Settings) -> Settings {
     settings.max_items = settings.max_items.clamp(1, 200);
+    // The same check `set_pinned` applies, here rather than only there.
+    //
+    // `set_settings` routes through this function and the webview sends the
+    // whole settings object, `pinned` included — so putting the check in one
+    // of the two write paths left the other able to persist a relative path.
+    settings
+        .pinned
+        .retain(|item| crate::webview_path::absolute(&item.path).is_ok());
     settings.pinned.truncate(MAX_PINNED);
     settings.retention_hours = settings
         .retention_hours
