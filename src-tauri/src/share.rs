@@ -61,7 +61,7 @@ pub async fn prepare_drag<R: Runtime>(
     path: String,
     kind: CaptureKind,
 ) -> Result<DragSource, String> {
-    let source = existing_file(&path)?;
+    let source = existing_file(&app, &path)?;
 
     // The preview under the cursor is always the original: it is shown at
     // thumbnail size, so a sized copy would buy nothing and cost a re-encode
@@ -102,8 +102,11 @@ pub async fn prepare_drag<R: Runtime>(
 /// reason recordings are: it is optional detail that arrives when it arrives,
 /// and a capture is on the shelf and draggable long before this returns.
 #[tauri::command]
-pub async fn describe_capture(path: String) -> Result<Findings, String> {
-    let source = existing_file(&path)?;
+pub async fn describe_capture<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+) -> Result<Findings, String> {
+    let source = existing_file(&app, &path)?;
 
     // Keyed on which *version* of the file, not just which path.
     //
@@ -211,7 +214,7 @@ pub async fn copy_capture<R: Runtime>(
     path: String,
     kind: CaptureKind,
 ) -> Result<(), String> {
-    let source = existing_file(&path)?;
+    let source = existing_file(&app, &path)?;
 
     // Everything slow and everything fallible happens before the marker is
     // armed, and the marker is armed immediately before the write.

@@ -15,6 +15,8 @@
 
 use std::path::{Path, PathBuf};
 
+use tauri::{AppHandle, Manager, Runtime};
+
 /// Accept a webview-supplied path without requiring it to still exist.
 ///
 /// **Absolute** is the part that always matters: a relative path is resolved
@@ -38,17 +40,39 @@ pub fn absolute(path: &str) -> Result<PathBuf, String> {
     Ok(source)
 }
 
-/// Resolve a webview-supplied path to a file that is actually there.
+/// Resolve a webview-supplied path to a capture this app is allowed to read.
 ///
-/// For every caller that goes on to *read* the file. A tile can outlive its
-/// file, and handing the OS a missing path makes for a drag that silently does
-/// nothing — every caller here would rather report that than fail halfway
-/// through.
-pub fn existing_file(path: &str) -> Result<PathBuf, String> {
+/// For every caller that goes on to *read* the file. Three checks:
+///
+/// **Absolute**, as above.
+///
+/// **Present.** A tile can outlive its file, and handing the OS a missing path
+/// makes for a drag that silently does nothing — every caller here would
+/// rather report that than fail halfway through.
+///
+/// **In scope.** The asset protocol is scoped shut by default and opened only
+/// for the folders the catch engine watches, the clipboard directory, the
+/// edits directory and the poster cache — so the webview can *display* exactly
+/// those and nothing else. Rust had no such limit, which meant any file on the
+/// machine could be read and credential-scanned, put on the clipboard, or
+/// handed to the OS as a drag payload, by asking for it by name. It also
+/// persisted: `set_pinned` writes paths to `settings.json`, and they are
+/// restored and re-scanned at the next launch.
+///
+/// Reusing the asset scope rather than inventing a second list is the point.
+/// Every capture the shelf can act on is one it is already showing, so the two
+/// boundaries agreeing costs nothing and cannot drift apart — and this one
+/// fails closed.
+pub fn existing_file<R: Runtime>(app: &AppHandle<R>, path: &str) -> Result<PathBuf, String> {
     let source = absolute(path)?;
 
     if !source.is_file() {
         return Err(format!("{path} is no longer on disk"));
+    }
+    if !app.asset_protocol_scope().is_allowed(&source) {
+        return Err(format!(
+            "{path} is not somewhere Shotshelf reads captures from"
+        ));
     }
 
     Ok(source)
@@ -97,33 +121,24 @@ mod tests {
     fn a_relative_path_is_refused() {
         // Whatever the working directory is, it is not the front-end's to
         // choose. This is the check `edit.rs`'s copy had quietly lost.
-        let err = existing_file("Pictures/Screenshot.png").expect_err("relative");
+        let err = absolute("Pictures/Screenshot.png").expect_err("relative");
         assert!(err.contains("absolute"), "{err}");
+
+        // Traversal is refused by the same rule rather than by a separate one.
+        assert!(absolute("../../etc/passwd").is_err());
     }
 
     #[test]
-    fn a_path_that_is_not_there_is_refused() {
-        let absolute = std::env::temp_dir().join("shotshelf-does-not-exist-000.png");
-        let err = existing_file(&absolute.to_string_lossy()).expect_err("missing");
-        assert!(err.contains("no longer on disk"), "{err}");
+    fn an_absolute_path_is_taken_whether_or_not_it_still_exists() {
+        // `save_edit` needs exactly this: the name of a capture that may have
+        // been deleted while the editor was open. The pixels are already in
+        // hand, so refusing would discard the annotation to protect a file the
+        // function never opens.
+        let gone = std::env::temp_dir().join("shotshelf-does-not-exist-000.png");
+        assert!(absolute(&gone.to_string_lossy()).is_ok());
     }
 
-    #[test]
-    fn a_directory_is_not_a_file() {
-        // `is_file` rather than `exists`: every caller goes on to read bytes.
-        let dir = std::env::temp_dir();
-        let err = existing_file(&dir.to_string_lossy()).expect_err("a directory");
-        assert!(err.contains("no longer on disk"), "{err}");
-    }
-
-    #[test]
-    fn a_real_file_comes_back() {
-        let path = std::env::temp_dir().join("shotshelf-webview-path-test.png");
-        std::fs::write(&path, b"x").expect("write");
-
-        let resolved = existing_file(&path.to_string_lossy()).expect("a real file");
-        assert_eq!(resolved, path);
-
-        let _ = std::fs::remove_file(&path);
-    }
+    // `existing_file` additionally consults the asset-protocol scope, which
+    // only exists on a running app, so it is exercised by the front-end gate
+    // rather than here. The shape check above is the half that is pure.
 }

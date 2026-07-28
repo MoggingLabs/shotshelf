@@ -66,8 +66,8 @@ pub async fn compare_captures<R: Runtime>(
     before: String,
     after: String,
 ) -> Result<String, String> {
-    let before_path = existing_file(&before)?;
-    let after_path = existing_file(&after)?;
+    let before_path = existing_file(&app, &before)?;
+    let after_path = existing_file(&app, &after)?;
     let name_source = after_path.clone();
 
     let bytes = tauri::async_runtime::spawn_blocking(move || {

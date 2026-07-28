@@ -93,7 +93,7 @@ pub async fn video_details<R: Runtime>(
     // Both of this module's commands take a path from the webview and used
     // to go straight to `fs::metadata`, with none of the checking its
     // siblings in `share.rs` and `edit.rs` do.
-    let source = existing_file(&path)?;
+    let source = existing_file(&app, &path)?;
     let meta = std::fs::metadata(&source).map_err(|err| err.to_string())?;
     let bytes = meta.len();
 
@@ -149,7 +149,7 @@ pub async fn video_details<R: Runtime>(
 #[tauri::command]
 pub fn forget_video<R: Runtime>(app: AppHandle<R>, path: String) {
     let Ok(dir) = poster_dir(&app) else { return };
-    let Ok(source) = existing_file(&path) else {
+    let Ok(source) = existing_file(&app, &path) else {
         return;
     };
     let Ok(meta) = std::fs::metadata(&source) else {
