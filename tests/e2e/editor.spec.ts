@@ -119,19 +119,31 @@ test("a redaction destroys the pixels rather than drawing over them", async ({ p
   expect(shown).not.toBeNull();
 
   await page.locator("#editor-save").click();
-
-  const png = await page.evaluate(
-    () => window.__shotshelf__.callsTo("save_edit").at(-1)?.args["png"] as number[],
-  );
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("save_edit").length))
+    .toBeGreaterThan(0);
 
   // Decode what was actually saved and read the pixels back. An overlay drawn
   // on an intact image would be separable from what it covers; this asserts
   // the covered pixels are simply not in the file.
+  //
+  // Decoded *inside* the page, reading the recorded call there. The bytes are
+  // a whole PNG — tens of thousands of array elements — and shipping them out
+  // to the test process and back in as an argument arrived undecodable on
+  // every CI runner while working locally. They have no reason to cross the
+  // boundary: the assertion is about what is in the file, and the file is
+  // already in the page.
+  //
   // The sample point is derived from the canvas the drag actually happened on,
   // rather than from an assumed size — the window is sized by Rust, so the
   // canvas is whatever fits, and a hard-coded width samples the wrong pixel.
   const covered = await page.evaluate(
-    async ({ bytes, width, height }: { bytes: number[]; width: number; height: number }) => {
+    async ({ width, height }: { width: number; height: number }) => {
+      const bytes = window.__shotshelf__.callsTo("save_edit").at(-1)?.args["png"] as
+        | number[]
+        | undefined;
+      if (!bytes?.length) throw new Error("nothing was saved");
+
       const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
       const bitmap = await createImageBitmap(blob);
       const canvas = document.createElement("canvas");
@@ -152,7 +164,7 @@ test("a redaction destroys the pixels rather than drawing over them", async ({ p
       ).data;
       return [data[0], data[1], data[2], data[3]];
     },
-    { bytes: png, width: shown!.width, height: shown!.height },
+    { width: shown!.width, height: shown!.height },
   );
 
   // Opaque and near-black: the fill, not the fixture's blue gradient.
