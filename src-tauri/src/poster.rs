@@ -19,6 +19,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_shell::ShellExt;
 
+use crate::webview_path::existing_file;
+
 /// Seek before grabbing the frame — the opening frame of a screen recording is
 /// very often black, a fade-in, or a desktop mid-redraw.
 const SEEK_SECONDS: &str = "1";
@@ -88,7 +90,10 @@ pub async fn video_details<R: Runtime>(
     app: AppHandle<R>,
     path: String,
 ) -> Result<VideoDetails, String> {
-    let source = PathBuf::from(&path);
+    // Both of this module's commands take a path from the webview and used
+    // to go straight to `fs::metadata`, with none of the checking its
+    // siblings in `share.rs` and `edit.rs` do.
+    let source = existing_file(&path)?;
     let meta = std::fs::metadata(&source).map_err(|err| err.to_string())?;
     let bytes = meta.len();
 
@@ -134,7 +139,9 @@ pub async fn video_details<R: Runtime>(
 #[tauri::command]
 pub fn forget_video<R: Runtime>(app: AppHandle<R>, path: String) {
     let Ok(dir) = poster_dir(&app) else { return };
-    let source = PathBuf::from(&path);
+    let Ok(source) = existing_file(&path) else {
+        return;
+    };
     let Ok(meta) = std::fs::metadata(&source) else {
         return;
     };

@@ -14,19 +14,23 @@
 
 import { convertFileSrc } from "@tauri-apps/api/core";
 
-import { saveEdit } from "../shelf/bridge.ts";
+import { browseShelf, previewShelf, saveEdit } from "../shelf/bridge.ts";
 import type { ShelfItem } from "../shelf/types.ts";
 import { paint, paintCropGuide } from "./draw.ts";
 import { EditSession, type Rect, type Tool } from "./session.ts";
 
-/** What the editor needs from whatever opened it. */
+/**
+ * What the editor needs from the shelf that owns it.
+ *
+ * Only the two things the shelf genuinely owns: what is on it, and what the
+ * user is told. The window itself goes through `bridge.ts` like every other
+ * view module — this used to take `size` as an injected callback while
+ * importing `saveEdit` directly, which declared a seam and then stepped over
+ * it in the same file.
+ */
 export interface EditorHost {
-  /** Ask Rust to size the window to this capture. Returns the size given. */
-  size(aspect: number): Promise<[number, number]>;
   /** An edit was saved; it joins the shelf as a capture of its own. */
   saved(path: string): void;
-  /** The editor has closed. */
-  closed(): void;
   /**
    * Something went wrong and the user needs telling.
    *
@@ -43,8 +47,11 @@ interface Live {
   picture: HTMLImageElement;
   canvas: HTMLCanvasElement;
   frame: HTMLElement;
+  /** The box the canvas has to fit inside. Watched, because it changes. */
+  stage: HTMLElement;
   /** Image pixels per canvas pixel, for turning pointer positions into marks. */
   scale: number;
+  watch: ResizeObserver;
 }
 
 let live: Live | undefined;
@@ -57,6 +64,17 @@ let live: Live | undefined;
  * editors, only the last of which anything tracked.
  */
 let opening = false;
+/**
+ * Bumped by every open and every close, so an open in flight can tell whether
+ * it is still the one being waited for.
+ *
+ * `opening` made `editorIsOpen()` true before there was anything to close, so
+ * the close paths bailed on `!live` and the keystroke went nowhere — except on
+ * Escape, where it fell through to dismissing the popover, and the editor then
+ * mounted itself into a window that was no longer on screen. An open now
+ * unwinds when it notices, and the close reports that it consumed the key.
+ */
+let openTicket = 0;
 /** Guards the save the same way; a double click wrote two files. */
 let saving = false;
 
@@ -71,26 +89,44 @@ export async function openEditor(
   callbacks: EditorHost,
 ): Promise<void> {
   if (item.kind === "video" || opening) return;
-  closeEditor(host, () => callbacks.closed());
+  // Discarded rather than closed: this is replacing the editor, not going back
+  // to the browse view, so it must not hand the window back on the way.
+  discardEditor();
 
   opening = true;
+  const ticket = ++openTicket;
   try {
-    await open(item, host, callbacks);
+    await open(ticket, item, host, callbacks);
   } finally {
     opening = false;
   }
 }
 
 async function open(
+  ticket: number,
   item: ShelfItem,
   host: HTMLElement,
   callbacks: EditorHost,
 ): Promise<void> {
   const picture = await load(convertFileSrc(item.path));
-  if (!picture) return;
+  if (ticket !== openTicket) return;
+  if (!picture) {
+    // The Edit control is offered for any single picked capture, including one
+    // whose file has since gone — an emptied Recycle Bin, a cleared temp
+    // folder. Returning in silence left the button looking simply broken.
+    callbacks.failed("That capture could not be opened — its file is gone.");
+    return;
+  }
 
   const session = new EditSession(picture.naturalWidth, picture.naturalHeight);
-  const [width] = await callbacks.size(picture.naturalWidth / picture.naturalHeight);
+  await previewShelf(picture.naturalWidth / picture.naturalHeight);
+  // Cancelled while Rust was resizing. The window has grown by now, so the
+  // close that cancelled this is still owed the restore it could not do
+  // against an editor that did not exist yet.
+  if (ticket !== openTicket) {
+    void browseShelf();
+    return;
+  }
 
   const frame = document.createElement("div");
   frame.className = "editor";
@@ -102,39 +138,75 @@ async function open(
   const stage = document.createElement("div");
   stage.className = "editor__stage";
   stage.append(canvas);
-  frame.append(toolbar(session, host, callbacks), stage);
+  frame.append(toolbar(session, callbacks), stage);
   host.append(frame);
-  host.dataset["editing"] = "true";
 
-  live = { item, session, picture, canvas, frame, scale: 1 };
-  // Sized against what the stage actually offers, not what Rust reported: the
-  // toolbar has taken some of it, and on a narrow window the CSS cap is what
-  // decides in the end.
-  resize(Math.min(width, stage.clientWidth || width));
+  // Re-fit whenever the stage changes shape, rather than at the three moments
+  // we happened to think of. The window grows asynchronously — Rust has
+  // returned, but the webview has not necessarily laid out at the new size —
+  // and a crop or an undo changes the region inside a stage that has not
+  // moved at all. One observer covers all three, and replaces three different
+  // guesses at "how much room is there" that the call sites used to pass in.
+  const watch = new ResizeObserver(() => {
+    fit();
+    render();
+  });
+  watch.observe(stage);
+
+  live = { item, session, picture, canvas, frame, stage, scale: 1, watch };
+  fit();
   bindPointer();
   render();
 }
 
 /**
- * Close the editor.
+ * Close the editor because the user backed out or the save finished.
  *
- * Takes the one callback it actually uses rather than a whole `EditorHost`:
- * synthesising a host here meant two of its three fields existed only to
- * satisfy the type, which reads as a contract and is not one.
+ * Hands the window back as it goes: the editor grew it to show one capture
+ * large, so every deliberate close owes the restore. Nothing else did it —
+ * closing left an always-on-top window at 72% of the screen showing a 225px
+ * column of cards until the user hid it and opened it again.
+ *
+ * Returns whether it consumed the gesture. True while one is merely *opening*
+ * too: Escape during the load used to be swallowed by the `editorIsOpen` guard
+ * and then fall through to dismissing the popover, after which the editor
+ * mounted into a window that was no longer on screen.
  */
-export function closeEditor(host: HTMLElement, onClosed?: () => void): boolean {
-  if (!live) return false;
+export function closeEditor(): boolean {
+  const pending = opening;
+  openTicket += 1;
+  if (!live) return pending;
+
+  teardown();
+  void browseShelf();
+  return true;
+}
+
+/**
+ * Tear the editor down because the window itself is going away.
+ *
+ * Deliberately does *not* restore: that puts the window back on screen at
+ * browse size, which is the exact opposite of what the user just asked for.
+ * Without this the editor outlived the hide entirely, and the next capture
+ * popped a column with a stale canvas painted over it — untouchable, because a
+ * peeked window never takes focus, so Escape could not reach it either.
+ */
+export function discardEditor(): void {
+  openTicket += 1;
+  teardown();
+}
+
+function teardown(): void {
+  if (!live) return;
+  live.watch.disconnect();
   live.frame.remove();
   live = undefined;
-  delete host.dataset["editing"];
-  onClosed?.();
-  return true;
 }
 
 /** Undo the last mark. Returns false if there was nothing to undo. */
 export function undoEdit(): boolean {
   if (!live?.session.undo()) return false;
-  resize(live.canvas.clientWidth);
+  fit();
   render();
   return true;
 }
@@ -154,7 +226,7 @@ function setTool(tool: Tool): void {
  * screen: the visible canvas is scaled to the window, so saving it would save
  * a screenshot of the preview instead of an annotated capture.
  */
-async function saveEditedCapture(host: HTMLElement, callbacks: EditorHost): Promise<void> {
+async function saveEditedCapture(callbacks: EditorHost): Promise<void> {
   if (!live || saving) return;
   const { item, session, picture } = live;
 
@@ -173,7 +245,7 @@ async function saveEditedCapture(host: HTMLElement, callbacks: EditorHost): Prom
     if (!blob) throw new Error("the edit could not be encoded");
 
     const path = await saveEdit(item.path, new Uint8Array(await blob.arrayBuffer()));
-    closeEditor(host, () => callbacks.closed());
+    closeEditor();
     callbacks.saved(path);
   } catch (error) {
     // The editor deliberately stays open: the marks are still there, and
@@ -187,7 +259,7 @@ async function saveEditedCapture(host: HTMLElement, callbacks: EditorHost): Prom
 
 // ── Internals ────────────────────────────────────────────────────────────
 
-function toolbar(session: EditSession, host: HTMLElement, callbacks: EditorHost): HTMLElement {
+function toolbar(session: EditSession, callbacks: EditorHost): HTMLElement {
   const bar = document.createElement("div");
   bar.className = "editor__bar";
 
@@ -213,7 +285,7 @@ function toolbar(session: EditSession, host: HTMLElement, callbacks: EditorHost)
   bar.append(
     action("Undo", "editor-undo", () => void undoEdit()),
     action("Save", "editor-save", () => {
-      void saveEditedCapture(host, callbacks);
+      void saveEditedCapture(callbacks);
     }),
   );
   return bar;
@@ -229,15 +301,27 @@ function action(label: string, id: string, onClick: () => void): HTMLButtonEleme
   return button;
 }
 
-/** Size the canvas to the window and work out the image-to-canvas scale. */
-function resize(available: number): void {
+/**
+ * Size the canvas to the stage, fitting **both** axes.
+ *
+ * Width alone was not enough, and the stage does not scroll: a canvas taller
+ * than it simply has its bottom cut off. That happened to every wide capture
+ * the moment it opened, and far worse after a crop to a tall region, where the
+ * user could see under half of what they had just cropped to and had no way to
+ * draw on the rest.
+ */
+function fit(): void {
   if (!live) return;
   const region = live.session.exportRect();
-  const width = Math.max(available || region.width, 1);
-  const scale = width / region.width;
+  const box = live.stage.getBoundingClientRect();
+  // Before the first layout there is no box to fit into. The observer calls
+  // again the moment there is one.
+  const width = box.width || region.width;
+  const height = box.height || region.height;
 
-  live.canvas.width = Math.round(region.width * scale);
-  live.canvas.height = Math.round(region.height * scale);
+  const scale = Math.min(width / region.width, height / region.height);
+  live.canvas.width = Math.max(Math.round(region.width * scale), 1);
+  live.canvas.height = Math.max(Math.round(region.height * scale), 1);
   live.scale = scale;
 }
 
@@ -359,7 +443,7 @@ function commit(start: { x: number; y: number }, end: { x: number; y: number }):
 
   switch (live.session.tool) {
     case "crop":
-      if (live.session.setCrop(rect)) resize(live.canvas.clientWidth);
+      if (live.session.setCrop(rect)) fit();
       return;
     case "box":
     case "redact":

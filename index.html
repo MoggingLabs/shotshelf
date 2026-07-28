@@ -72,13 +72,23 @@
         <p class="settings__hint">Pinned captures ignore “Keep for” and come back after a restart.</p>
       </section>
 
-      <main class="shelf__items" id="shelf-items" data-empty="true"></main>
+      <!-- The list and the overlay share one box, and that box is what the
+           overlay is allowed to cover. Both halves of that are load-bearing.
 
-      <!-- The editor and quick look live here, not inside #shelf-items.
-           That element is rebuilt wholesale on every render, so a capture
+           The overlay is a *sibling* of #shelf-items rather than a child:
+           that element is rebuilt wholesale on every render, so a capture
            landing mid-annotation used to remove the editor from under the
-           user while the module still held a pointer to the detached node. -->
-      <div class="shelf__overlay" id="shelf-overlay"></div>
+           user while the module still held a pointer to the detached node.
+
+           And it is a sibling *inside this wrapper* rather than inside
+           .shelf: stretched across the whole panel it covered the title
+           strip — the only drag handle a frameless window has, plus Hide and
+           Settings — and painted over the alert strip that reports the
+           editor's own failed saves. -->
+      <div class="shelf__body">
+        <main class="shelf__items" id="shelf-items" data-empty="true"></main>
+        <div class="shelf__overlay" id="shelf-overlay"></div>
+      </div>
 
       <!-- Only appears when something actually needs saying. -->
       <p class="shelf__alert" id="shelf-alert" hidden></p>

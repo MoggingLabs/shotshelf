@@ -681,11 +681,18 @@ body {
 /* The picture area: whatever is left once the toolbar has taken its height.
    `min-height: 0` is load-bearing — without it a flex child refuses to shrink
    below its content and pushes the canvas out of the panel. */
+/* Flex rather than grid, so `max-height: 100%` on the canvas means something.
+   A grid item's percentage height resolves against its grid *area*, and with
+   no `grid-template-rows` that area is content-sized — so the cap resolved
+   against the canvas's own height and did nothing at all. A wide capture
+   overflowed a stage it was supposed to fit inside, and the bottom of every
+   one of them was clipped before the user had drawn a single mark. */
 .editor__stage {
   flex: 1;
   min-height: 0;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
 }
 
@@ -721,6 +728,19 @@ body {
    That list is rebuilt wholesale on every render, so anything living in it is
    removed the moment a capture lands — which used to take an in-progress
    annotation with it, silently. Empty and inert until something mounts. */
+/* The box the list and the overlay share, and the overlay's whole world.
+   It is what makes `inset: 0` below mean "the list area" rather than "the
+   window": stretched across the panel, the overlay covered the title strip —
+   the only drag handle a frameless window has — along with Hide and Settings,
+   and painted over the alert strip underneath it. */
+.shelf__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .shelf__overlay:empty {
   display: none;
 }
@@ -728,12 +748,11 @@ body {
 .shelf__overlay {
   position: absolute;
   inset: 0;
-  /* Above the list and the alert strip; the panel's radius still clips it. */
+  /* Above the list, and no further. The alert strip sits outside this box
+     deliberately: the message it carries is usually about whatever the overlay
+     is showing — a save that destroyed pixels and then failed — and an overlay
+     painted over it is how that goes quiet. The panel's own `overflow: hidden`
+     does the corner clipping. */
   z-index: 2;
-  border-radius: inherit;
   overflow: hidden;
-}
-
-.shelf {
-  position: relative;
 }

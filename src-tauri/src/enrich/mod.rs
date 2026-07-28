@@ -95,4 +95,56 @@ mod tests {
         assert!(enrichment.text.is_none());
         assert!(enrichment.secrets.is_empty());
     }
+
+    #[test]
+    fn a_capture_that_could_not_be_read_is_not_reported_as_read_and_clean() {
+        // The distinction the whole marker rests on. "No secrets found" and
+        // "could not look" are both an empty list, and the only thing telling
+        // them apart across the wire is this flag.
+        let findings = Findings::from(describe(std::path::Path::new("/nonexistent/capture.png")));
+        assert!(!findings.scanned, "an unreadable capture was not scanned");
+        assert!(findings.secrets.is_empty());
+    }
+
+    #[test]
+    fn text_that_was_read_is_reported_as_scanned_even_when_it_is_clean() {
+        // Empty text is a real answer — a screenshot of a blank editor — and
+        // it must not collapse into "could not look".
+        let findings = Findings::from(Enrichment {
+            text: Some(String::new()),
+            secrets: Vec::new(),
+        });
+        assert!(findings.scanned);
+        assert!(findings.secrets.is_empty());
+    }
+
+    #[test]
+    fn the_findings_that_cross_the_wire_carry_masked_previews_and_no_text() {
+        // `Enrichment` holds the capture's full text; `Findings` is what the
+        // webview gets. This pins that the conversion drops the text and keeps
+        // the masked previews — the split exists for exactly that reason, and
+        // nothing else asserts it.
+        let text = "export GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+        let enrichment = Enrichment {
+            text: Some(text.to_owned()),
+            secrets: secrets::scan(text),
+        };
+        assert!(
+            !enrichment.secrets.is_empty(),
+            "the fixture has to contain something worth finding",
+        );
+
+        let findings = Findings::from(enrichment);
+        assert!(findings.scanned);
+
+        let wire = serde_json::to_string(&findings).expect("Findings serialises");
+        assert!(
+            !wire.contains("ghp_abcdefghijklmnopqrstuvwxyz0123456789"),
+            "the secret's value reached the webview: {wire}",
+        );
+        assert!(
+            !wire.contains("\"text\""),
+            "recognised text reached the webview: {wire}"
+        );
+    }
 }

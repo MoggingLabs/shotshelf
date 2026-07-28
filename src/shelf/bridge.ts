@@ -1,11 +1,25 @@
 /**
  * Every call the shelf makes into Rust, in one place.
  *
- * Two reasons it is worth a module of its own. Command names and argument
- * shapes are a contract with the Rust side, and scattering them through the
- * view means a renamed command fails at runtime in whichever corner happens to
- * call it. And it gives the tests one seam to stand in front of: a browser has
- * no Tauri to talk to, so this is the module a harness replaces.
+ * One reason, and it is enough: command names and argument shapes are a
+ * contract with the Rust side, and scattering them through the view means a
+ * renamed command fails at runtime in whichever corner happens to call it.
+ * `scripts/check-commands.mjs` checks both directions of that contract, and
+ * having the call sites in one file is what makes its output readable.
+ *
+ * **Not a test seam.** This used to claim to be the module a harness replaces;
+ * it is not, and never was — `tests/harness/tauri-mock.ts` stubs
+ * `window.__TAURI_INTERNALS__` and says in its own header that it chose that
+ * over abstracting Tauri behind an interface the app would otherwise not need.
+ * Believing the seam was here is how a reader would conclude the tests exercise
+ * less of the app than they do.
+ *
+ * **Where the boundary runs.** This is the shelf's calls, not the app's:
+ * `main.ts`, `popover.ts` and `settings.ts` invoke directly, because they are
+ * outside the shelf. Within the shelf the rule is that view modules reach Rust
+ * through here, and call back to `Shelf` only for what the shelf owns — what
+ * is on it, and what the user is told. Copy was on both sides of that line
+ * for a while and grew two failure reports as a result.
  *
  * Calls that are advisory rather than load-bearing swallow their errors here —
  * the tray count failing to update is not worth breaking a render over — and
@@ -70,9 +84,10 @@ export function describeCapture(path: string): Promise<Findings> {
 /**
  * Whether this build can read text out of a capture at all.
  *
- * Asked once at start-up. Windows has an OS text recogniser; macOS and Linux
- * do not have one wired up yet, and a user there needs telling — otherwise
- * every capture looks exactly like one that was checked and came back clean.
+ * Asked once at start-up. Windows and macOS use the OS recogniser; Linux uses
+ * tesseract if the machine has it, and has none if it does not. A user with no
+ * recogniser needs telling — otherwise every capture looks exactly like one
+ * that was checked and came back clean.
  */
 export function textRecognitionAvailable(): Promise<boolean> {
   return invoke<boolean>("text_recognition_available");
@@ -91,21 +106,28 @@ export function compareCaptures(before: string, after: string): Promise<string> 
 /**
  * Grow the popover to show one capture at readable size.
  *
- * Rust chooses the size and reports it back: only it knows the work area, and
- * a preview that spills off the screen is not a preview.
+ * Rust chooses the size: only it knows the work area, and a preview that
+ * spills off the screen is not a preview. It reports nothing back — both
+ * callers fit their content to the box they actually get, because the webview
+ * has not necessarily laid out at the new size by the time this resolves.
  */
-export function previewShelf(aspect: number): Promise<[number, number]> {
-  return invoke<[number, number]>("preview_shelf", { aspect });
+export async function previewShelf(aspect: number): Promise<void> {
+  await invoke("preview_shelf", { aspect });
 }
 
 /**
- * Put the popover back to the browse view after a preview.
+ * Put the popover back to the browse shape.
  *
- * The same command that opens it deliberately: "show the browse view, focused"
- * is one behaviour, and a second command that did exactly that was two names
- * for one thing and two pieces of reachable surface.
+ * Owed by everything that grew the window — the quick look and the editor both
+ * ask for a bigger one, and both have to give it back. It was named for the
+ * preview when only the preview called it, and the editor then had no obvious
+ * thing to call and silently skipped the restore altogether.
+ *
+ * The same command that opens the shelf deliberately: "show the browse view,
+ * focused" is one behaviour, and a second command doing exactly that was two
+ * names for one thing and two pieces of reachable surface.
  */
-export async function closePreview(): Promise<void> {
+export async function browseShelf(): Promise<void> {
   await invoke("show_shelf", { focus: true });
 }
 

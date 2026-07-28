@@ -130,9 +130,15 @@ const PREVIEW_FRACTION: f64 = 0.72;
 /// fits, and centred rather than cornered: this one is meant to be looked at.
 /// The caller passes the capture's aspect because only the front-end, which
 /// has the image loaded, knows it.
-pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) -> (f64, f64) {
+///
+/// Reports nothing back. It used to return the size it chose, on the reasoning
+/// that the front-end needed it to lay the picture out — but neither caller
+/// ever read it, and both were right not to: the toolbar takes a share of the
+/// window, and the webview has not necessarily laid out at the new size by the
+/// time this returns. Both fit their content to the box they actually get.
+pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) {
     let Some(shelf) = app.get_webview_window(SHELF) else {
-        return BROWSE_SIZE;
+        return;
     };
 
     let (max_width, max_height) = match shelf.primary_monitor().or_else(|_| shelf.current_monitor())
@@ -145,8 +151,8 @@ pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) -> (f64, f64) {
                 f64::from(area.size.height) / scale * PREVIEW_FRACTION,
             )
         }
-        // No monitor to measure means no better answer than the browse size.
-        _ => return BROWSE_SIZE,
+        // Nothing to measure against, so nothing sensible to resize to.
+        _ => return,
     };
 
     // A sane aspect or nothing: a zero or negative one would divide by zero,
@@ -166,8 +172,6 @@ pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) -> (f64, f64) {
     let _ = shelf.center();
     let _ = shelf.show();
     let _ = shelf.set_focus();
-
-    (width, height)
 }
 
 pub fn hide<R: Runtime>(app: &AppHandle<R>) {
@@ -289,11 +293,10 @@ pub fn hide_shelf<R: Runtime>(app: AppHandle<R>) {
     hide(&app);
 }
 
-/// Grow the popover to show one capture large, and report the size chosen.
+/// Grow the popover to show one capture large.
 ///
-/// The front-end needs the size back so it can lay the picture out inside it;
-/// it cannot compute it alone, because only Rust knows the work area.
+/// Only Rust knows the work area, so only Rust can choose the size.
 #[tauri::command]
-pub fn preview_shelf<R: Runtime>(app: AppHandle<R>, aspect: f64) -> (f64, f64) {
-    preview(&app, aspect)
+pub fn preview_shelf<R: Runtime>(app: AppHandle<R>, aspect: f64) {
+    preview(&app, aspect);
 }

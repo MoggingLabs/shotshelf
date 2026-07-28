@@ -11,18 +11,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import { el } from "./dom.ts";
 import { icon } from "./icons.ts";
 import { Popover } from "./popover.ts";
 import { currentSettings, initSettings, settingsOpen } from "./settings.ts";
 import { textRecognitionAvailable } from "./shelf/bridge.ts";
 import { Shelf, type Capture } from "./shelf/index.ts";
 import { noteScanUnavailable, say, showWatchState } from "./status.ts";
-
-function el<T extends HTMLElement>(selector: string): T {
-  const node = document.querySelector<T>(selector);
-  if (!node) throw new Error(`Shotshelf: missing element ${selector}`);
-  return node;
-}
 
 // Windows rounds the window through DWM at a fixed 8px, so the panel's own
 // radius has to match it there — see `window::round_corners`. The user agent is
@@ -52,8 +47,6 @@ const shelf = new Shelf(
       compareButton.toggleAttribute("hidden", picked !== 2);
       editButton.toggleAttribute("hidden", picked !== 1);
     },
-    // The editor grew the window; putting it away returns to the browse view.
-    onEditorClosed: () => popover.adoptBrowse(),
     onProblem: (message) => say(message),
     limits: () => currentSettings(),
   },

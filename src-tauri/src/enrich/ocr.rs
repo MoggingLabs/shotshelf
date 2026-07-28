@@ -56,6 +56,40 @@ pub fn text_recognition_available() -> bool {
     platform::available()
 }
 
+/// The most of one capture this will hold in memory at a time.
+///
+/// Generous for what it is guarding — a 6K screenshot is a few megabytes — and
+/// the point is only that there *is* a ceiling. The recognisers below hand the
+/// whole file to the OS in a single allocation, and the path reaches them from
+/// the webview, so an unbounded read turns one stray path into an
+/// out-of-memory kill of the whole app.
+///
+/// Linux does not need this: tesseract is handed the path and reads the file
+/// itself, in its own process.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+const MAX_CAPTURE_BYTES: u64 = 96 * 1024 * 1024;
+
+/// Read a capture into memory, refusing one that is implausibly large.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn read_capture(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(path)?;
+    let size = file.metadata()?.len();
+    if size > MAX_CAPTURE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{size} bytes is past the ceiling for a single capture"),
+        ));
+    }
+
+    let mut bytes = Vec::new();
+    // Capped a second time on the read itself: the file can grow between the
+    // metadata call and here.
+    file.take(MAX_CAPTURE_BYTES).read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
 #[cfg(target_os = "windows")]
 mod platform {
     use std::path::Path;
@@ -88,7 +122,7 @@ mod platform {
         // Read through an in-memory stream rather than `StorageFile`, which
         // applies broker rules that do not apply to a desktop app reading a
         // file it was handed by the OS.
-        let bytes = std::fs::read(path).map_err(|err| {
+        let bytes = super::read_capture(path).map_err(|err| {
             windows::core::Error::new(windows::Win32::Foundation::E_FAIL, err.to_string())
         })?;
 
@@ -146,7 +180,7 @@ mod platform {
     /// nothing to gain from threading a completion handler through a module
     /// with one job.
     pub fn recognise(path: &Path) -> Option<String> {
-        let bytes = std::fs::read(path).ok()?;
+        let bytes = super::read_capture(path).ok()?;
 
         // Handed the file's bytes rather than a URL: the URL initialiser needs
         // ImageIO, and this way the same read serves any format Vision knows.
@@ -250,13 +284,37 @@ mod platform {
             .spawn()
             .ok()?;
 
+        // stdout is drained on its own thread for the whole wait, rather than
+        // read once the child has exited.
+        //
+        // A pipe holds on the order of 64 KiB. Polling `try_wait` without
+        // reading meant a capture with more text than that filled the buffer,
+        // tesseract blocked forever on the write, the child therefore never
+        // exited, and the timeout below killed it — so the densest
+        // screenshots, which are precisely the ones worth reading for a
+        // credential, reliably came back with nothing at all. The failure was
+        // invisible: "no text found" and "could not read the text" looked the
+        // same from here.
+        let mut out = child.stdout.take()?;
+        let reader = std::thread::spawn(move || {
+            use std::io::Read;
+            let mut buf = Vec::new();
+            // Bounded: this is another program's stdout, and it ends up in a
+            // scanner and later in a search index.
+            let _ = (&mut out).take(MAX_TEXT as u64).read_to_end(&mut buf);
+            // Anything past the ceiling is drained and thrown away rather than
+            // left in the pipe, for the same reason: a child blocked on a full
+            // pipe never exits, and this one is holding a worker.
+            let _ = std::io::copy(&mut out, &mut std::io::sink());
+            buf
+        });
+
         // A wedged child would otherwise hold a blocking worker for the life
         // of the process, and the shelf starts one of these per capture.
         let deadline = std::time::Instant::now() + TIMEOUT;
-        loop {
+        let finished = loop {
             match child.try_wait() {
-                Ok(Some(status)) if status.success() => break,
-                Ok(Some(_)) => return None,
+                Ok(Some(status)) => break status.success(),
                 Ok(None) if std::time::Instant::now() < deadline => {
                     std::thread::sleep(std::time::Duration::from_millis(25));
                 }
@@ -264,15 +322,19 @@ mod platform {
                 _ => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return None;
+                    break false;
                 }
             }
+        };
+
+        // Joined on every path, including the kill: closing the pipe ends the
+        // read, so this cannot outlive the child it is reading.
+        let bytes = reader.join().ok()?;
+        if !finished {
+            return None;
         }
 
-        let output = child.wait_with_output().ok()?;
-        // Bounded: this is another program's stdout, and it ends up in a
-        // scanner and later in a search index.
-        let text = String::from_utf8_lossy(&output.stdout);
+        let text = String::from_utf8_lossy(&bytes);
         Some(
             text.chars()
                 .take(MAX_TEXT)

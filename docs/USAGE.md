@@ -97,9 +97,6 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
 - **Remove** (the cross) — takes it off the shelf. **It never deletes the file.**
 - **Pick several** — click one, then ctrl-click (⌘-click) others, or shift-click for a range.
   Dragging any one of them carries them all, oldest first.
-- **Edit** (or press `e`) — mark a capture up before you send it. Five tools and only five:
-  crop, box, arrow, numbered marker and redact. Saving makes a new capture; the original is
-  untouched.
 - **Quick look** — press space to open the picked capture at readable size, and
   space or Esc to close it. A 225px card is enough to recognise a screenshot and
   not enough to read one, which is the whole reason this exists.
@@ -108,9 +105,11 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
   produces a new capture on the shelf; the one you marked up is untouched.
 - **Compare** — pick exactly two and a Compare button appears in the title strip. It puts them
   side by side with whatever changed outlined, as a single new capture you can drag out. The
-  first one you picked is the "before".
+  **older** capture is the "before", whichever order you picked them in — ctrl-clicking and
+  shift-selecting produce different pick orders, so pick order is not one rule but two.
 
-Those three appear on a tile when you hover it.
+Pin, remove and copy appear on a tile when you hover it; edit and compare live in the title
+strip, because they act on what you have picked rather than on the tile under the pointer.
 - **Show/hide** — the tray icon, its right-click menu, or the global hotkey
   (`Ctrl+Shift+S` on Windows, `⌘⇧S` on macOS by default).
 
@@ -240,11 +239,14 @@ previous one stays active.
 | Video poster frames | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\posters\` | `~/Library/Caches/com.mogginglabs.shotshelf/posters/` | `~/.cache/com.mogginglabs.shotshelf/posters/` |
 | Smaller copies for sending | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\handoff\` | `~/Library/Caches/com.mogginglabs.shotshelf/handoff/` | `~/.cache/com.mogginglabs.shotshelf/handoff/` |
 
-**Two of those hold picture data**, so they are worth knowing about if you care where copies of
-your screen end up. `edits` holds comparisons and marked-up copies you made — they are captures in
-their own right, which is why they are kept rather than cached. The 200 most recent are kept. `handoff` holds smaller copies made for sending,
-and only if you turned that setting on; it keeps the 60 most recent and is safe to delete at any
-time.
+**Four of those hold picture data**, so they are worth knowing about if you care where copies of
+your screen end up. `clipboard` holds captures caught off the clipboard, which have no file
+anywhere else — those are originals, not copies. `edits` holds comparisons and marked-up copies you
+made; they are captures in their own right, which is why they are kept rather than cached, and
+nothing prunes them — a cap that deleted oldest-first would silently delete pinned work, so
+clearing that folder is your call and not the app's. `posters` holds one frame per recording, and
+`handoff` holds smaller copies made for sending, and only if you turned that setting on; it keeps
+the 60 most recent. Both are caches and are safe to delete at any time.
 
 Deleting these folders costs you pins, thumbnails, and any comparisons you have not dragged out
 yet. Your captures live wherever the OS put them and Shotshelf never moves or deletes them.

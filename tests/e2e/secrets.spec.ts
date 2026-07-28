@@ -158,15 +158,32 @@ test("a failing credential probe is not reported as the catch engine failing", a
   // shelf announced "The catch engine is unavailable" while the catch engine
   // was perfectly fine. A failure attributed to the wrong subsystem is worse
   // than one reported nowhere, and only a screenshot golden caught it.
+  //
+  // Seeded before boot, not declared after it. `main.ts` fires both of these
+  // during module evaluation and the harness answers synchronously, so a
+  // `reject()` after `bootShelf` arrived after the probe had already been
+  // answered `true` from the harness defaults — the rejection never happened,
+  // and the assertion below held for the trivial reason that the alert strip
+  // ships hidden. That version passed with the probe deleted outright, and
+  // with the probe chained back into the watch-folder `.catch`, which is the
+  // exact regression it exists to guard.
   await page.addInitScript(() => {
-    window.__shotshelfStubs__ = { catch_watch_dirs: ["/pictures/Screenshots"] };
+    window.__shotshelfStubs__ = {
+      catch_watch_dirs: ["/pictures/Screenshots"],
+      text_recognition_available: { __rejects__: "no recogniser" },
+    };
   });
   await bootShelf(page);
-  await page.evaluate(() =>
-    window.__shotshelf__.reject("text_recognition_available", "no recogniser"),
-  );
-  await page.waitForTimeout(250);
 
+  // The probe really ran and really failed. Without this the rest is vacuous.
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__shotshelf__.callsTo("text_recognition_available").length),
+    )
+    .toBe(1);
+
+  // The catch engine is reported as working, because it is.
+  await expect(page.locator("#shelf-mark")).toHaveClass(/shelf__mark--live/);
   await expect(page.locator("#shelf-alert")).toBeHidden();
 });
 

@@ -113,12 +113,24 @@ test("the popover's corner radius matches what rounds the window", async ({ page
   await bootShelf(page);
 
   const radius = await page.locator(".shelf").evaluate((el) => getComputedStyle(el).borderRadius);
-  const os = await page.evaluate(() => document.documentElement.dataset["os"]);
+  // Which OS this is comes from the test process, not from the page.
+  //
+  // The page's answer is `data-os`, which `main.ts` sets by sniffing the user
+  // agent — and the radius is selected by that same attribute. Asking the page
+  // therefore compared the stylesheet against itself: if the sniff regressed,
+  // `data-os` went undefined, the expectation moved to "14px", the CSS
+  // override stopped matching, and the test passed while the window showed the
+  // exact wedge it exists to catch.
+  const onWindows = process.platform === "win32";
 
   // On Windows the window itself is rounded by DWM at a fixed 8px, and a panel
   // that disagrees leaves the acrylic backdrop showing as a wedge in each
   // corner — which is exactly what "the corners look square" turned out to be.
-  expect(radius).toBe(os === "windows" ? "8px" : "14px");
+  expect(radius).toBe(onWindows ? "8px" : "14px");
+
+  // And the sniff that selects it is asserted rather than assumed.
+  const flagged = await page.evaluate(() => document.documentElement.dataset["os"]);
+  expect(flagged).toBe(onWindows ? "windows" : undefined);
 });
 
 test("card controls stay out of the way until you hover", async ({ page }) => {
@@ -149,10 +161,24 @@ test("the empty state is centred, and stops being centred once a capture lands",
   await expect(page.locator("#shelf-items")).toHaveAttribute("data-empty", "false");
 });
 
-/** How many columns the card grid is laid out in. */
+/**
+ * How many columns the card grid is laid out in.
+ *
+ * Returns 0 when the element is not a grid at all, which is the case this has
+ * to be able to tell apart. `gridTemplateColumns` computes to the single token
+ * `"none"` on a non-grid, so splitting on whitespace and counting gave 1 —
+ * indistinguishable from one column, and green with `display: grid` deleted
+ * from the stylesheet outright.
+ */
 async function trackCount(page: import("@playwright/test").Page): Promise<number> {
   return page
     .locator(".group__grid")
     .first()
-    .evaluate((grid) => getComputedStyle(grid).gridTemplateColumns.split(/\s+/).length);
+    .evaluate((grid) => {
+      const style = getComputedStyle(grid);
+      if (!style.display.includes("grid")) return 0;
+      const tracks = style.gridTemplateColumns;
+      if (tracks === "none" || tracks === "") return 0;
+      return tracks.split(/\s+/).filter(Boolean).length;
+    });
 }

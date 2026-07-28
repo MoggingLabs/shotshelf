@@ -8,23 +8,55 @@
 
 import { bootShelf, expect, FIXTURE, land, openBrowse, test } from "../harness/app.ts";
 
-async function openEditor(page: import("@playwright/test").Page): Promise<void> {
+async function openEditor(
+  page: import("@playwright/test").Page,
+  file: string = FIXTURE.wide,
+): Promise<void> {
   await bootShelf(page);
   await page.evaluate(() => {
-    // A size that fits the test viewport. In the app Rust really does resize
-    // the window, so the canvas fits what it is given; a stub that claims a
-    // window wider than the browser leaves the canvas overflowing and every
-    // pointer coordinate landing somewhere other than where it looks.
-    window.__shotshelf__.respond("preview_shelf", [220, 124]);
+    // `preview_shelf` reports nothing back: in the app Rust really does resize
+    // the window, and the canvas is fitted to the stage it ends up with rather
+    // than to any number crossing IPC. In the browser the window cannot resize
+    // at all, which is exactly why the fit assertions below are written
+    // against the stage — they hold at whatever size the stage happens to be.
+    window.__shotshelf__.respond("preview_shelf", null);
     window.__shotshelf__.respond("save_edit", "/edits/wide (edited).png");
   });
-  await land(page, FIXTURE.wide);
+  await land(page, file);
   await openBrowse(page);
 
   await page.keyboard.press("ArrowDown");
   await expect(page.locator("#shelf-edit")).toBeVisible();
   await page.locator("#shelf-edit").click();
   await expect(page.locator(".editor__canvas")).toBeVisible();
+}
+
+/** How far the canvas spills out of the box it is supposed to fit inside. */
+async function overflow(
+  page: import("@playwright/test").Page,
+): Promise<{ vertical: number; horizontal: number }> {
+  return page.evaluate(() => {
+    const canvas = document.querySelector(".editor__canvas")?.getBoundingClientRect();
+    const stage = document.querySelector(".editor__stage")?.getBoundingClientRect();
+    if (!canvas || !stage) throw new Error("the editor is not on screen");
+    return {
+      vertical: canvas.height - stage.height,
+      horizontal: canvas.width - stage.width,
+    };
+  });
+}
+
+/** What the user's pointer would actually reach at the centre of `selector`. */
+async function hitTest(
+  page: import("@playwright/test").Page,
+  selector: string,
+): Promise<boolean> {
+  return page.evaluate((target) => {
+    const box = document.querySelector(target)?.getBoundingClientRect();
+    if (!box) throw new Error(`${target} is not on screen`);
+    const at = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return at?.closest(target) !== null && at !== null;
+  }, selector);
 }
 
 /**
@@ -71,10 +103,17 @@ test("the edit control appears for exactly one picked capture", async ({ page })
   await expect(page.locator("#shelf-edit")).toBeVisible();
 
   // There is no such thing as marking up two captures at once.
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.down("Shift");
-  await page.keyboard.press("ArrowUp");
-  await page.keyboard.up("Shift");
+  //
+  // Picked by ctrl-clicking rather than with Shift+Arrow: the arrows ignore
+  // the shift key and every move ends in a selection of exactly one, so the
+  // gesture this used to use could not reach two captures at all — and the
+  // half of the test that mattered had no assertion after it either way.
+  const cards = page.locator(".tile");
+  await cards.nth(0).click();
+  await cards.nth(1).click({ modifiers: ["ControlOrMeta"] });
+  await expect(page.locator("#shelf-edit")).toBeHidden();
+  // Two is the number that offers a comparison instead.
+  await expect(page.locator("#shelf-compare")).toBeVisible();
 });
 
 test("the editor offers exactly the five tools", async ({ page }) => {
@@ -254,8 +293,179 @@ test("holding space does not stack previews", async ({ page }) => {
 
   for (let press = 0; press < 5; press += 1) await page.keyboard.press(" ");
 
-  // An odd number of presses leaves it open; the point is that it is one.
-  expect(await page.locator(".preview").count()).toBeLessThanOrEqual(1);
+  // An odd number of presses leaves it open, so this is exactly one. It used
+  // to allow "one or fewer", which passes at zero — i.e. it would have passed
+  // with the quick look deleted outright, and it is the regression test for
+  // the guard that stops presses stacking.
+  await expect(page.locator(".preview")).toHaveCount(1);
+});
+
+test("closing the editor gives the window back", async ({ page }) => {
+  // The editor grows the window to show one capture large. Nothing put it
+  // back: after every annotation the always-on-top shelf sat centred at 72% of
+  // the screen showing a 225px column of cards until it was hidden and
+  // reopened. The quick look next door always restored it, which is what made
+  // the gap invisible — the behaviour existed, just not on this path.
+  await openEditor(page);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".editor")).toHaveCount(0);
+
+  const restored = await page.evaluate(() =>
+    window.__shotshelf__.callsTo("show_shelf").map((call) => call.args["focus"]),
+  );
+  expect(restored).toEqual([true]);
+});
+
+test("saving gives the window back too", async ({ page }) => {
+  await openEditor(page);
+  await drag(page, [30, 25], [170, 95]);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.locator("#editor-save").click();
+  await expect(page.locator(".editor")).toHaveCount(0);
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.__shotshelf__.callsTo("show_shelf").filter((call) => call.args["focus"] === true)
+            .length,
+      ),
+    )
+    .toBe(1);
+});
+
+test("hiding the shelf takes the editor with it", async ({ page }) => {
+  // The overlay was given a lifetime of its own so the list could rebuild
+  // underneath it, and then nothing ended that lifetime. An editor survived
+  // the hide, and the next capture popped a column with a stale canvas painted
+  // across it — untouchable, because a popped column never takes focus, so
+  // Escape could not reach the thing covering it either.
+  await openEditor(page);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.evaluate(() => window.__shotshelf__.emit("shelf://hidden", null));
+  await expect(page.locator(".editor")).toHaveCount(0);
+
+  // And it must not ask for the window back on the way out — the user just
+  // put it away.
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("show_shelf").length)).toBe(0);
+
+  // The next capture pops a column showing just that capture — and the card
+  // is actually reachable, which is the part that broke: a hit test at the
+  // centre of the card used to land on the stale `.editor__canvas` over it.
+  await land(page, FIXTURE.tall, { ts: 99 });
+  await expect(page.locator(".tile")).toHaveCount(1);
+  await expect(page.locator(".editor")).toHaveCount(0);
+  expect(await hitTest(page, ".tile")).toBe(true);
+});
+
+test("hiding the shelf takes the quick look with it", async ({ page }) => {
+  await bootShelf(page);
+  await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", null));
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press(" ");
+  await expect(page.locator(".preview")).toHaveCount(1);
+
+  await page.evaluate(() => window.__shotshelf__.emit("shelf://hidden", null));
+  await expect(page.locator(".preview")).toHaveCount(0);
+});
+
+test("the title strip stays usable while the editor is up", async ({ page }) => {
+  // The overlay is absolutely positioned, and it was stretched across the
+  // whole panel rather than across the list. On a frameless window that strip
+  // is the only drag handle there is, and Hide and Settings live in it — so
+  // opening the editor made the window unmovable and both buttons dead.
+  await openEditor(page);
+  await expect(page.locator(".editor")).toHaveCount(1);
+
+  expect(await hitTest(page, "#shelf-hide")).toBe(true);
+  expect(await hitTest(page, "#shelf-settings")).toBe(true);
+  expect(await hitTest(page, ".shelf__bar")).toBe(true);
+});
+
+test("a save that fails says so where the user can see it", async ({ page }) => {
+  // The editor's redact tool destroys pixels and the docs sell it as
+  // permanent, so a failed save is the one failure here that must never be
+  // quiet. The message was being written correctly and then painted over by
+  // the overlay that had just been stretched across the panel.
+  await openEditor(page);
+  await drag(page, [30, 25], [170, 95]);
+  await page.evaluate(() => window.__shotshelf__.reject("save_edit", "the disk is full"));
+
+  await page.locator("#editor-save").click();
+
+  const alert = page.locator("#shelf-alert");
+  await expect(alert).toBeVisible();
+  expect(await hitTest(page, "#shelf-alert")).toBe(true);
+  // And the marks are still there to try again with.
+  await expect(page.locator(".editor")).toHaveCount(1);
+});
+
+test("the canvas fits the stage it is given, on both axes", async ({ page }) => {
+  // `resize` fitted width only and leaned on a CSS `max-height: 100%` that
+  // could not apply — the stage was a content-sized grid row, so the
+  // percentage resolved against the canvas's own height and did nothing. The
+  // stage does not scroll, so the bottom of a tall capture was simply cut off,
+  // and after a crop to a tall region the user could see under half of what
+  // they had just cropped to.
+  await openEditor(page, FIXTURE.tall);
+
+  const opened = await overflow(page);
+  expect(opened.vertical).toBeLessThanOrEqual(1);
+  expect(opened.horizontal).toBeLessThanOrEqual(1);
+
+  // Crop to a tall sliver, which is the shape that was worst.
+  await page.locator('.editor__tool[data-tool="crop"]').click();
+  const box = await page.locator(".editor__canvas").boundingBox();
+  expect(box).not.toBeNull();
+  await drag(
+    page,
+    [box!.width * 0.3, box!.height * 0.05],
+    [box!.width * 0.5, box!.height * 0.95],
+  );
+
+  const cropped = await overflow(page);
+  expect(cropped.vertical).toBeLessThanOrEqual(1);
+  expect(cropped.horizontal).toBeLessThanOrEqual(1);
+});
+
+test("escape during a slow open cancels it instead of dismissing the shelf", async ({ page }) => {
+  // `editorIsOpen()` goes true the instant an open begins, but the close paths
+  // bailed on "nothing is live yet" — so Escape fell straight through to
+  // dismissing the popover, and the editor then mounted itself into a window
+  // that was no longer on screen.
+  await bootShelf(page);
+  await page.evaluate(() => window.__shotshelf__.hang("preview_shelf"));
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.keyboard.press("ArrowDown");
+
+  await page.keyboard.press("e");
+  await page.keyboard.press("Escape");
+
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+  await expect(page.locator(".editor")).toHaveCount(0);
+});
+
+test("a capture whose file has gone reports rather than doing nothing", async ({ page }) => {
+  // The Edit control is offered for any single picked capture, including one
+  // whose file has since been emptied out of the Recycle Bin. The open failed
+  // and returned in silence, so the button simply looked broken.
+  await bootShelf(page);
+  await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", null));
+  await land(page, FIXTURE.missing);
+  await openBrowse(page);
+  await page.keyboard.press("ArrowDown");
+
+  await page.locator("#shelf-edit").click();
+
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+  await expect(page.locator(".editor")).toHaveCount(0);
 });
 
 test("a double click on save writes one file", async ({ page }) => {

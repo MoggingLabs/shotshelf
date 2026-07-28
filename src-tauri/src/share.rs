@@ -20,6 +20,7 @@ use crate::{
     enrich::{self, Findings},
     handoff,
     settings::SettingsStore,
+    webview_path::existing_file,
 };
 
 /// Recordings have no thumbnail of their own until phase 05, so they drag
@@ -239,19 +240,6 @@ fn file_uri(path: &Path) -> String {
     {
         format!("file://{}", path.to_string_lossy())
     }
-}
-
-fn existing_file(path: &str) -> Result<PathBuf, String> {
-    let source = PathBuf::from(path);
-
-    if !source.is_absolute() {
-        return Err(format!("{path} is not an absolute path"));
-    }
-    if !source.is_file() {
-        return Err(format!("{path} is no longer on disk"));
-    }
-
-    Ok(source)
 }
 
 /// Written out once because the drag plugin takes a path to a preview image,

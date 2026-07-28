@@ -86,6 +86,12 @@ export class Popover {
   adoptHidden(): void {
     window.clearTimeout(this.#launchTimer);
     this.#opened = false;
+    // The editor and the quick look mount outside the list so the list can
+    // rebuild under them; that also means nothing else ends their lifetime.
+    // Left standing, they survived the hide and the next capture popped a
+    // column with a stale canvas painted across it — and a peeked window never
+    // takes focus, so Escape could not reach it to clear it either.
+    this.#shelf.discardOverlay();
     // A hidden window stops delivering pointer events, so a `pointerleave`
     // that would have released the hover hold never arrives. Left armed, the
     // column never ages again and the popover stops dismissing itself for the

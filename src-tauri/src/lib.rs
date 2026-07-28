@@ -1,12 +1,14 @@
 //! Shotshelf — the shelf that catches every capture.
 //!
-//! Phase 01 is the shell only: a frameless, always-on-top, taskbar-less window
-//! docked to a screen edge, plus a tray icon that toggles it. Every adopted
-//! plugin (see `prompts/RESEARCH.md`) is registered here so the later phases
-//! add code, not dependencies.
+//! This file is wiring: the commands the webview may call, the plugins the app
+//! is built on, and the order start-up happens in. Every rule lives in the
+//! module it belongs to.
 //!
-//! Local-only by construction: no network, telemetry or analytics plugin is
-//! registered, and none will be.
+//! Local-only, with one stated exception. No telemetry or analytics plugin is
+//! registered and none will be; the updater below is the single component that
+//! opens a socket, and all it asks is whether there is a newer build. Captures
+//! never leave the machine — this used to claim no network plugin was
+//! registered at all, forty-nine lines above the line registering one.
 
 mod catch;
 mod edit;
@@ -19,6 +21,7 @@ mod settings;
 mod share;
 mod tray;
 mod update;
+mod webview_path;
 mod window;
 
 use tauri::Manager;

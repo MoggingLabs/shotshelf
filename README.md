@@ -41,8 +41,9 @@ instead of fixing our filing habits.
 - **Drags out** — grab an item off the shelf and drop it straight into an email, editor, or chat. No
   Finder/Explorer spelunking, no 4-second window. Pick several and they go together, in order.
 - **Reads them locally** — recognises the text in a screenshot on your machine, and warns you on
-  the card if it looks like you are about to send a credential. Windows only for now; where it is
-  unavailable the shelf says so rather than letting an unchecked capture look checked.
+  the card if it looks like you are about to send a credential. Windows and macOS use the
+  recogniser built into the OS; Linux uses tesseract if the machine has it. Where none is
+  available the shelf says so rather than letting an unchecked capture look checked.
 - **Compares two** — pick a before and an after and get one image with what changed outlined,
   which is the unit that actually carries meaning when you are iterating with a model.
 
@@ -101,7 +102,7 @@ the only ways in. Building the Rust side on its own
 src/            frontend — vanilla TS + Vite, deliberately dependency-light
 src-tauri/      Rust — window docking, tray icon, plugin registration
   catch/        the catch engine: folder watchers + clipboard watch
-  capabilities/ Tauri v2 permissions (clipboard, drag, a few window calls — no filesystem, no network)
+  capabilities/ Tauri v2 permissions for the webview (drag + window dragging — no clipboard, no filesystem, no network)
 app-icon.png    icon source; regenerate the set with `npm run tauri icon app-icon.png`
 .github/        CI — lints, tests and builds on Windows, macOS and Linux
 ```
@@ -314,7 +315,7 @@ already-installed apps.
 - [x] **v0.2** native drag-out (the crux) via `tauri-plugin-drag`, with a clipboard-copy fallback
 - [ ] **v0.3** screen recordings (ffmpeg thumbs), settings/persistence, cross-platform parity, packaging
   - [x] recordings — bundled ffmpeg poster frames, duration + size on the tile
-  - [x] settings + persistence — edge/monitor, retention, pinning, global hotkey
+  - [x] settings + persistence — retention, item cap, pinning, export sizing, global hotkey
   - [ ] cross-platform parity pass
   - [x] packaging — signed installers, bundled ffmpeg, internal updater, [USAGE](./docs/USAGE.md)
 

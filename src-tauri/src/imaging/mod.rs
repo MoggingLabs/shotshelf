@@ -76,10 +76,19 @@ pub fn load(path: &Path) -> Result<DynamicImage, ImageError> {
     // Bounded, because the path comes from the webview.
     //
     // A PNG's header can promise far more pixels than its bytes, and decoding
-    // is where that promise is honoured — so an unbounded decoder turns a
-    // small file into an allocation the size of whatever it claimed. This
-    // branch already put a ceiling on bytes arriving over IPC; the paths that
-    // *read* a webview-chosen file needed the same thought.
+    // is where that promise is honoured — so a small file becomes an
+    // allocation the size of whatever it claimed.
+    //
+    // The dimension caps are the new part, and the ones that matter here:
+    // `ImageReader::open` already installs `Limits::default()`, so this path
+    // was never the unbounded decoder it looked like — but the default caps
+    // *bytes* and nothing else, and 512 MiB of allocation is a great many
+    // pixels to hand a resize. The byte ceiling below is stated rather than
+    // inherited, and deliberately equals the default: an earlier version set
+    // it to 1 GiB, which quietly doubled the protection it was overriding.
+    //
+    // `compare_captures` decodes two of these in one blocking task, so the
+    // real ceiling for that command is twice this number.
     //
     // The dimension cap is generous: an 8K display is 7680 wide, and a
     // stitched or multi-monitor capture is legitimately larger still.
@@ -94,8 +103,9 @@ pub fn load(path: &Path) -> Result<DynamicImage, ImageError> {
         .map_err(|err| ImageError::Decode(err.to_string()))
 }
 
-/// The most a single decode may allocate.
-const MAX_DECODE_BYTES: u64 = 1024 * 1024 * 1024;
+/// The most a single decode may allocate. Matches the `image` crate's own
+/// default, stated here so overriding the other limits cannot silently raise it.
+const MAX_DECODE_BYTES: u64 = 512 * 1024 * 1024;
 /// The longest edge a capture may claim.
 const MAX_DECODE_EDGE: u32 = 32_768;
 

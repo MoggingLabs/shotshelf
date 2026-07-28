@@ -100,10 +100,16 @@ if (staleExceptions.length > 0) {
  * and that is precisely this direction. The harness hard-codes stub names, so
  * an e2e suite stays green against commands that no longer exist.
  *
+ * The type parameter is optional in the pattern, and that is the whole point.
+ * Requiring it — `invoke<T>(` — silently skipped every call whose result is
+ * discarded, which is most of the ones that only ever fail: `hide_shelf`,
+ * `set_pinned`, `show_shelf`. Six of sixteen call sites were invisible to the
+ * check that exists to catch a renamed command.
+ *
  * Plugin commands are namespaced (`plugin:drag|start_drag`) and are not ours
  * to check.
  */
-const invoked = [...source.matchAll(/invoke<[^>]*>?\(\s*"([^"]+)"/g)]
+const invoked = [...source.matchAll(/\binvoke\s*(?:<[^>]*>)?\s*\(\s*"([^"]+)"/g)]
   .map((match) => match[1])
   .filter((name) => name !== undefined && !name.includes(":"));
 

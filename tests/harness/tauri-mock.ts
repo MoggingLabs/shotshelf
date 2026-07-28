@@ -83,6 +83,16 @@ declare global {
      * Command responses seeded before the app boots, for the ones it reads
      * during start-up. Declaring them afterwards is too late — the shelf has
      * already read its limits by the time a test could call `respond`.
+     *
+     * "Too late" means the test cannot fail, not that it is merely weaker: one
+     * of these guarded a regression that had actually shipped, and it passed
+     * with the code under test deleted. Anything the app invokes during module
+     * evaluation — the settings, the watch folders, the credential probe —
+     * belongs here rather than in a `respond()` after `bootShelf`.
+     *
+     * A value of `{ __rejects__: "why" }` makes the command reject instead of
+     * resolve, which is the whole reason a start-up failure is expressible at
+     * all from out here.
      */
     __shotshelfStubs__?: Record<string, unknown>;
   }
@@ -156,7 +166,18 @@ export function installTauriMock(): void {
       return new Promise(() => {});
     }
 
-    if (cmd in defaults) return Promise.resolve(defaults[cmd]);
+    if (cmd in defaults) {
+      const seeded = defaults[cmd];
+      // A seeded stub may ask to reject — see `__shotshelfStubs__`. Without
+      // this, a start-up command could only ever be made to *succeed* before
+      // the app ran, and a test wanting a start-up failure had to call
+      // `reject()` after `bootShelf`, by which time the call it meant to
+      // affect had already been answered from the defaults above.
+      if (typeof seeded === "object" && seeded !== null && "__rejects__" in seeded) {
+        return Promise.reject(new Error(String(seeded.__rejects__)));
+      }
+      return Promise.resolve(seeded);
+    }
 
     return Promise.reject(
       new Error(`[harness] no stub for "${cmd}" — declare one with respond() or reject()`),

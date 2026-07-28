@@ -87,3 +87,41 @@ test("a test naming a command does not count as calling it", () => {
   });
   assert.equal(result.ok, false, "a test is not the app");
 });
+
+// ── The other direction: invoked, but not registered ──────────────────────
+//
+// Added late and with a regex that required a type parameter, so it only saw
+// `invoke<T>(...)` and was blind to the seven call sites whose result is
+// discarded — `hide_shelf`, `set_pinned`, `show_shelf` among them. The gate
+// reported "16 registered commands, and 9 invocations" and nobody read it as
+// the admission it was. These are the cases that hole would have passed.
+
+test("a command invoked but never registered fails", () => {
+  const result = check({
+    "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
+    "src/app.ts": `invoke("wired_command", {});\ninvoke("never_existed", {});`,
+  });
+  assert.equal(result.ok, false, "a renamed command must fail the gate");
+  assert.match(result.output, /never_existed/);
+});
+
+test("an untyped invoke is seen in both directions", () => {
+  // The exact shape the regex used to skip: no type parameter, because the
+  // caller ignores the result. Every command that can only fail looks like
+  // this, which made the blind spot precisely the risky half.
+  const result = check({
+    "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
+    "src/app.ts": `void invoke("wired_command", {});\nawait invoke("gone_missing");`,
+  });
+  assert.equal(result.ok, false, "an untyped invoke of a missing command must fail");
+  assert.match(result.output, /gone_missing/);
+});
+
+test("a plugin command is not ours to check", () => {
+  // Namespaced commands belong to the plugin that registered them.
+  const result = check({
+    "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
+    "src/app.ts": `invoke("wired_command", {});\ninvoke("plugin:drag|start_drag", {});`,
+  });
+  assert.ok(result.ok, result.output);
+});

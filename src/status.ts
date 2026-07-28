@@ -6,14 +6,10 @@
  * chatters is a tray app people quit.
  */
 
-/** Elements are looked up lazily so this module can be imported by tests. */
-function el<T extends HTMLElement>(selector: string): T | null {
-  return document.querySelector<T>(selector);
-}
-
+import { maybeEl } from "./dom.ts";
 /** The alert strip stays hidden until there is something worth reading. */
 export function say(message: string): void {
-  const alert = el<HTMLElement>("#shelf-alert");
+  const alert = maybeEl<HTMLElement>("#shelf-alert");
   if (!alert) return;
   alert.textContent = message;
   alert.removeAttribute("hidden");
@@ -52,7 +48,7 @@ Captures are not checked for credentials on this platform.`;
 export function showWatchState(dirs: readonly string[]): void {
   console.info("[shotshelf] watching", dirs);
 
-  const mark = el<HTMLElement>("#shelf-mark");
+  const mark = maybeEl<HTMLElement>("#shelf-mark");
   if (mark) {
     mark.classList.add("shelf__mark--live");
     mark.title = describeWatch(dirs);

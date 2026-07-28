@@ -7,6 +7,8 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+
+import { el } from "./dom.ts";
 // The neutral types module, not the shelf itself: the shelf imports this file
 // for `persistPinned`, and pointing back at it would be a cycle.
 import type { CaptureKind } from "./shelf/types.ts";
@@ -48,12 +50,6 @@ const DEFAULTS: Settings = {
 
 let current: Settings = DEFAULTS;
 let announce: (settings: Settings) => void = () => {};
-
-function el<T extends HTMLElement>(selector: string): T {
-  const node = document.querySelector<T>(selector);
-  if (!node) throw new Error(`Shotshelf: missing element ${selector}`);
-  return node;
-}
 
 const panel = () => el<HTMLElement>("#settings-panel");
 const note = () => el<HTMLElement>("#settings-note");

@@ -113,7 +113,7 @@ export function buildTile(item: ShelfItem, callbacks: TileCallbacks): HTMLElemen
 
   tile.append(
     label(item),
-    actions(item.id, item.path, item.kind, name, item.pinned, callbacks),
+    actions(item.id, name, item.pinned, callbacks),
   );
 
   if (item.kind === "video") {

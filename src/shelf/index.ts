@@ -13,14 +13,15 @@
  * aged out leaked its frame forever.
  */
 
-import { persistPinned, type Settings } from "../settings.ts";
 import {
-  compareCaptures,
-  copyCapture,
-  forgetVideo,
-  previewShelf,
-  setCaptureCount,
-} from "./bridge.ts";
+  closeEditor,
+  discardEditor,
+  editorIsOpen,
+  openEditor,
+  undoEdit,
+} from "../editor/index.ts";
+import { persistPinned, type Settings } from "../settings.ts";
+import { compareCaptures, copyCapture, forgetVideo, setCaptureCount } from "./bridge.ts";
 import { ColumnQueue, type HoldReason } from "./column.ts";
 import { armDrag, beginDrag } from "./drag.ts";
 import { columnHeight } from "./geometry.ts";
@@ -28,8 +29,7 @@ import { Selection } from "./selection.ts";
 import { ShelfStore } from "./store.ts";
 import { type Capture, captureId, type ShelfItem } from "./types.ts";
 import { ShelfView } from "./view/index.ts";
-import { hidePreview, previewIsOpen, showPreview } from "./view/preview.ts";
-import { closeEditor, editorIsOpen, openEditor, undoEdit } from "../editor/index.ts";
+import { discardPreview, hidePreview, showPreview } from "./view/preview.ts";
 
 export type { Capture } from "./types.ts";
 
@@ -58,8 +58,6 @@ export interface ShelfOptions {
    * show itself without anything outside the shelf holding selection state.
    */
   onSelectionChange(picked: number): void;
-  /** The editor closed, so the window goes back to the browse view. */
-  onEditorClosed(): void;
   /**
    * Something the user needs telling about.
    *
@@ -85,7 +83,6 @@ export class Shelf {
   #comparing = false;
   /** An OS drag steals focus; the popover must not read that as a dismissal. */
   #dragging = false;
-  #timers: number[] = [];
 
   /**
    * Where the editor and quick look mount.
@@ -108,6 +105,7 @@ export class Shelf {
     this.#view = new ShelfView(list, count, {
       togglePin: (id) => this.#togglePin(id),
       remove: (id) => this.remove(id),
+      copy: (id) => this.copy(id),
       armDrag: (node, item, event) => this.#armDrag(node, item, event),
       pick: (id, event) => this.#pick(id, event),
     });
@@ -132,10 +130,10 @@ export class Shelf {
 
   start(): void {
     this.#refresh();
-    this.#timers.push(
-      window.setInterval(() => this.#sweep(), SWEEP_MS),
-      window.setInterval(() => this.#ageColumn(), COLUMN_TICK_MS),
-    );
+    // Never cleared: the shelf lives as long as the window does, and the
+    // handles were being collected into a field that nothing read.
+    window.setInterval(() => this.#sweep(), SWEEP_MS);
+    window.setInterval(() => this.#ageColumn(), COLUMN_TICK_MS);
   }
 
   // ── Captures arriving ──────────────────────────────────────────────────
@@ -361,17 +359,18 @@ export class Shelf {
    * intensities rather than two windows.
    */
   editPicked(): void {
-    this.closePreview();
+    // Torn down rather than closed: closing gives the window back to the
+    // browse shape, and the editor is about to ask for a large one — the user
+    // would watch it shrink and grow again for no reason.
+    discardPreview();
     const [item] = this.#pickedItems();
     if (!item) return;
 
     void openEditor(item, this.#overlay, {
-      size: (aspect) => previewShelf(aspect),
       saved: (path) => {
         // An edit is a capture in its own right, dated now.
         this.add({ path, kind: "image", ts: Date.now() });
       },
-      closed: () => this.#options.onEditorClosed(),
       failed: (message) => this.#options.onProblem(message),
     });
   }
@@ -380,9 +379,9 @@ export class Shelf {
     return editorIsOpen();
   }
 
-  /** Back out of the editor. Returns false if it was not open. */
+  /** Back out of the editor. Returns false if there was nothing to back out of. */
   closeEditor(): boolean {
-    return closeEditor(this.#overlay, () => this.#options.onEditorClosed());
+    return closeEditor();
   }
 
   /** Undo the last mark. Returns false if there was nothing to undo. */
@@ -392,9 +391,25 @@ export class Shelf {
 
   /** Close the preview. Returns false if there was nothing to close. */
   closePreview(): boolean {
-    if (!previewIsOpen()) return false;
-    hidePreview(this.#overlay);
-    return true;
+    return hidePreview();
+  }
+
+  /**
+   * Drop whatever is on the overlay because the window is going away.
+   *
+   * The overlay was given a lifetime of its own so the list could rebuild
+   * underneath it, and then nothing ever ended that lifetime: an editor or a
+   * quick look survived the shelf being hidden, and the next capture popped a
+   * column with a stale canvas painted across it. That column is never
+   * focused, so Escape could not reach the thing covering it either — one
+   * hide, and the app's core loop was blind for the rest of the session.
+   *
+   * Silent by design. The deliberate closes hand the window back to the browse
+   * shape; doing that here would re-show a window the user has just dismissed.
+   */
+  discardOverlay(): void {
+    discardEditor();
+    discardPreview();
   }
 
   /**
@@ -444,11 +459,31 @@ export class Shelf {
   copyPicked(): void {
     const [item] = this.#pickedItems();
     if (!item) return;
+    void this.copy(item.id).catch(() => {
+      // Already reported through `onProblem`; the keyboard has no button to
+      // flash, so there is nothing further to do here.
+    });
+  }
 
-    void copyCapture(item.path, item.kind).catch((error: unknown) => {
+  /**
+   * Put one capture on the clipboard.
+   *
+   * The single copy the shelf has. Both routes in — the tile's button and
+   * Enter — land here, so a failure is reported the same way whichever was
+   * used, which is what `onProblem` says and did not do. Rejects as well as
+   * reporting, so the button that was pressed can show it went wrong.
+   */
+  async copy(id: string): Promise<void> {
+    const item = this.#store.find(id);
+    if (!item) return;
+
+    try {
+      await copyCapture(item.path, item.kind);
+    } catch (error) {
       console.error("[shotshelf] could not copy that capture", error);
       this.#options.onProblem("That capture could not be copied.");
-    });
+      throw error;
+    }
   }
 
   /** Take the picked captures off the shelf. The files are untouched. */

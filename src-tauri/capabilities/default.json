@@ -1,17 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Baseline permissions for the Shotshelf shelf window. Every entry is local-device only — nothing here can reach the network. Clipboard read/monitor catch Win+Shift+S / cmd-ctrl-shift-4 captures (phase 02); clipboard write backs the copy fallback for drag-out (phase 04).",
+  "description": "What the shelf window itself may do. Capabilities gate the webview — the least-trusted process here — and nothing else: work done in Rust with an AppHandle is not covered by this file, so a permission listed for the benefit of Rust code grants reach to the webview and buys nothing. Every entry below has a caller in src/, and that is the whole rule.",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "core:window:allow-show",
-    "core:window:allow-hide",
-    "core:window:allow-set-focus",
     "core:window:allow-start-dragging",
-    "clipboard:read-all",
-    "clipboard:monitor-all",
-    "clipboard:write-all",
     "drag:default"
   ]
 }

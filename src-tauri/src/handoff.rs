@@ -127,6 +127,24 @@ fn cache_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
 /// disclosure bug rather than a stale cache. The poster cache already keys on
 /// path and mtime for exactly this reason.
 fn key(source: &Path) -> String {
+    // An unreadable timestamp is not a reason to fail; it only means this
+    // capture shares a key with its other versions, which is where we were.
+    let modified = std::fs::metadata(source)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok());
+
+    fingerprint(&source.to_string_lossy(), modified)
+}
+
+/// The key itself, with the filesystem factored out.
+///
+/// Split from `key` so the "a re-saved capture gets a new key" property can be
+/// stated with two timestamps rather than by writing a file, sleeping, and
+/// hoping the filesystem records a distinct mtime. That test passed on NTFS
+/// and APFS and was one coarse-granularity runner away from failing for a
+/// reason that had nothing to do with the code.
+fn fingerprint(path: &str, modified: Option<std::time::Duration>) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut eat = |bytes: &[u8]| {
         for byte in bytes {
@@ -135,14 +153,9 @@ fn key(source: &Path) -> String {
         }
     };
 
-    eat(source.to_string_lossy().as_bytes());
-
-    // An unreadable timestamp is not a reason to fail; it only means this
-    // capture shares a key with its other versions, which is where we were.
-    if let Ok(modified) = std::fs::metadata(source).and_then(|meta| meta.modified()) {
-        if let Ok(age) = modified.duration_since(std::time::UNIX_EPOCH) {
-            eat(&age.as_millis().to_le_bytes());
-        }
+    eat(path.as_bytes());
+    if let Some(age) = modified {
+        eat(&age.as_millis().to_le_bytes());
     }
 
     format!("{hash:016x}")
@@ -200,17 +213,25 @@ mod tests {
     fn a_replaced_capture_gets_a_new_key() {
         // A capture tool reusing a filename must not make the shelf hand over
         // the previous image's pixels under the new thumbnail.
-        let path = std::env::temp_dir().join("shotshelf-handoff-key-test.png");
-        std::fs::write(&path, b"first").expect("write");
-        let first = key(&path);
+        //
+        // Stated against `fingerprint` with two timestamps rather than by
+        // writing a file twice and sleeping: the property is "a different
+        // mtime is a different key", and going through the filesystem to say
+        // so made it depend on the runner's timestamp granularity instead.
+        let at = |ms| Some(std::time::Duration::from_millis(ms));
+        let first = fingerprint("/pictures/Screenshot.png", at(1_700_000_000_000));
+        let second = fingerprint("/pictures/Screenshot.png", at(1_700_000_000_020));
 
-        // Enough of a gap that the filesystem records a different mtime.
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        std::fs::write(&path, b"second").expect("rewrite");
-        let second = key(&path);
-
-        let _ = std::fs::remove_file(&path);
         assert_ne!(first, second, "same path, different contents, same key");
+    }
+
+    #[test]
+    fn a_capture_with_no_readable_timestamp_still_gets_a_key() {
+        // Degrades to sharing a key with its other versions, which is where
+        // the cache was before mtime was part of it — not to a panic.
+        let keyed = fingerprint("/pictures/Screenshot.png", None);
+        assert_eq!(keyed.len(), 16);
+        assert!(keyed.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]

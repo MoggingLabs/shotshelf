@@ -7,16 +7,26 @@
  */
 
 import { icon } from "../../icons.ts";
-import { copyCapture } from "../bridge.ts";
-import type { CaptureKind } from "../types.ts";
 
 /** How long the copy button confirms itself. */
 const COPIED_MS = 1100;
 
-/** What a tile needs the shelf to do on its behalf. */
+/**
+ * What a tile needs the shelf to do on its behalf.
+ *
+ * Everything a control does goes through here, including the copy — which
+ * used to call `copyCapture` from this file directly. That left the shelf with
+ * two copy implementations reporting failure two different ways: this one
+ * flashed the button red and logged, while the same copy from Enter raised the
+ * alert strip, for an interface the docs present as equivalent. `onProblem`
+ * even documents the opposite. The button still flashes, because immediate
+ * feedback on the control you pressed is a view concern — but there is one
+ * copy, and it fails one way.
+ */
 export interface TileHandlers {
   togglePin(id: string): void;
   remove(id: string): void;
+  copy(id: string): Promise<void>;
 }
 
 function pinLabel(pinned: boolean): string {
@@ -50,16 +60,15 @@ function pinButton(id: string, pinned: boolean, handlers: TileHandlers): HTMLBut
 }
 
 /** For the apps that take a paste but refuse a file drop. */
-function copyButton(path: string, kind: CaptureKind, name: string): HTMLButtonElement {
+function copyButton(id: string, name: string, handlers: TileHandlers): HTMLButtonElement {
   const button = action("copy", `Copy ${name} to the clipboard`);
 
   button.addEventListener("click", () => {
-    void copyCapture(path, kind)
+    // The shelf reports the failure; this only says which button it was.
+    void handlers
+      .copy(id)
       .then(() => flash(button, true))
-      .catch((error: unknown) => {
-        console.error("[shotshelf] could not copy that capture", error);
-        flash(button, false);
-      });
+      .catch(() => flash(button, false));
   });
 
   return button;
@@ -74,8 +83,6 @@ function removeButton(id: string, name: string, handlers: TileHandlers): HTMLBut
 
 export function actions(
   id: string,
-  path: string,
-  kind: CaptureKind,
   name: string,
   pinned: boolean,
   handlers: TileHandlers,
@@ -84,7 +91,7 @@ export function actions(
   wrap.className = "tile__actions";
   wrap.append(
     pinButton(id, pinned, handlers),
-    copyButton(path, kind, name),
+    copyButton(id, name, handlers),
     removeButton(id, name, handlers),
   );
   return wrap;

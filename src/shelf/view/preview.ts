@@ -14,7 +14,7 @@
 
 import { convertFileSrc } from "@tauri-apps/api/core";
 
-import { closePreview, previewShelf } from "../bridge.ts";
+import { browseShelf, previewShelf } from "../bridge.ts";
 import type { ShelfItem } from "../types.ts";
 
 /** The preview currently on screen, if any. */
@@ -27,10 +27,15 @@ let open: { id: string; node: HTMLElement } | undefined;
  * keydown in every one of those spans, stacking a preview per press.
  */
 let opening = false;
-
-export function previewIsOpen(): boolean {
-  return open !== undefined || opening;
-}
+/**
+ * Set when something closes the quick look while an open is still in flight.
+ *
+ * `open` is only set at the very end, so a close arriving before that bailed
+ * on `!open` and did nothing at all — and the preview then appeared anyway,
+ * after the keystroke meant to prevent it. `hidePreview` reports the cancel as
+ * a close so the same keystroke does not also dismiss the popover behind it.
+ */
+let openTicket = 0;
 
 /**
  * Show a capture at readable size.
@@ -40,26 +45,33 @@ export function previewIsOpen(): boolean {
  */
 export async function showPreview(item: ShelfItem, host: HTMLElement): Promise<void> {
   if (item.kind === "video" || opening) return;
-  closePreview_(host);
+  teardown();
 
   opening = true;
+  const ticket = ++openTicket;
   try {
-    await mount(item, host);
+    await mount(ticket, item, host);
   } finally {
     opening = false;
   }
 }
 
-async function mount(item: ShelfItem, host: HTMLElement): Promise<void> {
-
+async function mount(ticket: number, item: ShelfItem, host: HTMLElement): Promise<void> {
   // The picture is measured before the window is asked for, because the
   // window's shape should follow the capture's rather than the other way
   // round — a portrait screenshot in a landscape window is mostly background.
   const picture = new Image();
   picture.src = convertFileSrc(item.path);
   const aspect = await naturalAspect(picture);
+  if (ticket !== openTicket) return;
 
   await previewShelf(aspect);
+  // Cancelled while Rust was resizing: the window has already grown, so the
+  // close that cancelled this still owes the restore it could not do.
+  if (ticket !== openTicket) {
+    void browseShelf();
+    return;
+  }
 
   const frame = document.createElement("div");
   frame.className = "preview";
@@ -71,21 +83,42 @@ async function mount(item: ShelfItem, host: HTMLElement): Promise<void> {
   frame.append(picture);
 
   host.append(frame);
-  host.dataset["preview"] = "true";
   open = { id: item.id, node: frame };
 }
 
-/** Put the window back to the browse view. */
-export function hidePreview(host: HTMLElement): void {
-  if (!open) return;
-  closePreview_(host);
-  void closePreview();
+/**
+ * Close the quick look because the user backed out, and put the window back.
+ *
+ * Returns whether it consumed the gesture — true while one is merely opening
+ * too, so a keystroke that cancels a pending open does not also fall through
+ * to dismissing the popover behind it.
+ */
+export function hidePreview(): boolean {
+  const pending = opening;
+  openTicket += 1;
+  if (!open) return pending;
+
+  teardown();
+  void browseShelf();
+  return true;
 }
 
-function closePreview_(host: HTMLElement): void {
+/**
+ * Tear the quick look down because the window itself is going away.
+ *
+ * No restore, for the same reason the editor has no restore on this path:
+ * showing the window again is the opposite of what the user asked for. Without
+ * it the picture outlived the hide and the next capture popped a column with a
+ * full-size screenshot painted over it.
+ */
+export function discardPreview(): void {
+  openTicket += 1;
+  teardown();
+}
+
+function teardown(): void {
   open?.node.remove();
   open = undefined;
-  delete host.dataset["preview"];
 }
 
 /**

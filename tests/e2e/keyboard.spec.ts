@@ -135,10 +135,26 @@ test("delete takes it off the shelf without touching the file", async ({ page })
 
 test("the shelf keys do not fire while the settings panel is open", async ({ page }) => {
   await threeOpen(page);
+
+  // Something has to be picked for Delete to have anything to remove.
+  // Without this the test passed with the settings guard deleted, because
+  // Delete on an empty selection removes nothing either way — it asserted a
+  // property of the fixture rather than of the code.
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator(".tile--picked")).toHaveCount(1);
+
   await page.locator("#shelf-settings").click();
   await expect(page.locator("#settings-panel")).toBeVisible();
 
   // Typing a hotkey into the settings panel is not a shelf command.
   await page.keyboard.press("Delete");
   await expect(page.locator(".tile")).toHaveCount(3);
+
+  // And it is genuinely only the panel holding it back: closing it lets the
+  // same keystroke through. Closed with the button rather than Escape, which
+  // is bound to backing out of the shelf itself.
+  await page.locator("#shelf-settings").click();
+  await expect(page.locator("#settings-panel")).toBeHidden();
+  await page.keyboard.press("Delete");
+  await expect(page.locator(".tile")).toHaveCount(2);
 });

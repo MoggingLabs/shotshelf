@@ -14,7 +14,10 @@ use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager, Runtime};
 
-use crate::imaging::{self, compare};
+use crate::{
+    imaging::{self, compare},
+    webview_path::existing_file,
+};
 
 /// Where edits live, under the app's data directory.
 const EDITS_DIR: &str = "edits";
@@ -63,8 +66,8 @@ pub async fn compare_captures<R: Runtime>(
     before: String,
     after: String,
 ) -> Result<String, String> {
-    let before_path = existing(&before)?;
-    let after_path = existing(&after)?;
+    let before_path = existing_file(&before)?;
+    let after_path = existing_file(&after)?;
     let name_source = after_path.clone();
 
     let bytes = tauri::async_runtime::spawn_blocking(move || {
@@ -97,7 +100,7 @@ pub async fn save_edit<R: Runtime>(
     source: String,
     png: Vec<u8>,
 ) -> Result<String, String> {
-    let source = existing(&source)?;
+    let source = existing_file(&source)?;
 
     if png.is_empty() {
         return Err("the edited capture came back empty".to_owned());
@@ -190,23 +193,6 @@ fn unique(dir: &Path, stem: &str, kind: &str) -> PathBuf {
         .unwrap_or(first)
 }
 
-/// Reject anything that is not an absolute path to a file that exists.
-///
-/// The absolute check is not decoration. These commands are reachable from the
-/// webview and take a path from it, so a relative path would be resolved
-/// against whatever the process's working directory happens to be. Its sibling
-/// in `share.rs` has always enforced this; this one had drifted.
-fn existing(path: &str) -> Result<PathBuf, String> {
-    let source = PathBuf::from(path);
-    if !source.is_absolute() {
-        return Err(format!("{path} is not an absolute path"));
-    }
-    if !source.is_file() {
-        return Err(format!("{path} is no longer on disk"));
-    }
-    Ok(source)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,18 +212,5 @@ mod tests {
         assert_ne!(first, second);
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_capture_that_has_gone_is_reported_rather_than_panicking() {
-        assert!(existing("/definitely/not/here.png").is_err());
-    }
-
-    #[test]
-    fn a_relative_path_from_the_webview_is_refused() {
-        // These commands take a path from the least-trusted process in the
-        // app; a relative one would resolve against the working directory.
-        assert!(existing("../../etc/passwd").is_err());
-        assert!(existing("Screenshot.png").is_err());
     }
 }
