@@ -119,14 +119,6 @@ test("a crop is clipped to the capture", () => {
   assert.deepEqual(edit.crop(), { x: 80, y: 60, width: 20, height: 20 });
 });
 
-test("an untouched session knows it has nothing to save", () => {
-  const edit = session();
-  assert.ok(edit.isEmpty);
-
-  edit.add({ kind: "box", x: 10, y: 10, width: 10, height: 10 });
-  assert.equal(edit.isEmpty, false);
-});
-
 test("clipRect refuses a rectangle with no area", () => {
   assert.equal(clipRect({ x: 10, y: 10, width: 0, height: 10 }, 100, 100), undefined);
 });

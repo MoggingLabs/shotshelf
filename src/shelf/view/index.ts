@@ -69,7 +69,7 @@ export class ShelfView {
     this.#list.dataset["view"] = "browse";
 
     if (items.length === 0) {
-      this.renderEmpty();
+      this.#renderEmpty();
       return;
     }
 
@@ -94,7 +94,7 @@ export class ShelfView {
     );
   }
 
-  renderEmpty(): void {
+  #renderEmpty(): void {
     this.#list.dataset["view"] = "browse";
     this.#list.dataset["empty"] = "true";
     this.#list.replaceChildren(emptyState());

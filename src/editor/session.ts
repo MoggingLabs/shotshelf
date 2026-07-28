@@ -71,10 +71,6 @@ export class EditSession {
     return this.#crop;
   }
 
-  get isEmpty(): boolean {
-    return this.#marks.length === 0 && this.#crop === undefined;
-  }
-
   /**
    * The number the next callout will carry.
    *

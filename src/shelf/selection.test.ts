@@ -102,5 +102,5 @@ test("clearing forgets the anchor too", () => {
   selection.extendTo("d", ORDER);
 
   assert.deepEqual(selection.ids(), ["d"]);
-  assert.ok(new Selection().isEmpty);
+  assert.deepEqual(new Selection().ids(), []);
 });

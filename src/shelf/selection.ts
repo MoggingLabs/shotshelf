@@ -20,10 +20,6 @@ export class Selection {
     return this.#picked.size;
   }
 
-  get isEmpty(): boolean {
-    return this.#picked.size === 0;
-  }
-
   has(id: string): boolean {
     return this.#picked.has(id);
   }

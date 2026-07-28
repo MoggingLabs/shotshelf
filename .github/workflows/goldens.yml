@@ -35,7 +35,7 @@ jobs:
         run: npx playwright test tests/visual --update-snapshots
 
       - name: Upload them
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: appearance-goldens
           path: tests/visual/**/*.png

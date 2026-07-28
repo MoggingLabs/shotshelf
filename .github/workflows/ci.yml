@@ -136,7 +136,7 @@ jobs:
       # gets off the Linux runner and into the repository.
       - name: Upload appearance diffs and goldens
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: appearance-${{ matrix.name }}
           path: |

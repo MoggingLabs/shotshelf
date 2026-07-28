@@ -297,9 +297,3 @@ pub fn hide_shelf<R: Runtime>(app: AppHandle<R>) {
 pub fn preview_shelf<R: Runtime>(app: AppHandle<R>, aspect: f64) -> (f64, f64) {
     preview(&app, aspect)
 }
-
-/// Put the popover back to the browse view after a preview.
-#[tauri::command]
-pub fn close_preview<R: Runtime>(app: AppHandle<R>) {
-    open(&app);
-}

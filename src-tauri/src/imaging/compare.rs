@@ -22,10 +22,13 @@ const BACKGROUND: Rgba<u8> = Rgba([17, 18, 26, 255]);
 /// Amber: reads as "look here" against both light and dark captures.
 const HIGHLIGHT: Rgba<u8> = Rgba([245, 158, 11, 255]);
 
-/// Comparison settings, exposed so the sensitivity can be tuned rather than
-/// guessed at.
+/// How much has to change before it counts.
+///
+/// Named for what it is rather than `Settings`: the crate already has a
+/// `settings::Settings` holding the user's preferences, and two unrelated
+/// concepts sharing the most generic name in the crate is a reader's problem.
 #[derive(Clone, Copy, Debug)]
-pub struct Settings {
+pub struct Sensitivity {
     /// Side of the square blocks the image is divided into before comparing.
     ///
     /// Comparing whole blocks rather than single pixels is what makes the
@@ -39,7 +42,7 @@ pub struct Settings {
     pub density: f32,
 }
 
-impl Default for Settings {
+impl Default for Sensitivity {
     fn default() -> Self {
         // Tuned for screenshots of user interfaces: text that has actually
         // changed moves far more than these, and subpixel rendering moves less.
@@ -60,7 +63,7 @@ impl Default for Settings {
 pub fn changed_regions(
     before: &DynamicImage,
     after: &DynamicImage,
-    settings: Settings,
+    settings: Sensitivity,
 ) -> Vec<Region> {
     let width = before.width().max(after.width());
     let height = before.height().max(after.height());
@@ -98,7 +101,7 @@ fn block_changed(
     before: &DynamicImage,
     after: &DynamicImage,
     region: Region,
-    settings: Settings,
+    settings: Sensitivity,
 ) -> bool {
     let total = region.width * region.height;
     if total == 0 {
@@ -284,7 +287,7 @@ mod tests {
     #[test]
     fn two_identical_captures_report_nothing_changed() {
         let before = filled(64, 64, [255, 255, 255, 255]);
-        let regions = changed_regions(&before, &before.clone(), Settings::default());
+        let regions = changed_regions(&before, &before.clone(), Sensitivity::default());
         assert!(
             regions.is_empty(),
             "nothing changed is a useful answer, not a failure"
@@ -305,7 +308,7 @@ mod tests {
             [0, 0, 0, 255],
         );
 
-        let regions = changed_regions(&before, &after, Settings::default());
+        let regions = changed_regions(&before, &after, Sensitivity::default());
 
         assert_eq!(regions.len(), 1);
         let found = regions[0];
@@ -328,7 +331,7 @@ mod tests {
             [0, 0, 0, 255],
         );
 
-        let regions = changed_regions(&before, &after, Settings::default());
+        let regions = changed_regions(&before, &after, Sensitivity::default());
 
         assert_eq!(
             regions.len(),
@@ -362,7 +365,7 @@ mod tests {
         );
 
         assert_eq!(
-            changed_regions(&before, &after, Settings::default()).len(),
+            changed_regions(&before, &after, Sensitivity::default()).len(),
             2
         );
     }
@@ -374,7 +377,7 @@ mod tests {
         let before = filled(64, 64, [200, 200, 200, 255]);
         let after = filled(64, 64, [203, 202, 201, 255]);
 
-        assert!(changed_regions(&before, &after, Settings::default()).is_empty());
+        assert!(changed_regions(&before, &after, Sensitivity::default()).is_empty());
     }
 
     #[test]
@@ -382,7 +385,7 @@ mod tests {
         let before = filled(32, 32, [255, 255, 255, 255]);
         let after = filled(64, 32, [255, 255, 255, 255]);
 
-        let regions = changed_regions(&before, &after, Settings::default());
+        let regions = changed_regions(&before, &after, Sensitivity::default());
 
         assert!(
             !regions.is_empty(),
@@ -395,7 +398,7 @@ mod tests {
     fn a_change_in_transparency_alone_still_counts() {
         let before = filled(32, 32, [0, 0, 0, 0]);
         let after = filled(32, 32, [0, 0, 0, 255]);
-        assert!(!changed_regions(&before, &after, Settings::default()).is_empty());
+        assert!(!changed_regions(&before, &after, Sensitivity::default()).is_empty());
     }
 
     #[test]
@@ -445,6 +448,6 @@ mod tests {
     #[test]
     fn comparing_empty_images_does_not_panic() {
         let empty = filled(0, 0, [0, 0, 0, 0]);
-        assert!(changed_regions(&empty, &empty.clone(), Settings::default()).is_empty());
+        assert!(changed_regions(&empty, &empty.clone(), Sensitivity::default()).is_empty());
     }
 }

@@ -20,7 +20,7 @@ import { bootShelf, expect, FIXTURE, land, test } from "../harness/app.ts";
 const TOKEN_FINDING = {
   kind: "serviceToken",
   label: "GitHub token",
-  preview: "ghp_A1b…",
+  preview: "ghp_…",
   severity: 3,
 };
 
@@ -32,7 +32,8 @@ async function withFindings(
   // webview, so a harness that supplied one would be testing a contract the
   // app no longer has.
   await page.evaluate(
-    (findings) => window.__shotshelf__.respond("describe_capture", { secrets: findings }),
+    (findings) =>
+      window.__shotshelf__.respond("describe_capture", { secrets: findings, scanned: true }),
     secrets,
   );
 }
@@ -89,14 +90,19 @@ test("the warning never blocks the drag or the copy", async ({ page }) => {
 test("the warning never puts the secret itself in the page", async ({ page }) => {
   await bootShelf(page);
   // What Rust would have masked — asserted here in case it ever stops masking.
-  await withFindings(page, [{ ...TOKEN_FINDING, preview: "ghp_A1b…" }]);
+  await withFindings(page, [TOKEN_FINDING]);
   await land(page, FIXTURE.wide);
   await expect(page.locator(".tile__secret")).toBeVisible();
 
-  const html = await page.content();
-  expect(html).not.toContain("A1b2C3d4E5f6G7h8");
-  // The masked preview is the most it may ever say.
-  await expect(page.locator(".tile__secret")).toHaveAttribute("title", /ghp_A1b…/);
+  // Asserted against what the *masking rule* produces, not against a string
+  // the harness never supplies. The previous version checked for a token body
+  // that could not enter the system under test, so it could not fail — and its
+  // fixture still carried the old leaky "ghp_A1b…" shape, which the Rust rule
+  // stopped producing when the marker length became per-pattern.
+  const shown = await page.locator(".tile__secret").getAttribute("title");
+  expect(shown).toContain("ghp_");
+  // Only the type marker survives; nothing after it.
+  expect(shown).not.toMatch(/ghp_[A-Za-z0-9]/);
 });
 
 test("several findings are counted, worst first", async ({ page }) => {
@@ -179,4 +185,30 @@ test("the shelf says once when captures are not being checked", async ({ page })
     .poll(() => page.locator("#shelf-mark").getAttribute("title"))
     .toMatch(/not checked for credentials/);
   await expect(page.locator("#shelf-alert")).toBeHidden();
+});
+
+test("a capture that could not be read is marked as unread, not as clean", async ({ page }) => {
+  await bootShelf(page);
+  // Text recognition is available — this particular file would not decode.
+  // The platform probe cannot express that, which is why `scanned` exists.
+  await page.evaluate(() =>
+    window.__shotshelf__.respond("describe_capture", { secrets: [], scanned: false }),
+  );
+  await land(page, FIXTURE.wide);
+
+  // A card with no marker at all is a card claiming to have been checked.
+  await expect(page.locator(".tile__unscanned")).toBeVisible();
+  await expect(page.locator(".tile__secret")).toHaveCount(0);
+});
+
+test("a capture that was read and came back clean carries no marker", async ({ page }) => {
+  await bootShelf(page);
+  await page.evaluate(() =>
+    window.__shotshelf__.respond("describe_capture", { secrets: [], scanned: true }),
+  );
+  await land(page, FIXTURE.wide);
+  await expect(page.locator(".tile")).toBeVisible();
+
+  await expect(page.locator(".tile__unscanned")).toHaveCount(0);
+  await expect(page.locator(".tile__secret")).toHaveCount(0);
 });

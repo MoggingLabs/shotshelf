@@ -24,10 +24,6 @@ export class ShelfStore {
     return this.#items.length;
   }
 
-  get isEmpty(): boolean {
-    return this.#items.length === 0;
-  }
-
   /** Newest first. Readonly: mutation goes through the methods below. */
   items(): readonly ShelfItem[] {
     return this.#items;

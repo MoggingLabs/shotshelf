@@ -17,7 +17,7 @@
 
 import { icon } from "../../icons.ts";
 import { describeCapture } from "../bridge.ts";
-import type { SecretFinding } from "../types.ts";
+import type { Findings, SecretFinding } from "../types.ts";
 
 /** How the warning describes what it found, worst first. */
 function summarise(findings: readonly SecretFinding[]): string {
@@ -62,21 +62,47 @@ function marker(findings: readonly SecretFinding[]): HTMLElement {
  * was found", and saying so on every tile would train people to ignore it.
  */
 export async function markSecrets(tile: HTMLElement, path: string): Promise<void> {
-  let findings: SecretFinding[];
+  let result: Findings;
   try {
-    // Sorted here rather than trusted from the wire. Rust sends a severity
-    // with each finding precisely so the "worst first" rule is data both
-    // sides can enforce, instead of an ordering that anything touching the
-    // list in between could silently undo.
-    findings = [...(await describeCapture(path)).secrets].sort(
-      (a, b) => b.severity - a.severity,
-    );
+    result = await describeCapture(path);
   } catch {
+    // The capture could not be read at all. Same meaning as `scanned: false`.
+    markUnscanned(tile);
     return;
   }
 
+  if (!result.scanned) {
+    // "Could not look" is not "looked and found nothing", and showing them the
+    // same way is how a safety feature becomes silently inert. The platform
+    // probe cannot answer this: text recognition can be available and *this*
+    // file still fail to decode.
+    markUnscanned(tile);
+    return;
+  }
+
+  // Sorted here rather than trusted from the wire. Rust sends a severity with
+  // each finding precisely so the "worst first" rule is data both sides can
+  // enforce, instead of an ordering that anything touching the list in
+  // between could silently undo.
+  const findings = [...result.secrets].sort((a, b) => b.severity - a.severity);
   if (findings.length === 0) return;
 
   tile.classList.add("tile--secret");
   tile.append(marker(findings));
+}
+
+/**
+ * Mark a capture that could not be read.
+ *
+ * Quiet on purpose — this is not a warning about the capture, it is the
+ * absence of one — but present, because a card with no marker at all is a card
+ * that claims to have been checked.
+ */
+function markUnscanned(tile: HTMLElement): void {
+  tile.classList.add("tile--unscanned");
+  const el = document.createElement("span");
+  el.className = "tile__unscanned";
+  el.title = "This capture could not be read, so it was not checked for credentials.";
+  el.textContent = "?";
+  tile.append(el);
 }

@@ -27,6 +27,14 @@ export interface EditorHost {
   saved(path: string): void;
   /** The editor has closed. */
   closed(): void;
+  /**
+   * Something went wrong and the user needs telling.
+   *
+   * The editor's marquee tool destroys pixels, and the docs sell it as
+   * permanent — a save that fails in silence, leaving the editor open, is the
+   * one failure here that must never be quiet.
+   */
+  failed(message: string): void;
 }
 
 interface Live {
@@ -52,7 +60,7 @@ export async function openEditor(
   callbacks: EditorHost,
 ): Promise<void> {
   if (item.kind === "video") return;
-  closeEditor(host, callbacks);
+  closeEditor(host, () => callbacks.closed());
 
   const picture = await load(convertFileSrc(item.path));
   if (!picture) return;
@@ -83,12 +91,19 @@ export async function openEditor(
   render();
 }
 
-export function closeEditor(host: HTMLElement, callbacks?: EditorHost): boolean {
+/**
+ * Close the editor.
+ *
+ * Takes the one callback it actually uses rather than a whole `EditorHost`:
+ * synthesising a host here meant two of its three fields existed only to
+ * satisfy the type, which reads as a contract and is not one.
+ */
+export function closeEditor(host: HTMLElement, onClosed?: () => void): boolean {
   if (!live) return false;
   live.frame.remove();
   live = undefined;
   delete host.dataset["editing"];
-  callbacks?.closed();
+  onClosed?.();
   return true;
 }
 
@@ -119,21 +134,28 @@ async function saveEditedCapture(host: HTMLElement, callbacks: EditorHost): Prom
   if (!live) return;
   const { item, session, picture } = live;
 
-  const region = session.exportRect();
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(region.width);
-  canvas.height = Math.round(region.height);
+  try {
+    const region = session.exportRect();
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(region.width);
+    canvas.height = Math.round(region.height);
 
-  const context = canvas.getContext("2d");
-  if (!context) return;
-  paint(context, picture, session, 1);
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("this window cannot draw");
+    paint(context, picture, session, 1);
 
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!blob) return;
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("the edit could not be encoded");
 
-  const path = await saveEdit(item.path, new Uint8Array(await blob.arrayBuffer()));
-  closeEditor(host, callbacks);
-  callbacks.saved(path);
+    const path = await saveEdit(item.path, new Uint8Array(await blob.arrayBuffer()));
+    closeEditor(host, () => callbacks.closed());
+    callbacks.saved(path);
+  } catch (error) {
+    // The editor deliberately stays open: the marks are still there, and
+    // closing on a failed save would throw the work away.
+    console.error("[shotshelf] could not save that edit", error);
+    callbacks.failed("That edit could not be saved. Your marks are still here.");
+  }
 }
 
 // ── Internals ────────────────────────────────────────────────────────────

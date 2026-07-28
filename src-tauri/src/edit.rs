@@ -19,6 +19,70 @@ use crate::imaging::{self, compare};
 /// Where edits live, under the app's data directory.
 const EDITS_DIR: &str = "edits";
 
+/// How many edits to keep. They are captures in their own right rather than a
+/// cache, so this is generous — but not unbounded: a comparison of two 4K
+/// screenshots is a full-resolution PNG, and this was the only picture-holding
+/// directory in the app with no ceiling at all.
+const EDITS_LIMIT: usize = 200;
+
+/// Let the webview display edits from previous sessions.
+///
+/// Called at start-up, beside the grants for the watch folders and the poster
+/// cache. It used to be done only by `write_edit`, i.e. only in the session
+/// that wrote the file — so a pinned edit came back after a restart, was
+/// refused by the asset protocol, and rendered as the "file has gone" glyph
+/// while sitting on disk. Drag and copy still worked, which is exactly what
+/// made it quiet.
+pub fn allow_reading_edits<R: Runtime>(app: &AppHandle<R>) {
+    let Ok(dir) = edits_dir(app) else {
+        return;
+    };
+    if let Err(err) = app.asset_protocol_scope().allow_directory(&dir, false) {
+        eprintln!("shotshelf: saved edits may not display ({err})");
+    }
+}
+
+/// Drop the oldest edits once there are more than the ceiling allows.
+///
+/// Oldest first by modified time, like the other two caches. These are the
+/// user's own work, so the ceiling is high and the removal is quiet.
+pub fn prune<R: Runtime>(app: &AppHandle<R>) {
+    let Ok(dir) = edits_dir(app) else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| {
+            let modified = entry.metadata().and_then(|meta| meta.modified()).ok()?;
+            Some((modified, entry.path()))
+        })
+        .collect();
+
+    if files.len() <= EDITS_LIMIT {
+        return;
+    }
+
+    files.sort_unstable_by_key(|(modified, _)| *modified);
+    for (_, path) in files.iter().take(files.len() - EDITS_LIMIT) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+fn edits_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| err.to_string())?
+        .join(EDITS_DIR);
+    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    Ok(dir)
+}
+
 /// Put two captures side by side, with what changed outlined on the second.
 #[tauri::command]
 pub async fn compare_captures<R: Runtime>(
@@ -33,7 +97,7 @@ pub async fn compare_captures<R: Runtime>(
     let bytes = tauri::async_runtime::spawn_blocking(move || {
         let before = imaging::load(&before_path)?;
         let after = imaging::load(&after_path)?;
-        let changes = compare::changed_regions(&before, &after, compare::Settings::default());
+        let changes = compare::changed_regions(&before, &after, compare::Sensitivity::default());
         imaging::to_png(&compare::side_by_side(&before, &after, &changes))
     })
     .await
@@ -66,6 +130,19 @@ pub async fn save_edit<R: Runtime>(
         return Err("the edited capture came back empty".to_owned());
     }
 
+    // A ceiling on bytes that arrive from the webview. A full-resolution
+    // annotated screenshot is a few megabytes; anything past this is not an
+    // edit of a capture, and writing it unbounded because the sender said so
+    // is how a renderer bug becomes a full disk.
+    const MAX_BYTES: usize = 64 * 1024 * 1024;
+    if png.len() > MAX_BYTES {
+        return Err(format!(
+            "the edited capture is {} MB, past the {} MB ceiling",
+            png.len() / 1_048_576,
+            MAX_BYTES / 1_048_576,
+        ));
+    }
+
     write_edit(&app, &source, "edited", &png)
 }
 
@@ -80,12 +157,7 @@ fn write_edit<R: Runtime>(
     kind: &str,
     bytes: &[u8],
 ) -> Result<String, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|err| err.to_string())?
-        .join(EDITS_DIR);
-    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    let dir = edits_dir(app)?;
 
     let stem = source.file_stem().map_or_else(
         || "capture".to_owned(),
@@ -114,12 +186,6 @@ fn write_edit<R: Runtime>(
             }
             Err(err) => return Err(err.to_string()),
         }
-    }
-
-    // The webview renders it through the asset protocol, which only serves
-    // directories it has been told about.
-    if let Err(err) = app.asset_protocol_scope().allow_directory(&dir, false) {
-        eprintln!("shotshelf: edits may not display ({err})");
     }
 
     Ok(target.to_string_lossy().into_owned())

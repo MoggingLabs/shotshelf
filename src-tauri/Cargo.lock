@@ -4144,6 +4144,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tokio",
  "window-vibrancy 0.8.0",
  "windows 0.61.3",
 ]

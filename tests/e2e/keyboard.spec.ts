@@ -61,8 +61,14 @@ test("space shows the picked capture large, and space closes it", async ({ page 
 
   await page.keyboard.press(" ");
   await expect(page.locator(".preview")).toHaveCount(0);
+  // Closing a preview is "show the browse view, focused" — the same command
+  // that opens it. A second command doing exactly that was two names for one
+  // behaviour and two pieces of webview-reachable surface.
   await expect
-    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("close_preview").length))
+    .poll(async () => {
+      const calls = await page.evaluate(() => window.__shotshelf__.callsTo("show_shelf"));
+      return calls.filter((call) => call.args["focus"] === true).length;
+    })
     .toBe(1);
 });
 

@@ -29,6 +29,14 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:4173",
     trace: "retain-on-failure",
+    // Pinned because the app formats dates with the runtime's defaults:
+    // `dayLabel` falls through to `toLocaleDateString([], …)` and `dayKey`
+    // uses local time. The clock was pinned after a golden baked in
+    // "YESTERDAY"; these two are the other half of the same ambient input, and
+    // without them a golden encodes "26 July" versus "July 26" as a property
+    // of the runner image rather than of the code.
+    locale: "en-US",
+    timezoneId: "UTC",
   },
 
   expect: {

@@ -56,10 +56,6 @@ export class Popover {
     this.#options = options;
   }
 
-  get opened(): boolean {
-    return this.#opened;
-  }
-
   /** Put the column on screen at whatever height its cards need right now. */
   showColumn(): void {
     this.#root.dataset["mode"] = "column";

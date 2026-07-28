@@ -98,9 +98,15 @@ export function previewShelf(aspect: number): Promise<[number, number]> {
   return invoke<[number, number]>("preview_shelf", { aspect });
 }
 
-/** Put the popover back to the browse view after a preview. */
+/**
+ * Put the popover back to the browse view after a preview.
+ *
+ * The same command that opens it deliberately: "show the browse view, focused"
+ * is one behaviour, and a second command that did exactly that was two names
+ * for one thing and two pieces of reachable surface.
+ */
 export async function closePreview(): Promise<void> {
-  await invoke("close_preview");
+  await invoke("show_shelf", { focus: true });
 }
 
 /**

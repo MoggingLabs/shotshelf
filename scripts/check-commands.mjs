@@ -67,10 +67,11 @@ function stripComments(source) {
 }
 
 const source = frontendSource();
+const registered = registeredCommands();
 const unreachable = [];
 const staleExceptions = [];
 
-for (const command of registeredCommands()) {
+for (const command of registered) {
   // The command name appears as a string literal at the invoke site.
   const called = source.includes(`"${command}"`);
   if (called && UNWIRED.has(command)) staleExceptions.push(command);
@@ -90,6 +91,32 @@ if (staleExceptions.length > 0) {
   );
 }
 
+/**
+ * The other direction: an `invoke("…")` naming a command Rust does not expose.
+ *
+ * The reachability half was written to close a security hole and inherited its
+ * single direction — but `bridge.ts` justifies its own existence by saying a
+ * renamed command "fails at runtime in whichever corner happens to call it",
+ * and that is precisely this direction. The harness hard-codes stub names, so
+ * an e2e suite stays green against commands that no longer exist.
+ *
+ * Plugin commands are namespaced (`plugin:drag|start_drag`) and are not ours
+ * to check.
+ */
+const invoked = [...source.matchAll(/invoke<[^>]*>?\(\s*"([^"]+)"/g)]
+  .map((match) => match[1])
+  .filter((name) => name !== undefined && !name.includes(":"));
+
+const unregistered = [...new Set(invoked)].filter((name) => !registered.includes(name));
+
+if (unregistered.length > 0) {
+  console.error(
+    "\nCommands invoked from src/ that Rust does not register:\n" +
+      unregistered.map((command) => `  ${command}`).join("\n") +
+      "\n\nThese fail at runtime, in whichever corner happens to call them.",
+  );
+}
+
 if (unreachable.length > 0) {
   console.error(
     "\nRegistered Tauri commands with no caller in src/:\n" +
@@ -99,5 +126,9 @@ if (unreachable.length > 0) {
   );
 }
 
-if (unreachable.length > 0 || staleExceptions.length > 0) process.exit(1);
-console.info(`Checked ${registeredCommands().length} registered commands.`);
+if (unreachable.length > 0 || staleExceptions.length > 0 || unregistered.length > 0) {
+  process.exit(1);
+}
+console.info(
+  `Checked ${registered.length} registered commands, and ${new Set(invoked).size} invocations.`,
+);

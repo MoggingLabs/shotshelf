@@ -19,15 +19,18 @@ const DRAG_THRESHOLD_PX = 6;
  * Wait for real pointer travel before starting a drag, so a click on a card
  * stays a click and the list can still be scrolled.
  *
- * Returns a teardown function; the caller uses it to disarm if the shelf is
- * torn down mid-press.
+ * The listeners remove themselves on the first of move-past-threshold, up, or
+ * cancel, so nothing outstanding survives a press. An earlier version returned
+ * a teardown function for a caller that was never written — a documented
+ * contract with no consumer is worse than none, because it reads as a
+ * guarantee somebody is honouring.
  */
 export function armDrag(
   node: HTMLElement,
   item: ShelfItem,
   start: PointerEvent,
   begin: (node: HTMLElement, item: ShelfItem) => void,
-): () => void {
+): void {
   const from = { x: start.clientX, y: start.clientY };
 
   const disarm = (): void => {
@@ -45,8 +48,6 @@ export function armDrag(
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", disarm);
   window.addEventListener("pointercancel", disarm);
-
-  return disarm;
 }
 
 /**

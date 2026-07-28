@@ -50,6 +50,7 @@ const shelf = new Shelf(el<HTMLElement>("#shelf-items"), el<HTMLElement>("#shelf
   },
   // The editor grew the window; putting it away returns to the browse view.
   onEditorClosed: () => popover.adoptBrowse(),
+  onProblem: (message) => say(message),
   limits: () => currentSettings(),
 });
 

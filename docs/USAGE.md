@@ -96,7 +96,10 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
   the only ones still on the shelf after a restart. A pinned tile keeps its star showing.
 - **Remove** (the cross) — takes it off the shelf. **It never deletes the file.**
 - **Pick several** — click one, then ctrl-click (⌘-click) others, or shift-click for a range.
-  Dragging any one of them carries them all, in the order you picked them.
+  Dragging any one of them carries them all, oldest first.
+- **Edit** (or press `e`) — mark a capture up before you send it. Five tools and only five:
+  crop, box, arrow, numbered marker and redact. Saving makes a new capture; the original is
+  untouched.
 - **Quick look** — press space to open the picked capture at readable size, and
   space or Esc to close it. A 225px card is enough to recognise a screenshot and
   not enough to read one, which is the whole reason this exists.
@@ -122,7 +125,9 @@ shows rather defeats the point.
 | `Space` | Open the picked capture at readable size, and close it again |
 | `Enter` | Copy it to the clipboard |
 | `Delete` | Take it off the shelf — **the file stays on disk** |
-| `Esc` | Close the preview, or the shelf if no preview is open |
+| `e` | Mark the picked capture up |
+| `Ctrl+Z` | Undo the last mark, while marking up |
+| `Esc` | Close the editor, then the preview, then the shelf |
 
 Escape backs out one level at a time on purpose: one key that closes two things
 at once is one key that loses your place.
@@ -148,6 +153,24 @@ sending a screenshot, this is the tool to use.
 
 `Ctrl+Z` undoes the last mark, including a crop. `Esc` leaves without saving.
 
+### What a card is named after
+
+A capture arrives named after the clock, which identifies it to a filesystem and to nobody
+else. So Shotshelf notes **what was in front when you took it** and puts that on the card
+instead — "Code — auth.ts" rather than `Screenshot 2026-07-27 133012.png`. The filename is
+still there in the tooltip.
+
+This is read on your machine and stays there, like everything else. It asks for no new
+permission, and that constraint shapes what it can see:
+
+| | What is read |
+| :-- | :-- |
+| **Windows** | The frontmost window's title, and the program that owns it |
+| **macOS** | The frontmost **application** only. Reading a window title there needs Screen Recording permission, which Shotshelf does not ask for and does not want |
+| **Linux** | Nothing — there is no portable way, and Wayland deliberately refuses |
+
+Where nothing can be read, the card shows its filename, exactly as before.
+
 ### The credential warning
 
 Screenshots of a working machine routinely contain an API key, a `.env`, or a customer's email
@@ -159,11 +182,15 @@ Three things worth knowing:
 
 - **It never stops you.** Dragging, copying and pinning a flagged capture all work exactly as
   they always did. It is a second look, not a lock.
-- **It is Windows-only for now.** Windows has a text recogniser built into the OS; macOS and
-  Linux do not have one wired up yet. Where it is unavailable the shelf says so in the tooltip
-  on the status dot, so an unchecked capture is never mistaken for a checked one.
+- **It runs on all three platforms, but not on every machine.** Windows and macOS each have a
+  text recogniser built into the OS — `Windows.Media.Ocr` and Vision, the one Preview uses. On
+  Linux it needs `tesseract` installed; without it there is nothing to read with. Where it is
+  unavailable the shelf says so in the tooltip on the status dot, and any capture that could
+  not be read carries a small **?** — so an unchecked capture is never mistaken for a checked
+  one.
 - **No marker does not mean "safe".** It means nothing matched. Text recognition on a
   screenshot is imperfect, and the patterns only cover credentials with recognisable shapes.
+  A **?** is different again: that capture could not be read at all, so nothing was checked.
 
 Nothing about this leaves your machine — the checking happens locally, and the recognised text
 never leaves Rust.
@@ -209,13 +236,13 @@ previous one stays active.
 | :-- | :-- | :-- | :-- |
 | Settings | `%APPDATA%\com.mogginglabs.shotshelf\` | `~/Library/Application Support/com.mogginglabs.shotshelf/` | `~/.config/com.mogginglabs.shotshelf/` |
 | Clipboard captures | `%APPDATA%\com.mogginglabs.shotshelf\clipboard\` | `~/Library/Application Support/com.mogginglabs.shotshelf/clipboard/` | `~/.local/share/com.mogginglabs.shotshelf/clipboard/` |
-| Comparisons | `%APPDATA%\com.mogginglabs.shotshelf\edits\` | `~/Library/Application Support/com.mogginglabs.shotshelf/edits/` | `~/.local/share/com.mogginglabs.shotshelf/edits/` |
+| Comparisons and edits | `%APPDATA%\com.mogginglabs.shotshelf\edits\` | `~/Library/Application Support/com.mogginglabs.shotshelf/edits/` | `~/.local/share/com.mogginglabs.shotshelf/edits/` |
 | Video poster frames | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\posters\` | `~/Library/Caches/com.mogginglabs.shotshelf/posters/` | `~/.cache/com.mogginglabs.shotshelf/posters/` |
 | Smaller copies for sending | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\handoff\` | `~/Library/Caches/com.mogginglabs.shotshelf/handoff/` | `~/.cache/com.mogginglabs.shotshelf/handoff/` |
 
 **Two of those hold picture data**, so they are worth knowing about if you care where copies of
-your screen end up. `edits` holds comparisons you made — they are captures in their own right,
-which is why they are kept rather than cached. `handoff` holds smaller copies made for sending,
+your screen end up. `edits` holds comparisons and marked-up copies you made — they are captures in
+their own right, which is why they are kept rather than cached. The 200 most recent are kept. `handoff` holds smaller copies made for sending,
 and only if you turned that setting on; it keeps the 60 most recent and is safe to delete at any
 time.
 

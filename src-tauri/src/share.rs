@@ -88,12 +88,73 @@ pub fn prepare_drag<R: Runtime>(
 pub async fn describe_capture(path: String) -> Result<Findings, String> {
     let source = existing_file(&path)?;
 
-    // OCR is the slowest thing this app does — hundreds of milliseconds on a
-    // dense screenshot — so it goes to a blocking worker rather than holding
-    // the async runtime that also serves the shelf's other commands.
-    tauri::async_runtime::spawn_blocking(move || Findings::from(enrich::describe(&source)))
+    // Answered from memory when it has been asked before.
+    //
+    // The shelf asks once per image tile as it is built, and opening a full
+    // shelf builds every tile at once — pinned captures are exempt from the
+    // item cap, so "every tile" is unbounded. Without this, a launch with
+    // fifty pins started fifty full-resolution decodes and fifty OCR passes
+    // simultaneously, and did it again on the next launch.
+    if let Some(cached) = scan_cache()
+        .lock()
+        .ok()
+        .and_then(|c| c.get(&source).cloned())
+    {
+        return Ok(cached);
+    }
+
+    // And no more than a few at a time. OCR is the slowest thing this app
+    // does; a semaphore keeps a burst of tiles from becoming a burst of
+    // engines, without making the shelf wait for any of them.
+    let permit = scan_limit()
+        .clone()
+        .acquire_owned()
         .await
-        .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?;
+
+    let for_worker = source.clone();
+    // A blocking worker rather than the async runtime that also serves the
+    // shelf's other commands.
+    let findings = tauri::async_runtime::spawn_blocking(move || {
+        let findings = Findings::from(enrich::describe(&for_worker));
+        drop(permit);
+        findings
+    })
+    .await
+    .map_err(|err| err.to_string())?;
+
+    if let Ok(mut cache) = scan_cache().lock() {
+        // Bounded: a shelf that has seen thousands of captures in one session
+        // should not hold every scan for the life of the process.
+        if cache.len() >= SCAN_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(source, findings.clone());
+    }
+
+    Ok(findings)
+}
+
+/// How many scans to remember before starting over.
+const SCAN_CACHE_LIMIT: usize = 500;
+
+/// How many captures may be read at once.
+///
+/// Small on purpose: this is CPU-bound work on a machine the user is using for
+/// something else, and the shelf is usable the whole time either way.
+const SCAN_CONCURRENCY: usize = 2;
+
+fn scan_cache() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, Findings>> {
+    static CACHE: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<PathBuf, Findings>>,
+    > = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn scan_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
+    static LIMIT: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::OnceLock::new();
+    LIMIT.get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(SCAN_CONCURRENCY)))
 }
 
 /// Clipboard fallback, for the apps that will take a paste but not a drop.

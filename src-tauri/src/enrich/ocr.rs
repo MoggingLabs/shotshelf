@@ -47,7 +47,10 @@ pub fn recognise(path: &Path) -> Option<String> {
 /// though it had been checked and come back clean.
 /// Not `const`: on Linux this depends on whether the machine has Tesseract,
 /// so it is a question about the running system rather than about the build.
-#[tauri::command]
+/// `command(async)` because on Linux the first call spawns `tesseract
+/// --version` to find out, and a plain command runs inline on the IPC thread —
+/// the same rule `prepare_drag` follows, for the same reason.
+#[tauri::command(async)]
 #[must_use]
 pub fn text_recognition_available() -> bool {
     platform::available()
@@ -226,6 +229,11 @@ mod platform {
         *PRESENT
     }
 
+    /// How long one capture may take before the child is killed.
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+    /// A ceiling on recognised text, which is another program's output.
+    const MAX_TEXT: usize = 200_000;
+
     pub fn recognise(path: &Path) -> Option<String> {
         if !available() {
             return None;
@@ -234,18 +242,44 @@ mod platform {
         // `-` writes the text to stdout instead of to a file beside the
         // capture, which matters: the folder being read is a folder Shotshelf
         // is watching, and writing into it would catch our own output.
-        let output = std::process::Command::new("tesseract")
+        let mut child = std::process::Command::new("tesseract")
             .arg(path)
             .arg("-")
+            .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
-            .output()
+            .spawn()
             .ok()?;
 
-        if !output.status.success() {
-            return None;
+        // A wedged child would otherwise hold a blocking worker for the life
+        // of the process, and the shelf starts one of these per capture.
+        let deadline = std::time::Instant::now() + TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => break,
+                Ok(Some(_)) => return None,
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                // Out of time, or the child cannot be waited on at all.
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+            }
         }
 
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        let output = child.wait_with_output().ok()?;
+        // Bounded: this is another program's stdout, and it ends up in a
+        // scanner and later in a search index.
+        let text = String::from_utf8_lossy(&output.stdout);
+        Some(
+            text.chars()
+                .take(MAX_TEXT)
+                .collect::<String>()
+                .trim()
+                .to_owned(),
+        )
     }
 }
 

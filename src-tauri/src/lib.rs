@@ -47,7 +47,6 @@ pub fn run() {
             tray::set_capture_count,
             window::show_shelf,
             window::preview_shelf,
-            window::close_preview,
             window::hide_shelf,
         ])
         // ── Adopted plugins — don't hand-roll what these already solve ──
@@ -87,6 +86,10 @@ pub fn run() {
             // Sized copies are a cache too, and a cache that only grows is a
             // leak with a nicer name.
             handoff::prune(app.handle());
+            // Edits are the user's own work rather than a cache, but they are
+            // still pictures on a disk with no other ceiling.
+            edit::allow_reading_edits(app.handle());
+            edit::prune(app.handle());
 
             if let Some(shelf) = app.get_webview_window(window::SHELF) {
                 window::apply_material(&shelf);

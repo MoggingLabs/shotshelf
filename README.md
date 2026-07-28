@@ -17,10 +17,12 @@ take and keeps it one drag away — so you never dig through folders for the cli
 
 ---
 
-> **Status: the shell runs.** Cross-platform desktop app on **Tauri v2** — the frameless, always-on-top
-> edge window and its tray icon are in; the catch engine, thumbnails and drag-out come next. Prior-art
-> research settled fork-vs-build (nothing forkable does cross-platform auto-catch, so we build) and
-> confirmed the scary part, native drag-out, is a solved plugin. See `prompts/RESEARCH.md`. Part of
+> **Status: it works.** Cross-platform desktop app on **Tauri v2**. The catch engine, the corner
+> popover, native drag-out, recordings, settings and packaging are all in — and on top of them:
+> on-device text recognition, a credential warning, a five-tool annotation editor with real
+> redaction, before/after comparison, quick look, multi-select and a keyboard map. Prior-art
+> research settled fork-vs-build (nothing forkable does cross-platform auto-catch, so we build)
+> and confirmed the scary part, native drag-out, is a solved plugin. See `prompts/RESEARCH.md`. Part of
 > [MoggingLabs Internals](https://github.com/MoggingLabs/mogginglabs-internals), in a new category:
 > an **internal desktop utility** (not a platform driver like the `-wire` tools).
 
@@ -99,15 +101,31 @@ the only ways in. Building the Rust side on its own
 src/            frontend — vanilla TS + Vite, deliberately dependency-light
 src-tauri/      Rust — window docking, tray icon, plugin registration
   catch/        the catch engine: folder watchers + clipboard watch
-  capabilities/ Tauri v2 permissions (local filesystem, clipboard, drag — no network)
+  capabilities/ Tauri v2 permissions (clipboard, drag, a few window calls — no filesystem, no network)
 app-icon.png    icon source; regenerate the set with `npm run tauri icon app-icon.png`
-.github/        CI — builds on Windows and macOS
+.github/        CI — lints, tests and builds on Windows, macOS and Linux
 ```
 
 Most of the per-OS code sits behind `cfg` gates that only the matching host compiles, so CI
-builds both: every push and PR runs `tsc` → `vite build` → `cargo fmt --check` → `cargo clippy
--D warnings` → `cargo build` on **windows-latest and macos-latest**. Run the same gate locally
-with `npm run build` then `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`.
+builds all three. Every push and PR runs, on **windows-latest, macos-latest and ubuntu-latest**:
+
+| Gate | What it catches |
+| :-- | :-- |
+| `npm run lint` | ESLint with type-aware rules — floating promises, unchecked IPC |
+| `npm run deadcode` | knip, plus a check that every registered Tauri command has a caller *and* every invoked command is registered |
+| `npm run test:unit` | the pure rules, in Node with no browser |
+| `npm run build` | `tsc --noEmit` over `src` **and** `tests`, then the bundle |
+| `npm run test:e2e` | the real front-end in a browser with the Tauri runtime stubbed |
+| `npm run test:visual` | geometry and computed style everywhere; pixel goldens on Linux |
+| `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo build` | the Rust half |
+
+`npm run gate` runs the lot locally. The three-OS matrix is not ceremony: it has caught an
+unused parameter, two platform-only dead-code errors and an `unsafe` block that guarded
+nothing, none of which the other two hosts could see.
+
+Pixel goldens are taken on Linux and compared on Linux — font rasterisation differs between
+operating systems, so the appearance specs skip themselves elsewhere. Regenerate them with the
+**Appearance goldens** workflow, then look at the images before committing them.
 
 ### Where it watches
 
@@ -155,7 +173,8 @@ and size, because that is identity rather than chrome.
 ### Settings
 
 The gear in the title strip opens the whole surface: how long captures **stay**, how many the
-shelf **holds**, and the **hotkey**. That's the entire list, and it's meant to stay that way.
+shelf **holds**, whether to **send smaller copies**, and the **hotkey**. That's the entire list,
+and it's meant to stay short.
 
 Everything lives in one hand-editable JSON file, on device, never synced:
 

@@ -14,7 +14,13 @@
  */
 
 import { persistPinned, type Settings } from "../settings.ts";
-import { compareCaptures, copyCapture, forgetVideo, setCaptureCount } from "./bridge.ts";
+import {
+  compareCaptures,
+  copyCapture,
+  forgetVideo,
+  previewShelf,
+  setCaptureCount,
+} from "./bridge.ts";
 import { ColumnQueue, type HoldReason } from "./column.ts";
 import { armDrag, beginDrag } from "./drag.ts";
 import { columnHeight } from "./geometry.ts";
@@ -24,7 +30,6 @@ import { type Capture, captureId, type ShelfItem } from "./types.ts";
 import { ShelfView } from "./view/index.ts";
 import { hidePreview, previewIsOpen, showPreview } from "./view/preview.ts";
 import { closeEditor, editorIsOpen, openEditor, undoEdit } from "../editor/index.ts";
-import { previewShelf } from "./bridge.ts";
 
 export type { Capture } from "./types.ts";
 
@@ -55,6 +60,15 @@ export interface ShelfOptions {
   onSelectionChange(picked: number): void;
   /** The editor closed, so the window goes back to the browse view. */
   onEditorClosed(): void;
+  /**
+   * Something the user needs telling about.
+   *
+   * One channel, so the keyboard and the buttons report a failure the same
+   * way. They did not: a copy from the copy button flashed the button red and
+   * logged, while the same copy from Enter produced an unhandled rejection and
+   * nothing on screen — for an interface the docs present as equivalent.
+   */
+  onProblem(message: string): void;
   /** Current limits. Read on demand so a settings change takes effect at once. */
   limits(): Pick<Settings, "maxItems" | "retentionHours">;
 }
@@ -88,10 +102,6 @@ export class Shelf {
 
   // ── State the popover asks about ───────────────────────────────────────
 
-  get mode(): Mode {
-    return this.#mode;
-  }
-
   get dragging(): boolean {
     return this.#dragging;
   }
@@ -113,12 +123,6 @@ export class Shelf {
       window.setInterval(() => this.#sweep(), SWEEP_MS),
       window.setInterval(() => this.#ageColumn(), COLUMN_TICK_MS),
     );
-  }
-
-  /** Stops the timers. The app never tears the shelf down; tests do. */
-  stop(): void {
-    for (const timer of this.#timers) window.clearInterval(timer);
-    this.#timers = [];
   }
 
   // ── Captures arriving ──────────────────────────────────────────────────
@@ -355,6 +359,7 @@ export class Shelf {
         this.add({ path, kind: "image", ts: Date.now() });
       },
       closed: () => this.#options.onEditorClosed(),
+      failed: (message) => this.#options.onProblem(message),
     });
   }
 
@@ -364,21 +369,12 @@ export class Shelf {
 
   /** Back out of the editor. Returns false if it was not open. */
   closeEditor(): boolean {
-    return closeEditor(this.#list, {
-      size: (aspect) => previewShelf(aspect),
-      saved: () => undefined,
-      closed: () => this.#options.onEditorClosed(),
-    });
+    return closeEditor(this.#list, () => this.#options.onEditorClosed());
   }
 
   /** Undo the last mark. Returns false if there was nothing to undo. */
   undoEdit(): boolean {
     return undoEdit();
-  }
-
-  /** Whether a capture is being shown at readable size. */
-  get previewing(): boolean {
-    return previewIsOpen();
   }
 
   /** Close the preview. Returns false if there was nothing to close. */
@@ -398,7 +394,12 @@ export class Shelf {
     if (this.closePreview()) return;
 
     const [item] = this.#pickedItems();
-    if (item) void showPreview(item, this.#list);
+    if (!item) return;
+
+    void showPreview(item, this.#list).catch((error: unknown) => {
+      console.error("[shotshelf] could not preview that capture", error);
+      this.#options.onProblem("That capture could not be opened.");
+    });
   }
 
   /**
@@ -429,7 +430,12 @@ export class Shelf {
   /** Copy the picked capture, for the keyboard path. */
   copyPicked(): void {
     const [item] = this.#pickedItems();
-    if (item) void copyCapture(item.path, item.kind);
+    if (!item) return;
+
+    void copyCapture(item.path, item.kind).catch((error: unknown) => {
+      console.error("[shotshelf] could not copy that capture", error);
+      this.#options.onProblem("That capture could not be copied.");
+    });
   }
 
   /** Take the picked captures off the shelf. The files are untouched. */

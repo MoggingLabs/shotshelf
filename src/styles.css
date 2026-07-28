@@ -710,3 +710,24 @@ body {
   /* A checkerboard would imply transparency the capture may not have. */
   background: #05060a;
 }
+
+/* A capture that could not be read.
+   Not a warning about the capture — the absence of one. Quiet, but present,
+   because a card with no marker at all is a card claiming to have been
+   checked, and "could not look" is not "looked and found nothing". */
+.tile__unscanned {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: rgba(87, 83, 78, 0.9);
+  color: #d6d3d1;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  z-index: 1;
+}
