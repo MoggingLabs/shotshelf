@@ -241,17 +241,38 @@ test("a redaction destroys the pixels rather than drawing over them", async ({ p
 
 test("undo takes back the last mark", async ({ page }) => {
   await openEditor(page);
+
+  // Read straight off the canvas rather than by saving and counting calls.
+  // Counting saves asserted only that *a* save happened — it passed with undo
+  // doing nothing at all — and the round trip through `toBlob` made it flaky
+  // under a loaded runner. This looks at the pixels the mark is made of.
+  const inkAt = async (x: number, y: number): Promise<(number | undefined)[]> =>
+    page.evaluate(
+      ({ x, y }) => {
+        const canvas = document.querySelector<HTMLCanvasElement>(".editor__canvas");
+        const context = canvas?.getContext("2d");
+        if (!canvas || !context) throw new Error("no canvas");
+        const box = canvas.getBoundingClientRect();
+        // Rendered coordinates to backing-store pixels.
+        const data = context.getImageData(
+          Math.round((x / box.width) * canvas.width),
+          Math.round((y / box.height) * canvas.height),
+          1,
+          1,
+        ).data;
+        return [data[0], data[1], data[2], data[3]];
+      },
+      { x, y },
+    );
+
+  const clean = await inkAt(25, 25);
   await drag(page, [25, 25], [150, 90]);
-  await page.evaluate(() => window.__shotshelf__.clearCalls());
+  const marked = await inkAt(25, 25);
+  expect(marked).not.toEqual(clean);
 
   await page.locator("#editor-undo").click();
-  await page.locator("#editor-save").click();
-
-  // Saving after undoing an only mark still produces a file — an unmarked
-  // copy is a legitimate thing to want — but nothing was drawn on it.
-  await expect
-    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("save_edit").length))
-    .toBe(1);
+  const undone = await inkAt(25, 25);
+  expect(undone).toEqual(clean);
 });
 
 test("escape backs out of the editor before it backs out of the shelf", async ({ page }) => {

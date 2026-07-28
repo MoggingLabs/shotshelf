@@ -97,6 +97,9 @@ fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
 /// is a fixed, scrollable box with a title strip, the column is sized to
 /// exactly the cards it holds and carries no furniture at all.
 pub const BROWSE_SIZE: (f64, f64) = (225.0, 420.0);
+/// The tallest the popped column may be asked to grow. Generous — a tall
+/// screen holds a lot of cards — and it exists so the number cannot be absurd.
+const MAX_COLUMN_HEIGHT: f64 = 4000.0;
 pub const COLUMN_WIDTH: f64 = BROWSE_SIZE.0;
 
 /// Open the popover deliberately: full grid, in its corner, on top, and focused.
@@ -120,7 +123,15 @@ pub fn peek<R: Runtime>(app: &AppHandle<R>, height: f64) {
     };
 
     set_opened(false);
-    let height = height.max(80.0);
+    // Clamped at both ends. `preview_shelf` validates its float and says why —
+    // "it arrives from the front-end" — and this takes the same kind of value
+    // from the same place with only a floor. A NaN happens to fall out safely
+    // (Rust's `max` returns the operand), which is luck rather than a check.
+    let height = if height.is_finite() {
+        height.clamp(80.0, MAX_COLUMN_HEIGHT)
+    } else {
+        80.0
+    };
     let _ = shelf.set_size(tauri::LogicalSize::new(COLUMN_WIDTH, height));
     // Re-place on every peek: the column grows a card at a time, and it is
     // pinned by its bottom-right corner, so a taller one has to move up to keep

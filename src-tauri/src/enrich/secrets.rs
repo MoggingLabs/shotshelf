@@ -177,10 +177,17 @@ static PATTERNS: LazyLock<Vec<Pattern>> = LazyLock::new(|| {
     ]
 });
 
+/// The most findings one capture will report.
+///
+/// A screenshot of a contact list is thousands of distinct addresses, and the
+/// whole list crosses IPC and becomes a tooltip. Past a handful the warning
+/// has already made its point.
+const MAX_FINDINGS: usize = 50;
+
 /// Scan recognised text for anything worth a second look.
 ///
 /// Findings are deduplicated and ordered worst-first, so a caller showing only
-/// one is showing the one that matters.
+/// one is showing the one that matters, and capped at [`MAX_FINDINGS`].
 #[must_use]
 pub fn scan(text: &str) -> Vec<Finding> {
     let mut findings: Vec<Finding> = Vec::new();
@@ -202,6 +209,9 @@ pub fn scan(text: &str) -> Vec<Finding> {
 
     // Reverse severity: the worst thing is what you see first.
     findings.sort_by_key(|finding| std::cmp::Reverse(finding.severity));
+    // Truncated *after* sorting, so what survives is the most serious of what
+    // was found rather than whichever pattern happened to run first.
+    findings.truncate(MAX_FINDINGS);
     findings
 }
 
@@ -274,6 +284,69 @@ fn mask_email(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_capture_full_of_findings_reports_the_worst_of_them_and_stops() {
+        // A screenshot of a contact list is thousands of distinct addresses,
+        // and every one of them crossed IPC and became a tooltip.
+        let mut text = String::from(
+            "-----BEGIN RSA PRIVATE KEY-----
+",
+        );
+        for n in 0..400 {
+            text.push_str(&format!(
+                "person{n}@example.com
+"
+            ));
+        }
+
+        let findings = scan(&text);
+        assert!(
+            findings.len() <= MAX_FINDINGS,
+            "{} findings",
+            findings.len()
+        );
+        // And the private key is still the first thing reported.
+        assert_eq!(
+            findings.first().map(|f| f.kind),
+            Some(SecretKind::PrivateKey)
+        );
+    }
+
+    #[test]
+    fn the_kinds_on_the_wire_are_the_ones_the_front_end_knows() {
+        // `SecretKind` is declared four times — here, as a TypeScript union, as
+        // CSS selectors, and as strings in the e2e specs — and nothing joined
+        // them. Renaming a variant compiled on both sides, silently stopped
+        // matching a CSS rule, and rendered a warning in the wrong colour, with
+        // every gate green. This and `src/shelf/types.test.ts` assert against
+        // one fixture, so a rename fails on whichever side forgot.
+        let expected: Vec<String> =
+            serde_json::from_str(include_str!("../../../tests/fixtures/secret-kinds.json"))
+                .expect("the shared kinds fixture parses");
+
+        let ours: Vec<String> = [
+            SecretKind::PrivateKey,
+            SecretKind::ServiceToken,
+            SecretKind::Jwt,
+            SecretKind::Assignment,
+            SecretKind::PersonalData,
+        ]
+        .iter()
+        .map(|kind| {
+            serde_json::to_value(kind)
+                .expect("a kind serialises")
+                .as_str()
+                .expect("as a string")
+                .to_owned()
+        })
+        .collect();
+
+        assert_eq!(
+            ours, expected,
+            "the wire names have drifted from the fixture"
+        );
+    }
 
     fn kinds(text: &str) -> Vec<SecretKind> {
         scan(text).into_iter().map(|finding| finding.kind).collect()

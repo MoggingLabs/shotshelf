@@ -87,7 +87,10 @@ impl SettingsStore {
     }
 
     /// Narrower edit for the pin toggle, which the settings surface never touches.
-    pub fn set_pinned(&self, pinned: Vec<PinnedItem>) {
+    pub fn set_pinned(&self, mut pinned: Vec<PinnedItem>) {
+        // Bounded here too: this path skips `sanitise` entirely, which is how
+        // the cap on the settings surface would have been missed.
+        pinned.truncate(MAX_PINNED);
         let snapshot = {
             let mut current = self.lock();
             current.pinned = pinned;
@@ -169,8 +172,17 @@ fn write(path: &PathBuf, settings: &Settings) -> std::io::Result<()> {
 
 /// Keep hand-edited files from producing a shelf that holds nothing or never
 /// forgets anything.
+/// The most pinned captures that will be stored.
+///
+/// Pins are exempt from the item cap by design, but the list arrives from the
+/// webview and is written to disk and re-read — and every entry costs a tile
+/// and a credential scan at the next launch. Comfortably more than anyone
+/// pins on purpose.
+const MAX_PINNED: usize = 500;
+
 fn sanitise(mut settings: Settings) -> Settings {
     settings.max_items = settings.max_items.clamp(1, 200);
+    settings.pinned.truncate(MAX_PINNED);
     settings.retention_hours = settings
         .retention_hours
         .filter(|hours| hours.is_finite() && *hours > 0.0);

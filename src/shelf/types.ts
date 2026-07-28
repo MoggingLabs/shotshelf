@@ -70,8 +70,23 @@ export function captureId(capture: Capture): string {
   return `${capture.ts}:${capture.path}`;
 }
 
-/** How alarming a finding is. Mirrors `enrich::secrets::SecretKind`. */
-type SecretKind = "privateKey" | "serviceToken" | "jwt" | "assignment" | "personalData";
+/**
+ * How alarming a finding is. Mirrors `enrich::secrets::SecretKind`.
+ *
+ * A value rather than a bare type, so the mirroring can be asserted: both
+ * sides check this list against `tests/fixtures/secret-kinds.json`. It was a
+ * type alone, which meant a rename in Rust type-checked here perfectly and
+ * only showed up as a warning badge in the wrong colour.
+ */
+export const SECRET_KINDS = [
+  "privateKey",
+  "serviceToken",
+  "jwt",
+  "assignment",
+  "personalData",
+] as const;
+
+type SecretKind = (typeof SECRET_KINDS)[number];
 
 /**
  * Something in a capture worth a second look before it leaves the machine.

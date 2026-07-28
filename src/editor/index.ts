@@ -480,14 +480,28 @@ function normalise(rect: Rect): Rect {
   };
 }
 
+/** How long to wait for a capture to decode before giving up on it. */
+const LOAD_TIMEOUT_MS = 15_000;
+
 function load(src: string): Promise<HTMLImageElement | undefined> {
   return new Promise((resolve) => {
     const picture = new Image();
     // The asset protocol sends CORS headers, so this keeps the canvas
     // untainted — without it `toBlob` throws and nothing can be saved.
     picture.crossOrigin = "anonymous";
-    picture.addEventListener("load", () => resolve(picture), { once: true });
-    picture.addEventListener("error", () => resolve(undefined), { once: true });
+
+    // Neither `load` nor `error` is guaranteed to fire. Without a deadline
+    // `opening` stayed true forever, `editorIsOpen()` with it, and the keydown
+    // handler swallowed every key but Escape and Ctrl+Z for the rest of the
+    // session — the shelf looked alive and answered nothing.
+    const giveUp = window.setTimeout(() => resolve(undefined), LOAD_TIMEOUT_MS);
+    const settle = (result: HTMLImageElement | undefined): void => {
+      window.clearTimeout(giveUp);
+      resolve(result);
+    };
+
+    picture.addEventListener("load", () => settle(picture), { once: true });
+    picture.addEventListener("error", () => settle(undefined), { once: true });
     picture.src = src;
   });
 }
