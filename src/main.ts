@@ -95,12 +95,22 @@ void initSettings(() => shelf.applySettings())
   });
 
 void invoke<string[]>("catch_watch_dirs")
-  .then(async (dirs) => {
-    showWatchState(dirs);
-    // Said after the watch state, so it lands in the same tooltip.
-    if (!(await textRecognitionAvailable())) noteScanUnavailable();
-  })
+  .then((dirs) => showWatchState(dirs))
   .catch((error: unknown) => {
     console.error("[shotshelf] could not read the watch folders", error);
     say("The catch engine is unavailable — no captures will be picked up.");
+  })
+  // Its own chain, deliberately. Asking whether captures can be checked for
+  // credentials is advisory, and hanging it off the watch-folder call meant a
+  // failure here was reported as the catch engine being down — a failure
+  // attributed to the wrong subsystem is worse than one reported nowhere.
+  .finally(() => {
+    void textRecognitionAvailable()
+      .then((available) => {
+        if (!available) noteScanUnavailable();
+      })
+      .catch(() => {
+        // Nothing to tell the user: not knowing whether checking is available
+        // is not itself worth a line in the alert strip.
+      });
   });

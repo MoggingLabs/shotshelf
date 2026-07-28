@@ -142,3 +142,41 @@ test("recordings are not scanned", async ({ page }) => {
   // There is no text in a video frame worth the cost of decoding one for it.
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("describe_capture").length)).toBe(0);
 });
+
+test("a failing credential probe is not reported as the catch engine failing", async ({ page }) => {
+  // This shipped: the availability probe was chained inside the watch-folder
+  // call's `.then`, so its rejection landed in that call's `.catch` and the
+  // shelf announced "The catch engine is unavailable" while the catch engine
+  // was perfectly fine. A failure attributed to the wrong subsystem is worse
+  // than one reported nowhere, and only a screenshot golden caught it.
+  await page.addInitScript(() => {
+    window.__shotshelfStubs__ = { catch_watch_dirs: ["/pictures/Screenshots"] };
+  });
+  await bootShelf(page);
+  await page.evaluate(() =>
+    window.__shotshelf__.reject("text_recognition_available", "no recogniser"),
+  );
+  await page.waitForTimeout(250);
+
+  await expect(page.locator("#shelf-alert")).toBeHidden();
+});
+
+test("the shelf says once when captures are not being checked", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__shotshelfStubs__ = {
+      catch_watch_dirs: ["/pictures/Screenshots"],
+      // What macOS and Linux report today.
+      text_recognition_available: false,
+    };
+  });
+  await bootShelf(page);
+
+  // In the status tooltip rather than on every card: this is a standing
+  // property of the platform, and a warning on each tile is one people stop
+  // reading. Saying nothing was the worse option — it made an unchecked
+  // capture look identical to a checked one.
+  await expect
+    .poll(() => page.locator("#shelf-mark").getAttribute("title"))
+    .toMatch(/not checked for credentials/);
+  await expect(page.locator("#shelf-alert")).toBeHidden();
+});

@@ -118,6 +118,7 @@ export function installTauriMock(): void {
       pinned: [],
     },
     "set_pinned": null,
+    "text_recognition_available": true,
     "set_capture_count": null,
     "show_shelf": null,
     "hide_shelf": null,
