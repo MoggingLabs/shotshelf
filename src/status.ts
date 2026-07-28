@@ -45,8 +45,9 @@ function hush(): void {
 /**
  * Describe what the catch engine is watching, in the dot's tooltip.
  *
- * Folders that do not exist are skipped by Rust rather than watched blindly,
- * so this is also how you find out that the folder you expected is missing.
+ * A missing capture folder is created beside a parent that already exists, so
+ * the list here is what is genuinely being watched — which is also how you
+ * find out that the folder you expected is not among them.
  */
 function describeWatch(dirs: readonly string[]): string {
   if (dirs.length === 0) return "Watching the clipboard only";

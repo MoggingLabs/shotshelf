@@ -10,34 +10,36 @@
  * panel: there is no arrangement of a picture inside that width that makes
  * small text legible. Rust owns the sizing because only Rust knows the work
  * area; this asks for a size and lays the picture out in whatever it gets.
+ *
+ * The lifetime — what "open" means, who may end an open, who owes the browse
+ * window back — belongs to `Overlay`, shared with the editor. It was written
+ * out here too once, and the two copies drifted.
  */
 
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import { browseShelf, previewShelf } from "../bridge.ts";
-import { OverlayTicket } from "../overlay-ticket.ts";
+import { Overlay, readable } from "../overlay.ts";
 import type { ShelfItem } from "../types.ts";
 
-/** The preview currently on screen, if any. */
-let open: { id: string; node: HTMLElement } | undefined;
-/**
- * Opening, superseding and abandoning, shared with the editor.
- *
- * This module used to keep its own copy of these three flags and the rules
- * around them. The copies drifted: the editor learned to clear `opening` when
- * a close cancels an open in flight, and this one did not — so a capture that
- * never decoded wedged the shelf for the session.
- */
-const lifetime = new OverlayTicket();
+interface Shown {
+  id: string;
+  node: HTMLElement;
+}
+
+const overlay = new Overlay<Shown>({
+  teardown: (shown) => shown.node.remove(),
+  restore: () => void browseShelf(),
+});
 
 /** Whether a quick look is on screen, or about to be. */
 export function previewIsOpen(): boolean {
-  return open !== undefined || lifetime.opening;
+  return overlay.isOpen;
 }
 
 /** Which capture it is showing, so the shelf can tell when that one leaves. */
 export function previewedId(): string | undefined {
-  return open?.id;
+  return overlay.live?.id;
 }
 
 /**
@@ -47,45 +49,38 @@ export function previewedId(): string | undefined {
  * preview of a video, and playing one is a media player, not a shelf.
  */
 export async function showPreview(item: ShelfItem, host: HTMLElement): Promise<void> {
-  if (item.kind === "video" || lifetime.opening) return;
-  teardown();
+  if (item.kind === "video") return;
 
-  const ticket = lifetime.begin();
-  try {
-    await mount(ticket, item, host);
-  } finally {
-    lifetime.finish();
-  }
-}
+  await overlay.show(async (stale) => {
+    // The picture is measured before the window is asked for, because the
+    // window's shape should follow the capture's rather than the other way
+    // round — a portrait screenshot in a landscape window is mostly background.
+    const picture = new Image();
+    picture.src = convertFileSrc(item.path);
 
-async function mount(ticket: number, item: ShelfItem, host: HTMLElement): Promise<void> {
-  // The picture is measured before the window is asked for, because the
-  // window's shape should follow the capture's rather than the other way
-  // round — a portrait screenshot in a landscape window is mostly background.
-  const picture = new Image();
-  picture.src = convertFileSrc(item.path);
-  const aspect = await naturalAspect(picture);
-  if (lifetime.stale(ticket)) return;
+    // A capture that cannot be measured still gets a preview, in a screen's
+    // shape: one that refuses to open is worse than one that is the wrong
+    // shape.
+    const measured = await readable(picture);
+    if (stale()) return undefined;
+    const aspect = measured
+      ? measured.naturalWidth / Math.max(measured.naturalHeight, 1)
+      : 16 / 9;
 
-  await previewShelf(aspect);
-  // Cancelled while Rust was resizing: the window has already grown, so the
-  // close that cancelled this still owes the restore it could not do.
-  if (lifetime.stale(ticket)) {
-    if (!lifetime.abandoned) void browseShelf();
-    return;
-  }
+    await previewShelf(aspect);
+    if (stale()) return undefined;
 
-  const frame = document.createElement("div");
-  frame.className = "preview";
-  frame.dataset["id"] = item.id;
+    const frame = document.createElement("div");
+    frame.className = "preview";
 
-  picture.className = "preview__picture";
-  picture.alt = item.path;
-  picture.draggable = false;
-  frame.append(picture);
+    picture.className = "preview__picture";
+    picture.alt = item.path;
+    picture.draggable = false;
+    frame.append(picture);
+    host.append(frame);
 
-  host.append(frame);
-  open = { id: item.id, node: frame };
+    return { id: item.id, node: frame };
+  });
 }
 
 /**
@@ -96,64 +91,10 @@ async function mount(ticket: number, item: ShelfItem, host: HTMLElement): Promis
  * to dismissing the popover behind it.
  */
 export function hidePreview(): boolean {
-  const pending = lifetime.close();
-  if (!open) return pending;
-
-  teardown();
-  void browseShelf();
-  return true;
+  return overlay.close();
 }
 
-/**
- * Tear the quick look down because the window itself is going away.
- *
- * No restore, for the same reason the editor has no restore on this path:
- * showing the window again is the opposite of what the user asked for. Without
- * it the picture outlived the hide and the next capture popped a column with a
- * full-size screenshot painted over it.
- */
+/** Tear the quick look down because the window itself is going away. */
 export function discardPreview(): void {
-  lifetime.discard();
-  teardown();
+  overlay.discard();
 }
-
-function teardown(): void {
-  open?.node.remove();
-  open = undefined;
-}
-
-/**
- * The capture's own width-to-height ratio.
- *
- * Falls back to a screen's shape when the picture cannot be measured — a
- * missing file, a format the webview will not decode — because a preview that
- * refuses to open is worse than one that is the wrong shape.
- */
-function naturalAspect(picture: HTMLImageElement): Promise<number> {
-  if (picture.complete && picture.naturalWidth > 0) {
-    return Promise.resolve(picture.naturalWidth / picture.naturalHeight);
-  }
-
-  return new Promise((resolve) => {
-    // Neither `load` nor `error` is guaranteed to fire — a file on a
-    // disconnected share, or one still being written. Without a deadline the
-    // open never ends, `opening` stays true, and the shelf stops answering
-    // Space and Escape for the rest of the session. The editor's `load` has
-    // carried this for a round; this one did not.
-    const giveUp = window.setTimeout(() => resolve(16 / 9), MEASURE_TIMEOUT_MS);
-    const settle = (aspect: number): void => {
-      window.clearTimeout(giveUp);
-      resolve(aspect);
-    };
-
-    picture.addEventListener(
-      "load",
-      () => settle(picture.naturalWidth / Math.max(picture.naturalHeight, 1)),
-      { once: true },
-    );
-    picture.addEventListener("error", () => settle(16 / 9), { once: true });
-  });
-}
-
-/** How long to wait for a capture to report its shape before assuming one. */
-const MEASURE_TIMEOUT_MS = 15_000;

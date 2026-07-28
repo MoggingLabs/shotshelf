@@ -35,7 +35,7 @@ tauri-plugin-clipboard = "2"                                      # clipboard im
 tauri-plugin-drag = "2"                                           # native drag-out (phase 04)
 tauri-plugin-shell = "2"                                          # runs the bundled ffmpeg sidecar
 tauri-plugin-global-shortcut = "2"                                # show/hide hotkey (phase 06)
-tauri-plugin-updater = "2"                                        # in-place updates from the internal feed
+tauri-plugin-updater = "2"                                        # asks the internal feed whether a newer build exists; installs nothing
 window-vibrancy = "0.8"                                           # acrylic / vibrancy behind the popover
 tauri-plugin-single-instance = "2"                                # one shelf, one catcher
 

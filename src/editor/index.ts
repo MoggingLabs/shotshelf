@@ -17,7 +17,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { browseShelf, previewShelf, saveEdit } from "../shelf/bridge.ts";
 import type { ShelfItem } from "../shelf/types.ts";
 import { paint, paintCropGuide } from "./draw.ts";
-import { OverlayTicket } from "../shelf/overlay-ticket.ts";
+import { Overlay, readable } from "../shelf/overlay.ts";
 import { EditSession, type Rect, type Tool } from "./session.ts";
 
 /**
@@ -55,102 +55,101 @@ interface Live {
   watch: ResizeObserver;
 }
 
-let live: Live | undefined;
-/**
- * Opening, superseding and abandoning — the same rules the quick look uses.
- *
- * These were written out here and again in `view/preview.ts`, in identical
- * code with identical comments, and then diverged: three fixes landed here
- * and none reached the copy. `OverlayTicket` exists so the next fix cannot
- * land in only one of them.
- */
-const lifetime = new OverlayTicket();
+const overlay = new Overlay<Live>({
+  teardown: (live) => {
+    live.watch.disconnect();
+    live.frame.remove();
+  },
+  restore: () => void browseShelf(),
+});
+
 /** Guards the save the same way; a double click wrote two files. */
 let saving = false;
 
 export function editorIsOpen(): boolean {
-  return live !== undefined || lifetime.opening;
+  return overlay.isOpen;
 }
 
-/** Open the editor on a capture. Recordings have nothing to annotate. */
+/**
+ * Open the editor on a capture. Recordings have nothing to annotate.
+ *
+ * Refuses rather than replaces when one is already up. It used to discard
+ * whatever was open and start again, which made the Edit control — visible in
+ * the title strip, which the overlay deliberately does not cover — a one-click
+ * shredder for every unsaved mark.
+ */
 export async function openEditor(
   item: ShelfItem,
   host: HTMLElement,
   callbacks: EditorHost,
 ): Promise<void> {
-  // Refuses rather than replaces.
-  //
-  // It used to discard whatever was open and start again, which made the Edit
-  // control — visible in the title strip, which the overlay deliberately does
-  // not cover — a one-click shredder for every unsaved mark. The `editing`
-  // guard existed twice on the keyboard path and on neither click path. The
-  // control is hidden while an overlay is up now; this is the half that does
-  // not depend on remembering to hide it.
-  if (item.kind === "video" || lifetime.opening || live) return;
+  if (item.kind === "video") return;
 
-  const ticket = lifetime.begin();
-  try {
-    await open(ticket, item, host, callbacks);
-  } finally {
-    lifetime.finish();
-  }
-}
+  await overlay.show(async (stale) => {
+    const picture = new Image();
+    // The asset protocol sends CORS headers, so this keeps the canvas
+    // untainted — without it `toBlob` throws and nothing can be saved.
+    picture.crossOrigin = "anonymous";
+    picture.src = convertFileSrc(item.path);
 
-async function open(
-  ticket: number,
-  item: ShelfItem,
-  host: HTMLElement,
-  callbacks: EditorHost,
-): Promise<void> {
-  const picture = await load(convertFileSrc(item.path));
-  if (lifetime.stale(ticket)) return;
-  if (!picture) {
-    // The Edit control is offered for any single picked capture, including one
-    // whose file has since gone — an emptied Recycle Bin, a cleared temp
-    // folder. Returning in silence left the button looking simply broken.
-    callbacks.failed("That capture could not be opened — its file is gone.");
-    return;
-  }
+    const loaded = await readable(picture);
+    if (stale()) return undefined;
+    if (!loaded) {
+      // The Edit control is offered for any single picked capture, including
+      // one whose file has since gone — an emptied Recycle Bin, a cleared temp
+      // folder. Returning in silence left the button looking simply broken.
+      callbacks.failed("That capture could not be opened — its file is gone.");
+      return undefined;
+    }
 
-  const session = new EditSession(picture.naturalWidth, picture.naturalHeight);
-  await previewShelf(picture.naturalWidth / picture.naturalHeight);
-  // Cancelled while Rust was resizing. The window has grown by now, so the
-  // close that cancelled this is still owed the restore it could not do
-  // against an editor that did not exist yet.
-  if (lifetime.stale(ticket)) {
-    if (!lifetime.abandoned) void browseShelf();
-    return;
-  }
+    const session = new EditSession(loaded.naturalWidth, loaded.naturalHeight);
+    await previewShelf(loaded.naturalWidth / loaded.naturalHeight);
+    if (stale()) return undefined;
 
-  const frame = document.createElement("div");
-  frame.className = "editor";
+    const frame = document.createElement("div");
+    frame.className = "editor";
 
-  const canvas = document.createElement("canvas");
-  canvas.className = "editor__canvas";
-  // The canvas sits in its own stage so the toolbar's height is taken out of
-  // the space it fits into, rather than the canvas overflowing past it.
-  const stage = document.createElement("div");
-  stage.className = "editor__stage";
-  stage.append(canvas);
-  frame.append(toolbar(session, callbacks), stage);
-  host.append(frame);
+    const canvas = document.createElement("canvas");
+    canvas.className = "editor__canvas";
+    // The canvas sits in its own stage so the toolbar's height is taken out of
+    // the space it fits into, rather than the canvas overflowing past it.
+    const stage = document.createElement("div");
+    stage.className = "editor__stage";
+    stage.append(canvas);
+    frame.append(toolbar(session, callbacks), stage);
+    host.append(frame);
 
-  // Re-fit whenever the stage changes shape, rather than at the three moments
-  // we happened to think of. The window grows asynchronously — Rust has
-  // returned, but the webview has not necessarily laid out at the new size —
-  // and a crop or an undo changes the region inside a stage that has not
-  // moved at all. One observer covers all three, and replaces three different
-  // guesses at "how much room is there" that the call sites used to pass in.
-  const watch = new ResizeObserver(() => {
-    fit();
-    render();
+    // Re-fit whenever the stage changes shape, rather than at the three moments
+    // we happened to think of. The window grows asynchronously — Rust has
+    // returned, but the webview has not necessarily laid out at the new size —
+    // and a crop or an undo changes the region inside a stage that has not
+    // moved at all.
+    const watch = new ResizeObserver(() => {
+      fit();
+      render();
+    });
+    watch.observe(stage);
+
+    const built: Live = {
+      item,
+      session,
+      picture: loaded,
+      canvas,
+      frame,
+      stage,
+      scale: 1,
+      watch,
+    };
+    return built;
   });
-  watch.observe(stage);
 
-  live = { item, session, picture, canvas, frame, stage, scale: 1, watch };
-  fit();
-  bindPointer();
-  render();
+  // Mounted, or refused. Either way the canvas can only be sized once the
+  // overlay owns it.
+  if (overlay.live) {
+    fit();
+    bindPointer();
+    render();
+  }
 }
 
 /**
@@ -167,12 +166,7 @@ async function open(
  * mounted into a window that was no longer on screen.
  */
 export function closeEditor(): boolean {
-  const pending = lifetime.close();
-  if (!live) return pending;
-
-  teardown();
-  void browseShelf();
-  return true;
+  return overlay.close();
 }
 
 /**
@@ -185,19 +179,12 @@ export function closeEditor(): boolean {
  * peeked window never takes focus, so Escape could not reach it either.
  */
 export function discardEditor(): void {
-  lifetime.discard();
-  teardown();
-}
-
-function teardown(): void {
-  if (!live) return;
-  live.watch.disconnect();
-  live.frame.remove();
-  live = undefined;
+  overlay.discard();
 }
 
 /** Undo the last mark. Returns false if there was nothing to undo. */
 export function undoEdit(): boolean {
+  const live = overlay.live;
   if (!live?.session.undo()) return false;
   fit();
   render();
@@ -205,6 +192,7 @@ export function undoEdit(): boolean {
 }
 
 function setTool(tool: Tool): void {
+  const live = overlay.live;
   if (!live) return;
   live.session.tool = tool;
   for (const button of live.frame.querySelectorAll<HTMLButtonElement>(".editor__tool")) {
@@ -220,6 +208,7 @@ function setTool(tool: Tool): void {
  * a screenshot of the preview instead of an annotated capture.
  */
 async function saveEditedCapture(callbacks: EditorHost): Promise<void> {
+  const live = overlay.live;
   if (!live || saving) return;
   const { item, session, picture } = live;
 
@@ -230,7 +219,7 @@ async function saveEditedCapture(callbacks: EditorHost): Promise<void> {
   // and opened a different capture tore that second editor down and took its
   // marks with it. The ticket exists to answer "is this still the operation
   // being waited for"; the save was the one async path not asking.
-  const ticket = lifetime.current;
+  const ticket = overlay.current;
 
   saving = true;
   try {
@@ -250,7 +239,7 @@ async function saveEditedCapture(callbacks: EditorHost): Promise<void> {
     // The file is written either way — it is the user's work and it is on
     // disk. Only the editor this save started in is closed, and only if it is
     // still the one on screen.
-    if (!lifetime.stale(ticket)) closeEditor();
+    if (!overlay.stale(ticket)) closeEditor();
     callbacks.saved(path);
   } catch (error) {
     // The editor deliberately stays open: the marks are still there, and
@@ -316,6 +305,7 @@ function action(label: string, id: string, onClick: () => void): HTMLButtonEleme
  * draw on the rest.
  */
 function fit(): void {
+  const live = overlay.live;
   if (!live) return;
   const region = live.session.exportRect();
   const box = live.stage.getBoundingClientRect();
@@ -331,6 +321,7 @@ function fit(): void {
 }
 
 function render(guide?: Rect): void {
+  const live = overlay.live;
   if (!live) return;
   const context = live.canvas.getContext("2d");
   if (!context) return;
@@ -359,6 +350,7 @@ function render(guide?: Rect): void {
  * almost always.
  */
 function at(event: PointerEvent): { x: number; y: number } {
+  const live = overlay.live;
   if (!live) return { x: 0, y: 0 };
   const box = live.canvas.getBoundingClientRect();
   const region = live.session.exportRect();
@@ -371,11 +363,16 @@ function at(event: PointerEvent): { x: number; y: number } {
 }
 
 function bindPointer(): void {
+  const live = overlay.live;
   if (!live) return;
   const canvas = live.canvas;
 
   canvas.addEventListener("pointerdown", (event) => {
-    if (!live || event.button !== 0) return;
+    // Re-read rather than closing over the binding above: a capture landing,
+    // a hide, or a save can tear the editor down between press and release,
+    // and a drag that goes on painting into a detached canvas is how the
+    // editor used to survive its own destruction.
+    if (!overlay.live || event.button !== 0) return;
     const start = at(event);
     canvas.setPointerCapture(event.pointerId);
 
@@ -387,7 +384,7 @@ function bindPointer(): void {
     }
 
     const move = (moved: PointerEvent): void => {
-      if (!live) return;
+      if (!overlay.live) return;
       const now = at(moved);
       const rect: Rect = {
         x: start.x,
@@ -408,7 +405,7 @@ function bindPointer(): void {
       canvas.removeEventListener("pointermove", move);
       canvas.removeEventListener("pointerup", up);
       canvas.removeEventListener("pointercancel", up);
-      if (!live) return;
+      if (!overlay.live) return;
 
       const end = at(ended);
       commit(start, end);
@@ -423,6 +420,7 @@ function bindPointer(): void {
 
 /** Draw the mark being dragged, without adding it to the session. */
 function preview(rect: Rect): void {
+  const live = overlay.live;
   if (!live) return;
   const context = live.canvas.getContext("2d");
   if (!context) return;
@@ -438,6 +436,7 @@ function preview(rect: Rect): void {
 }
 
 function commit(start: { x: number; y: number }, end: { x: number; y: number }): void {
+  const live = overlay.live;
   if (!live) return;
   const rect: Rect = {
     x: start.x,
@@ -472,28 +471,3 @@ function normalise(rect: Rect): Rect {
   };
 }
 
-/** How long to wait for a capture to decode before giving up on it. */
-const LOAD_TIMEOUT_MS = 15_000;
-
-function load(src: string): Promise<HTMLImageElement | undefined> {
-  return new Promise((resolve) => {
-    const picture = new Image();
-    // The asset protocol sends CORS headers, so this keeps the canvas
-    // untainted — without it `toBlob` throws and nothing can be saved.
-    picture.crossOrigin = "anonymous";
-
-    // Neither `load` nor `error` is guaranteed to fire. Without a deadline
-    // `opening` stayed true forever, `editorIsOpen()` with it, and the keydown
-    // handler swallowed every key but Escape and Ctrl+Z for the rest of the
-    // session — the shelf looked alive and answered nothing.
-    const giveUp = window.setTimeout(() => resolve(undefined), LOAD_TIMEOUT_MS);
-    const settle = (result: HTMLImageElement | undefined): void => {
-      window.clearTimeout(giveUp);
-      resolve(result);
-    };
-
-    picture.addEventListener("load", () => settle(picture), { once: true });
-    picture.addEventListener("error", () => settle(undefined), { once: true });
-    picture.src = src;
-  });
-}

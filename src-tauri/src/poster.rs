@@ -17,7 +17,7 @@ use std::{
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
-use tauri_plugin_shell::ShellExt;
+use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 use crate::webview_path::existing_file;
 
@@ -242,14 +242,38 @@ async fn run_ffmpeg<R: Runtime>(
             "4",
             &target_arg,
         ])
-        .output();
-
-    let output = tokio::time::timeout(FRAME_TIMEOUT, run)
-        .await
-        .map_err(|_| "ffmpeg took too long on this recording".to_owned())?
+        .spawn()
         .map_err(|err| err.to_string())?;
 
-    Ok(parse_duration(&String::from_utf8_lossy(&output.stderr)))
+    // Spawned rather than awaited to completion, because the deadline has to
+    // reach the *process*.
+    //
+    // `timeout` on `.output()` drops the future and nothing else: the plugin's
+    // `CommandChild` has no `Drop` that kills, so a wedged ffmpeg kept running
+    // — still holding CPU, still able to be writing into the staging file this
+    // function is about to publish or delete. `ocr.rs` gets this right with an
+    // explicit `kill()`; this module had the deadline and not the kill.
+    let (mut events, child) = run;
+    let mut stderr = Vec::new();
+
+    let collect = async {
+        while let Some(event) = events.recv().await {
+            match event {
+                CommandEvent::Stderr(chunk) => stderr.extend_from_slice(&chunk),
+                CommandEvent::Terminated(_) => break,
+                _ => {}
+            }
+        }
+        stderr
+    };
+
+    match tokio::time::timeout(FRAME_TIMEOUT, collect).await {
+        Ok(stderr) => Ok(parse_duration(&String::from_utf8_lossy(&stderr))),
+        Err(_) => {
+            let _ = child.kill();
+            Err("ffmpeg took too long on this recording".to_owned())
+        }
+    }
 }
 
 /// How long one frame grab may take before it is given up on.
