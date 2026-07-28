@@ -88,13 +88,47 @@ pub fn current() -> Context {
 fn tidy(raw: &str) -> Option<String> {
     const MAX: usize = 120;
 
-    let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Neutralised before collapsing, because none of these are whitespace and
+    // `split_whitespace` therefore carried them straight through into a label
+    // Shotshelf renders in its own UI. U+202E on its own is enough to display
+    // a title as the reverse of what it says, and the zero-width characters
+    // hide text inside a word — both in a string chosen by whatever program
+    // happened to be in front, which is as untrusted as input gets here.
+    //
+    // Mapped to a space rather than dropped: a title with a newline in it is
+    // two words, and deleting the separator would run them together.
+    //
+    // Deliberately not scanned for credentials. A title can certainly contain
+    // one, but unlike the capture it is never handed to anything — it is shown
+    // on the card and nowhere else — so a warning would be about a disclosure
+    // that cannot happen. That changes the day the shelf becomes searchable
+    // and titles are indexed.
+    let cleaned: String = raw
+        .chars()
+        .map(|c| if is_display_noise(c) { ' ' } else { c })
+        .collect();
+
+    let collapsed = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.is_empty() {
         return None;
     }
 
     // Truncated on a character boundary; a title can be any script at all.
     Some(collapsed.chars().take(MAX).collect())
+}
+
+/// Control and formatting characters that have no business in a label.
+///
+/// The C0/C1 controls, the bidirectional overrides and isolates, and the
+/// zero-width joiners and spaces.
+fn is_display_noise(c: char) -> bool {
+    c.is_control()
+        || matches!(c,
+            '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{FEFF}')
 }
 
 #[cfg(target_os = "windows")]
@@ -259,6 +293,25 @@ mod tests {
         );
         assert_eq!(tidy("   "), None);
         assert_eq!(tidy(""), None);
+    }
+
+    #[test]
+    fn a_title_cannot_smuggle_bidi_or_zero_width_characters_into_the_ui() {
+        // A window title is chosen by whatever program is in front, and this
+        // one renders in Shotshelf's own card and tooltip. U+202E reverses
+        // everything after it on screen; U+200B hides a join inside a word.
+        let spoofed = tidy("Notes\u{202E}gnp.tnuocca\u{200B}drac").expect("a label");
+        assert!(
+            !spoofed.chars().any(is_display_noise),
+            "control characters survived: {spoofed:?}",
+        );
+
+        // And the words either side are still words.
+        assert_eq!(
+            tidy("Visual\u{0007}Studio").as_deref(),
+            Some("Visual Studio")
+        );
+        assert_eq!(tidy("\u{202E}\u{200B}").as_deref(), None);
     }
 
     #[test]

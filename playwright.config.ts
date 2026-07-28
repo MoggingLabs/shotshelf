@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { defineConfig, devices } from "@playwright/test";
 
 /**
@@ -14,8 +16,23 @@ import { defineConfig, devices } from "@playwright/test";
  * a diff on every glyph and tells you nothing. `npm run test:e2e` runs the
  * behavioural specs everywhere; `npm run test:visual` is the pinned one.
  */
-/** The popover's real size. Layout assertions are only meaningful at it. */
-const POPOVER_VIEWPORT = { width: 225, height: 420 };
+/**
+ * The popover's real size. Layout assertions are only meaningful at it.
+ *
+ * Read from the Tauri config rather than written out again here. The number
+ * lived in three hand-maintained places — this file, `tauri.conf.json` and
+ * `window.rs` — with nothing checking they agreed, so a resized window would
+ * have left every layout test measuring a shape the app no longer takes.
+ * `window.rs` cannot import JSON, so a Rust test asserts its constant against
+ * the same file.
+ */
+const shelfWindow = (
+  JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8")) as {
+    app: { windows: { width: number; height: number }[] };
+  }
+).app.windows[0];
+if (!shelfWindow) throw new Error("tauri.conf.json declares no shelf window");
+const POPOVER_VIEWPORT = { width: shelfWindow.width, height: shelfWindow.height };
 
 export default defineConfig({
   testDir: "tests",

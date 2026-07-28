@@ -40,7 +40,7 @@ export interface Settings {
  * Mirrors the Rust defaults so the shelf has sane limits from its very first
  * frame — a capture can land before the settings file has been read.
  */
-const DEFAULTS: Settings = {
+export const DEFAULTS: Settings = {
   retentionHours: null,
   maxItems: 50,
   hotkey: "CommandOrControl+Shift+S",

@@ -300,3 +300,25 @@ pub fn hide_shelf<R: Runtime>(app: AppHandle<R>) {
 pub fn preview_shelf<R: Runtime>(app: AppHandle<R>, aspect: f64) {
     preview(&app, aspect);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_browse_size_matches_the_window_the_app_actually_opens() {
+        // `BROWSE_SIZE` is what every `set_size` here uses; `tauri.conf.json`
+        // is what the window is created at. They were two hand-maintained
+        // copies of one number, along with the Playwright viewport — which now
+        // reads the config directly, leaving this as the only join left to
+        // check. A disagreement means the shelf changes shape the first time
+        // anything calls `open`, which no test at either end would notice.
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        let window = &config["app"]["windows"][0];
+
+        assert_eq!(window["label"].as_str(), Some(SHELF));
+        assert_eq!(window["width"].as_f64(), Some(BROWSE_SIZE.0));
+        assert_eq!(window["height"].as_f64(), Some(BROWSE_SIZE.1));
+    }
+}

@@ -185,6 +185,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_defaults_are_the_ones_the_front_end_starts_on() {
+        // The same shape is declared in Rust and in `src/settings.ts`, because
+        // the shelf needs limits before `get_settings` resolves — a capture can
+        // land in that window. Nothing checked the two agreed, and they already
+        // drifted once: `downscaleExports` shipped typed only in Rust and
+        // survived purely because the payload is spread from the raw response.
+        //
+        // Both sides now assert against `tests/fixtures/default-settings.json`,
+        // so a field added to one and forgotten in the other fails here.
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/default-settings.json"))
+                .expect("the shared defaults fixture parses");
+
+        let ours = serde_json::to_value(Settings::default()).expect("settings serialise");
+        assert_eq!(
+            ours, fixture,
+            "Rust defaults have drifted from the shared fixture"
+        );
+    }
+
+    #[test]
     fn a_utf8_bom_does_not_cost_you_your_settings() {
         // Notepad and PowerShell's `Set-Content -Encoding utf8` both write one,
         // and it silently reverted a whole settings file to defaults.
