@@ -83,8 +83,22 @@ body {
    strip, settings, alerts — is furniture you did not ask for here. */
 
 .shelf[data-mode="column"] .shelf__bar,
-.shelf[data-mode="column"] .settings,
-.shelf[data-mode="column"] .shelf__alert {
+.shelf[data-mode="column"] .settings {
+  display: none;
+}
+
+/* The alert strip is furniture the column does not want either — *unless*
+   something is on the overlay.
+
+   A failed save is reported here, and the editor's own docstring calls that the
+   one failure that must never be quiet. Hiding the strip by shape meant the
+   message was written correctly and painted out of existence, after the redact
+   tool had already destroyed pixels the user believed were saved.
+
+   `window::preview` now puts the shelf into the browse shape, so this state
+   should be unreachable; this is the second lock on the same door, because
+   losing that message is not a failure worth being clever about. */
+.shelf[data-mode="column"]:not(:has(.shelf__overlay:not(:empty))) .shelf__alert {
   display: none;
 }
 

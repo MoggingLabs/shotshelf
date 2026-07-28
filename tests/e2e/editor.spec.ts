@@ -31,17 +31,43 @@ async function openEditor(
   await expect(page.locator(".editor__canvas")).toBeVisible();
 }
 
-/** How far the canvas spills out of the box it is supposed to fit inside. */
-async function overflow(
-  page: import("@playwright/test").Page,
-): Promise<{ vertical: number; horizontal: number }> {
+/**
+ * How far the canvas spills out of what it must fit inside — measured twice,
+ * because the two halves of the fix mask each other.
+ *
+ * `rendered*` is the canvas's box against the **editor frame**, which is the
+ * fixed one: `.editor` is `position:absolute; inset:0`, so it cannot grow to
+ * accommodate its contents. That catches the CSS half.
+ *
+ * `buffer*` is the canvas's own pixel buffer against the stage. That catches
+ * the `fit()` half, which CSS would otherwise hide by scaling an oversized
+ * buffer down to something that looks correct.
+ *
+ * The earlier version measured only the canvas against the stage, and passed
+ * with either half reverted — the stage is content-sized under the CSS
+ * regression, so the difference was zero in exactly the failure mode the test
+ * existed to catch. It only failed with both halves broken at once, which is
+ * not what its name claimed.
+ */
+async function overflow(page: import("@playwright/test").Page): Promise<{
+  renderedBelow: number;
+  renderedRight: number;
+  bufferTaller: number;
+  bufferWider: number;
+}> {
   return page.evaluate(() => {
-    const canvas = document.querySelector(".editor__canvas")?.getBoundingClientRect();
-    const stage = document.querySelector(".editor__stage")?.getBoundingClientRect();
-    if (!canvas || !stage) throw new Error("the editor is not on screen");
+    const canvas = document.querySelector<HTMLCanvasElement>(".editor__canvas");
+    const stage = document.querySelector(".editor__stage");
+    const frame = document.querySelector(".editor");
+    if (!canvas || !stage || !frame) throw new Error("the editor is not on screen");
+
+    const shown = canvas.getBoundingClientRect();
+    const outer = frame.getBoundingClientRect();
     return {
-      vertical: canvas.height - stage.height,
-      horizontal: canvas.width - stage.width,
+      renderedBelow: shown.bottom - outer.bottom,
+      renderedRight: shown.right - outer.right,
+      bufferTaller: canvas.height - stage.clientHeight,
+      bufferWider: canvas.width - stage.clientWidth,
     };
   });
 }
@@ -399,7 +425,16 @@ test("a save that fails says so where the user can see it", async ({ page }) => 
 
   await page.locator("#editor-save").click();
 
+  // The message itself, not merely that the strip is showing something. The
+  // harness boots with no watch folders, so start-up writes "No capture
+  // folders found" to this strip — which made `toBeVisible()` true for the
+  // whole session and this test pass with the save's failure report deleted.
   const alert = page.locator("#shelf-alert");
+  await expect(alert).toHaveText(/could not be saved/);
+  // `toHaveText` reads textContent and says nothing about visibility — a
+  // `display: none` strip with the right words in it satisfies it. Both halves
+  // are needed: the text catches a missing report, the visibility catches one
+  // that is painted out of existence.
   await expect(alert).toBeVisible();
   expect(await hitTest(page, "#shelf-alert")).toBe(true);
   // And the marks are still there to try again with.
@@ -416,8 +451,10 @@ test("the canvas fits the stage it is given, on both axes", async ({ page }) => 
   await openEditor(page, FIXTURE.tall);
 
   const opened = await overflow(page);
-  expect(opened.vertical).toBeLessThanOrEqual(1);
-  expect(opened.horizontal).toBeLessThanOrEqual(1);
+  expect(opened.renderedBelow).toBeLessThanOrEqual(1);
+  expect(opened.renderedRight).toBeLessThanOrEqual(1);
+  expect(opened.bufferTaller).toBeLessThanOrEqual(1);
+  expect(opened.bufferWider).toBeLessThanOrEqual(1);
 
   // Crop to a tall sliver, which is the shape that was worst.
   await page.locator('.editor__tool[data-tool="crop"]').click();
@@ -430,8 +467,10 @@ test("the canvas fits the stage it is given, on both axes", async ({ page }) => 
   );
 
   const cropped = await overflow(page);
-  expect(cropped.vertical).toBeLessThanOrEqual(1);
-  expect(cropped.horizontal).toBeLessThanOrEqual(1);
+  expect(cropped.renderedBelow).toBeLessThanOrEqual(1);
+  expect(cropped.renderedRight).toBeLessThanOrEqual(1);
+  expect(cropped.bufferTaller).toBeLessThanOrEqual(1);
+  expect(cropped.bufferWider).toBeLessThanOrEqual(1);
 });
 
 test("escape during a slow open cancels it instead of dismissing the shelf", async ({ page }) => {
@@ -464,6 +503,9 @@ test("a capture whose file has gone reports rather than doing nothing", async ({
 
   await page.locator("#shelf-edit").click();
 
+  // Asserted on the text for the same reason as above: the boot message made
+  // "the strip is visible" true before this test did anything at all.
+  await expect(page.locator("#shelf-alert")).toHaveText(/its file is gone/);
   await expect(page.locator("#shelf-alert")).toBeVisible();
   await expect(page.locator(".editor")).toHaveCount(0);
 });
@@ -489,4 +531,79 @@ test("a double click on save writes one file", async ({ page }) => {
   // had its chance before the count means anything.
   await page.waitForTimeout(200);
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("save_edit").length)).toBe(1);
+});
+
+// ── The popped column ─────────────────────────────────────────────────────
+//
+// Every test above reaches the editor through `openBrowse`. None of them did
+// before either, which is how two blockers lived here: the column shape hides
+// the alert strip, and the column's expiry timer dismisses the window. Both
+// are reachable by an ordinary sequence — a capture lands, you click the card,
+// you press `e`.
+
+/** Open the editor the way a user does when a capture has just landed. */
+async function openEditorFromColumn(
+  page: import("@playwright/test").Page,
+  options: { fakeClock?: boolean } = {},
+): Promise<void> {
+  // Installed before `bootShelf`, which is the only order that works: the app
+  // captures `setTimeout` at module evaluation.
+  if (options.fakeClock) await page.clock.install();
+  await bootShelf(page);
+  await page.evaluate(() => {
+    window.__shotshelf__.respond("preview_shelf", null);
+    window.__shotshelf__.respond("save_edit", "/edits/wide (edited).png");
+  });
+  // No `openBrowse`: this is the auto-popup column.
+  await land(page, FIXTURE.wide);
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
+
+  await page.locator(".tile").first().click();
+  await page.keyboard.press("e");
+  await expect(page.locator(".editor__canvas")).toBeVisible();
+}
+
+test("opening the editor from the column puts the shelf into the browse shape", async ({
+  page,
+}) => {
+  // `window::preview` sets Rust's "opened" flag; this event is the only thing
+  // that tells the front-end. Without it the shelf kept rendering its column
+  // shape around a full-size editor — which is what made both blockers below
+  // reachable at all.
+  await openEditorFromColumn(page);
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "browse");
+});
+
+test("a failed save is visible when the editor was opened from the column", async ({ page }) => {
+  await openEditorFromColumn(page);
+  await drag(page, [30, 25], [170, 95]);
+  await page.evaluate(() => window.__shotshelf__.reject("save_edit", "the disk is full"));
+
+  await page.locator("#editor-save").click();
+
+  // The redact tool destroys pixels and the docs sell it as permanent. This
+  // message was being written correctly and painted out of existence by
+  // `.shelf[data-mode="column"] .shelf__alert { display: none }`.
+  await expect(page.locator("#shelf-alert")).toHaveText(/could not be saved/);
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+  await expect(page.locator(".editor")).toHaveCount(1);
+});
+
+test("the column's timer does not tear down an open editor", async ({ page }) => {
+  // `#ageColumn` vetoed on a drag in flight but not on an open overlay. When
+  // the last card aged out it dismissed the window, which discarded the editor
+  // and every unsaved mark in it — on a timer, with no message.
+  await openEditorFromColumn(page, { fakeClock: true });
+  await drag(page, [30, 25], [170, 95]);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  // Well past the card's minute, with the pointer off the window so no hold
+  // is keeping the column alive. The clock is a real installed fake — without
+  // `clock.install()` before boot, `runFor` advances nothing and the test
+  // asserts that 0 ms of ageing changed nothing.
+  await page.mouse.move(0, 0);
+  await page.clock.runFor(70_000);
+
+  await expect(page.locator(".editor__canvas")).toBeVisible();
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
 });

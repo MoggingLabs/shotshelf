@@ -7,6 +7,7 @@
  * a test that stops matching the app the moment start-up changes.
  */
 
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -82,21 +83,29 @@ export interface BootOptions {
   }>;
 }
 
+/**
+ * The defaults the app really starts on, read from the file both Rust and the
+ * front-end assert against.
+ *
+ * Not written out again here. The harness used to carry its own copy — two, in
+ * fact — so adding a setting could pass the Rust round-trip test and the
+ * TypeScript one while every e2e test silently ran against a settings object
+ * missing the new field. That is precisely the drift the fixture exists to
+ * prevent, reproduced inside the gate meant to catch it.
+ */
+const DEFAULT_SETTINGS = JSON.parse(
+  readFileSync(path.join(FIXTURES, "default-settings.json"), "utf8"),
+) as Record<string, unknown>;
+
 export async function bootShelf(page: Page, options: BootOptions = {}): Promise<void> {
-  if (options.settings) {
-    await page.addInitScript((settings) => {
-      window.__shotshelfStubs__ = {
-        get_settings: {
-          retentionHours: null,
-          maxItems: 50,
-          hotkey: "CommandOrControl+Shift+S",
-          downscaleExports: false,
-          pinned: [],
-          ...settings,
-        },
-      };
-    }, options.settings);
-  }
+  await page.addInitScript((seed) => {
+    // Merged, not assigned. A spec that seeds its own start-up stubs runs its
+    // init script before this one, and assigning wholesale dropped them —
+    // silently, so the next test to seed both would have failed for a reason
+    // with nothing to do with what it was testing.
+    const existing = window.__shotshelfStubs__ ?? {};
+    window.__shotshelfStubs__ = { get_settings: seed, ...existing };
+  }, { ...DEFAULT_SETTINGS, ...options.settings });
 
   await page.addInitScript(installTauriMock);
   await serveFixtures(page);

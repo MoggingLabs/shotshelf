@@ -55,8 +55,6 @@ interface TestHooks {
   hang(cmd: string): void;
   /** Deliver a Tauri event to whatever the app has listening. */
   emit(event: string, payload: unknown): void;
-  /** How many listeners are attached to an event. */
-  listenerCount(event: string): number;
 }
 
 /**
@@ -121,13 +119,11 @@ export function installTauriMock(): void {
    */
   const defaults: Record<string, unknown> = {
     "catch_watch_dirs": [],
-    "get_settings": {
-      retentionHours: null,
-      maxItems: 50,
-      hotkey: "CommandOrControl+Shift+S",
-      downscaleExports: false,
-      pinned: [],
-    },
+    // No `get_settings` here on purpose: `bootShelf` seeds it from
+    // `tests/fixtures/default-settings.json`, the same file Rust and the
+    // front-end assert their defaults against. A third hand-written copy in
+    // this file is how the harness would go on booting the app with a settings
+    // shape the app no longer has.
     "set_pinned": null,
     "text_recognition_available": true,
     "set_capture_count": null,
@@ -139,6 +135,13 @@ export function installTauriMock(): void {
     "describe_capture": { secrets: [], scanned: true },
     ...(window.__shotshelfStubs__ ?? {}),
   };
+
+  /** Deliver an event to whatever the app has listening. */
+  function emitTo(event: string, payload: unknown): void {
+    for (const id of listeners.get(event) ?? []) {
+      callbacks.get(id)?.({ event, id, payload });
+    }
+  }
 
   function invoke(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
     // Event plumbing is part of the runtime, not part of the app's contract,
@@ -157,6 +160,26 @@ export function installTauriMock(): void {
     }
 
     calls.push({ cmd, args });
+
+    // Two commands emit `shelf://opened` from Rust, and the front-end depends
+    // on it: `window::open` and `window::preview` both set the "opened" flag,
+    // and this event is the only thing that tells the webview so.
+    //
+    // Modelled here because a stub that answers but does not emit is a lie
+    // about the contract. `preview_shelf` not emitting was a real defect — the
+    // shelf kept rendering its column shape around a full-size editor, which
+    // hid the alert strip and left the column's expiry timer running — and no
+    // browser test could see it while the harness had the same gap.
+    if ((cmd === "show_shelf" && args["focus"] === true) || cmd === "preview_shelf") {
+      queueMicrotask(() => {
+        emitTo("shelf://opened", null);
+      });
+    }
+    if (cmd === "hide_shelf") {
+      queueMicrotask(() => {
+        emitTo("shelf://hidden", null);
+      });
+    }
 
     const declared = responses.get(cmd);
     if (declared) {
@@ -217,11 +240,6 @@ export function installTauriMock(): void {
     respondWith: (cmd, answer) => responses.set(cmd, { kind: "from-args", answer }),
     reject: (cmd, message) => responses.set(cmd, { kind: "error", message }),
     hang: (cmd) => responses.set(cmd, { kind: "pending" }),
-    emit: (event, payload) => {
-      for (const id of listeners.get(event) ?? []) {
-        callbacks.get(id)?.({ event, id, payload });
-      }
-    },
-    listenerCount: (event) => (listeners.get(event) ?? []).length,
+    emit: emitTo,
   };
 }

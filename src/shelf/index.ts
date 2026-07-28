@@ -29,7 +29,13 @@ import { Selection } from "./selection.ts";
 import { ShelfStore } from "./store.ts";
 import { type Capture, captureId, type ShelfItem } from "./types.ts";
 import { ShelfView } from "./view/index.ts";
-import { discardPreview, hidePreview, showPreview } from "./view/preview.ts";
+import {
+  discardPreview,
+  hidePreview,
+  previewedId,
+  previewIsOpen,
+  showPreview,
+} from "./view/preview.ts";
 
 export type { Capture } from "./types.ts";
 
@@ -57,7 +63,7 @@ export interface ShelfOptions {
    * Reported rather than exposed, so the control that acts on a selection can
    * show itself without anything outside the shelf holding selection state.
    */
-  onSelectionChange(picked: number): void;
+  onSelectionChange(picked: number, editable: boolean): void;
   /**
    * Something the user needs telling about.
    *
@@ -119,6 +125,20 @@ export class Shelf {
 
   get columnIsEmpty(): boolean {
     return this.#column.isEmpty;
+  }
+
+  /**
+   * Whether the editor or the quick look is on screen, or about to be.
+   *
+   * "The user is in the middle of something", for every timer that would
+   * otherwise put the window away underneath them. There are two such timers —
+   * the column's expiry and the launch dismissal — and they each had their own
+   * idea of what counts: the column vetoed on a drag in flight, the launch
+   * dismissal on a drag or the settings panel, and neither knew about the
+   * overlay. Both tore an open editor down and took every unsaved mark with it.
+   */
+  get overlayOpen(): boolean {
+    return editorIsOpen() || previewIsOpen();
   }
 
   /** Window height the column needs for what it is holding. */
@@ -193,6 +213,15 @@ export class Shelf {
   /** The single way a capture leaves. Both routes out clean up identically. */
   #release(item: ShelfItem): void {
     this.#view.release(item.id);
+    // A capture leaving takes its quick look with it. Deleting the picked
+    // capture while looking at it left a full-size picture of something the
+    // shelf no longer had, with no way to dismiss it but Escape — and the id
+    // needed to notice was already being recorded and never read.
+    //
+    // The *editor* deliberately survives this. Its pixels are in memory and
+    // `save_edit` no longer needs the original, so the annotation can still be
+    // finished and saved; closing it would throw that work away.
+    if (previewedId() === item.id) this.closePreview();
     // The poster frame is ours; the recording is not. Only the cache is cleared.
     if (item.kind === "video") void forgetVideo(item.path);
   }
@@ -251,7 +280,19 @@ export class Shelf {
   }
 
   #ageColumn(): void {
+    // An OS drag and an open overlay are both "the user is in the middle of
+    // something"; ageing the column out from under either ends with the window
+    // dismissed. `#dragging` was here from the start and the overlay was not,
+    // so a column that emptied while you were annotating tore the editor down
+    // and took every unsaved mark with it — silently, on a timer, with the
+    // window disappearing at the same moment.
+    //
+    // Belt to the braces in `window::preview`, which now puts the shelf into
+    // the browse shape so this cannot be reached with an overlay open at all.
+    // Two independent reasons for the same rule, because losing someone's work
+    // is not a failure worth being clever about.
     if (this.#mode !== "column" || this.#dragging) return;
+    if (this.overlayOpen) return;
     if (!this.#column.expire()) return;
 
     this.#refresh();
@@ -280,7 +321,14 @@ export class Shelf {
 
   #reflectSelection(): void {
     this.#view.reflectSelection(new Set(this.#selection.ids()));
-    this.#options.onSelectionChange(this.#selection.size);
+    const picked = this.#pickedItems();
+    // Editability is reported alongside the count because the count alone
+    // cannot answer it: one picked *recording* showed the Edit control, and
+    // pressing it did nothing at all and said nothing either.
+    this.#options.onSelectionChange(
+      picked.length,
+      picked.length === 1 && picked[0]?.kind === "image",
+    );
   }
 
   /** What the shelf is showing, in the order it is showing it. */
@@ -359,12 +407,25 @@ export class Shelf {
    * intensities rather than two windows.
    */
   editPicked(): void {
+    // Every reason not to open is checked *before* the quick look is torn
+    // down. `discardPreview` deliberately does not give the window back, so
+    // tearing down first and bailing afterwards stranded an always-on-top
+    // window at preview size with the browse list inside it — the exact
+    // symptom the editor's own restore was added to fix, on a path that
+    // predated it.
+    const [item] = this.#pickedItems();
+    if (!item) return;
+    if (item.kind === "video") {
+      // The control should not be offered at all, and is not; this is the
+      // keyboard path, where `e` reaches whatever happens to be picked.
+      this.#options.onProblem("A recording cannot be marked up.");
+      return;
+    }
+
     // Torn down rather than closed: closing gives the window back to the
     // browse shape, and the editor is about to ask for a large one — the user
     // would watch it shrink and grow again for no reason.
     discardPreview();
-    const [item] = this.#pickedItems();
-    if (!item) return;
 
     void openEditor(item, this.#overlay, {
       saved: (path) => {

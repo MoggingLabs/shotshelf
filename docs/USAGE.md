@@ -58,8 +58,10 @@ Shotshelf lives in the tray (Windows, Linux) / menu bar (macOS). It has no taskb
 design — the shelf is a **popover that rests in the bottom-right corner of your screen**, just
 clear of the taskbar, not a window that sits open all day.
 
-- **Click the icon**, or press the hotkey, to open it. It closes when you click away or press Esc.
-- **When a capture lands** it peeks for about four seconds and closes itself. It never takes
+- **Click the icon**, or press the hotkey, to open it. Esc closes it, as does the − button. It
+  deliberately does *not* close when you click away: an opened shelf is sticky, because the whole
+  point is dragging out of it and into something else.
+- **When a capture lands** it peeks for about a minute and closes itself. It never takes
   focus, so it can't swallow what you're typing. Hover it and it stays open for as long as you
   want it.
 - The icon's tooltip tells you how many captures are on the shelf. On macOS the count also sits
@@ -79,7 +81,7 @@ open the flyout to click it, or use the hotkey.
 | **macOS** | wherever `defaults read com.apple.screencapture location` points, otherwise `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
 | **Linux** | `~/Pictures/Screenshots` (GNOME, XDG portal) and `~/Pictures` (Spectacle, Flameshot), plus `~/Videos` and `~/Videos/Screencasts` | the clipboard watch applies here too |
 
-Folders that don't exist are skipped. The status line at the bottom of the shelf tells you how
+Folders that don't exist are skipped. The dot in the title strip turns green once it is watching, and its tooltip tells you how
 many it's watching.
 
 Take a screenshot. Within about a second the shelf appears with a thumbnail of it.
@@ -255,11 +257,14 @@ yet. Your captures live wherever the OS put them and Shotshelf never moves or de
 
 ## Updates
 
-On launch Shotshelf asks the internal feed whether a newer version exists. If one does, it
-downloads and installs it in place; restart to run it. If the feed is unreachable — you're
+On launch Shotshelf asks the internal feed whether a newer version exists. If one does, it says
+so once and does nothing else — nothing is downloaded and nothing is replaced. Installing is
+your decision, taken by fetching the installer yourself. If the feed is unreachable — you're
 offline, or off the VPN — it carries on silently.
 
-An update is only installed if it carries a valid signature from the MoggingLabs updater key.
+It used to download and install the update in place, unattended, at every launch. That is not
+something an app should do without asking, and it is not what "asks whether a newer version
+exists" means, so it no longer happens.
 A compromised feed cannot make Shotshelf run arbitrary code.
 
 To go back a version, install the older build over the top.

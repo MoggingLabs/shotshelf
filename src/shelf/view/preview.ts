@@ -36,6 +36,26 @@ let opening = false;
  * a close so the same keystroke does not also dismiss the popover behind it.
  */
 let openTicket = 0;
+/**
+ * Why the in-flight open was invalidated.
+ *
+ * The ticket says *that* it was superseded; it does not say by what, and the
+ * two cases need opposite endings. Backing out owes the browse window back.
+ * The window being put away owes nothing — restoring there puts an
+ * always-on-top window the user just dismissed back on screen, focused, which
+ * is the exact thing `discard*` exists to avoid.
+ */
+let abandoned = false;
+
+/** Whether a quick look is on screen, or about to be. */
+export function previewIsOpen(): boolean {
+  return open !== undefined || opening;
+}
+
+/** Which capture it is showing, so the shelf can tell when that one leaves. */
+export function previewedId(): string | undefined {
+  return open?.id;
+}
 
 /**
  * Show a capture at readable size.
@@ -48,6 +68,7 @@ export async function showPreview(item: ShelfItem, host: HTMLElement): Promise<v
   teardown();
 
   opening = true;
+  abandoned = false;
   const ticket = ++openTicket;
   try {
     await mount(ticket, item, host);
@@ -69,7 +90,7 @@ async function mount(ticket: number, item: ShelfItem, host: HTMLElement): Promis
   // Cancelled while Rust was resizing: the window has already grown, so the
   // close that cancelled this still owes the restore it could not do.
   if (ticket !== openTicket) {
-    void browseShelf();
+    if (!abandoned) void browseShelf();
     return;
   }
 
@@ -96,6 +117,7 @@ async function mount(ticket: number, item: ShelfItem, host: HTMLElement): Promis
 export function hidePreview(): boolean {
   const pending = opening;
   openTicket += 1;
+  abandoned = false;
   if (!open) return pending;
 
   teardown();
@@ -113,6 +135,7 @@ export function hidePreview(): boolean {
  */
 export function discardPreview(): void {
   openTicket += 1;
+  abandoned = true;
   teardown();
 }
 

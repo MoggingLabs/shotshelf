@@ -16,7 +16,7 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use crate::{
     imaging::{self, compare},
-    webview_path::existing_file,
+    webview_path::{absolute, existing_file},
 };
 
 /// Where edits live, under the app's data directory.
@@ -100,7 +100,11 @@ pub async fn save_edit<R: Runtime>(
     source: String,
     png: Vec<u8>,
 ) -> Result<String, String> {
-    let source = existing_file(&source)?;
+    // Absolute, but not required to still exist. The source is taken only for
+    // its name and the pixels are already in hand; refusing to write because
+    // the original has since gone would discard the annotation to protect a
+    // file this function never opens.
+    let source = absolute(&source)?;
 
     if png.is_empty() {
         return Err("the edited capture came back empty".to_owned());

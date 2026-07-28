@@ -43,9 +43,11 @@ const shelf = new Shelf(
   {
     onColumnChange: () => popover.onColumnChange(),
     // A comparison of one capture, or of five, is not a thing.
-    onSelectionChange: (picked) => {
+    onSelectionChange: (picked, editable) => {
       compareButton.toggleAttribute("hidden", picked !== 2);
-      editButton.toggleAttribute("hidden", picked !== 1);
+      // Not `picked !== 1`: a single picked recording has nothing to mark up,
+      // and offering the control for it made the button look broken.
+      editButton.toggleAttribute("hidden", !editable);
     },
     onProblem: (message) => say(message),
     limits: () => currentSettings(),
@@ -53,9 +55,11 @@ const shelf = new Shelf(
 );
 
 const popover = new Popover(root, shelf, {
-  // An OS drag steals focus and the settings panel is a deliberate act; a
-  // launch appearance must not vanish out from under either.
-  busy: () => shelf.dragging || settingsOpen(),
+  // An OS drag steals focus, the settings panel is a deliberate act, and an
+  // open editor is someone's unsaved work; a launch appearance must not vanish
+  // out from under any of them. The overlay was missing from this list, so the
+  // four-second launch timer discarded an editor opened inside it.
+  busy: () => shelf.dragging || shelf.overlayOpen || settingsOpen(),
 });
 
 shelf.start();

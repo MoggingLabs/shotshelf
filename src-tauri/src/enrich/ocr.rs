@@ -56,40 +56,6 @@ pub fn text_recognition_available() -> bool {
     platform::available()
 }
 
-/// The most of one capture this will hold in memory at a time.
-///
-/// Generous for what it is guarding — a 6K screenshot is a few megabytes — and
-/// the point is only that there *is* a ceiling. The recognisers below hand the
-/// whole file to the OS in a single allocation, and the path reaches them from
-/// the webview, so an unbounded read turns one stray path into an
-/// out-of-memory kill of the whole app.
-///
-/// Linux does not need this: tesseract is handed the path and reads the file
-/// itself, in its own process.
-#[cfg(any(target_os = "windows", target_os = "macos"))]
-const MAX_CAPTURE_BYTES: u64 = 96 * 1024 * 1024;
-
-/// Read a capture into memory, refusing one that is implausibly large.
-#[cfg(any(target_os = "windows", target_os = "macos"))]
-fn read_capture(path: &Path) -> std::io::Result<Vec<u8>> {
-    use std::io::Read;
-
-    let file = std::fs::File::open(path)?;
-    let size = file.metadata()?.len();
-    if size > MAX_CAPTURE_BYTES {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("{size} bytes is past the ceiling for a single capture"),
-        ));
-    }
-
-    let mut bytes = Vec::new();
-    // Capped a second time on the read itself: the file can grow between the
-    // metadata call and here.
-    file.take(MAX_CAPTURE_BYTES).read_to_end(&mut bytes)?;
-    Ok(bytes)
-}
-
 #[cfg(target_os = "windows")]
 mod platform {
     use std::path::Path;
@@ -122,7 +88,7 @@ mod platform {
         // Read through an in-memory stream rather than `StorageFile`, which
         // applies broker rules that do not apply to a desktop app reading a
         // file it was handed by the OS.
-        let bytes = super::read_capture(path).map_err(|err| {
+        let bytes = crate::webview_path::read_capture(path).map_err(|err| {
             windows::core::Error::new(windows::Win32::Foundation::E_FAIL, err.to_string())
         })?;
 
@@ -180,7 +146,7 @@ mod platform {
     /// nothing to gain from threading a completion handler through a module
     /// with one job.
     pub fn recognise(path: &Path) -> Option<String> {
-        let bytes = super::read_capture(path).ok()?;
+        let bytes = crate::webview_path::read_capture(path).ok()?;
 
         // Handed the file's bytes rather than a URL: the URL initialiser needs
         // ImageIO, and this way the same read serves any format Vision knows.

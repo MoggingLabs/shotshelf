@@ -12,8 +12,9 @@ Thanks for taking the time to contribute!
 3. **Keep both platforms working.** Every change is verified on **Windows and macOS**, or clearly
    flagged as platform-specific. Catch + drag-out are the two features that must never regress on
    either OS.
-4. **Local-only, always.** No network calls, no telemetry, no cloud. If a change would send a capture
-   anywhere off the device, it doesn't belong here.
+4. **Local-only, always.** No telemetry, no cloud, and exactly one network call: the launch-time
+   update *check*, which sends nothing but the running version number and installs nothing. If a
+   change would send a capture anywhere off the device, it doesn't belong here.
 5. **Be kind.** See the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
 ## Workflow

@@ -187,3 +187,30 @@ async function trackCount(page: import("@playwright/test").Page): Promise<number
       return tracks.split(/\s+/).filter(Boolean).length;
     });
 }
+
+test("the alert strip is not hidden by the column shape when an overlay is up", async ({
+  page,
+}) => {
+  // The second lock on a door `window::preview` now closes. The column shape
+  // hides the alert strip as furniture you did not ask for — but an editor's
+  // failed save is reported there, and the editor's own docstring calls that
+  // the one failure that must never be quiet. Reached directly, because the
+  // state it guards is meant to be unreachable through the app.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
+
+  // Nothing on the overlay: the strip stays out of the way, as intended.
+  await page.evaluate(() => {
+    document.querySelector("#shelf-alert")?.removeAttribute("hidden");
+  });
+  await expect(page.locator("#shelf-alert")).toBeHidden();
+
+  // Something on the overlay: the strip has to come back.
+  await page.evaluate(() => {
+    const frame = document.createElement("div");
+    frame.className = "editor";
+    document.querySelector("#shelf-overlay")?.append(frame);
+  });
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+});

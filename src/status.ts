@@ -7,12 +7,39 @@
  */
 
 import { maybeEl } from "./dom.ts";
-/** The alert strip stays hidden until there is something worth reading. */
+/** How long a message stays on the strip before it takes itself down. */
+const ALERT_MS = 12_000;
+
+let alertTimer: number | undefined;
+
+/**
+ * The alert strip stays hidden until there is something worth reading, and
+ * goes away again afterwards.
+ *
+ * The clearing half is not tidiness. A message that never leaves permanently
+ * costs a line of a 225px panel and, far worse, a stale one reads as current —
+ * the strip carried "No capture folders found" from start-up onwards, so
+ * "the alert is visible" was true for the entire session. Three regression
+ * tests used exactly that as their proof that a failure had been reported, and
+ * all three passed with the code that reports it deleted.
+ */
 export function say(message: string): void {
   const alert = maybeEl<HTMLElement>("#shelf-alert");
   if (!alert) return;
   alert.textContent = message;
   alert.removeAttribute("hidden");
+
+  window.clearTimeout(alertTimer);
+  alertTimer = window.setTimeout(hush, ALERT_MS);
+}
+
+/** Take the strip down, and stop it coming back on an old timer. */
+function hush(): void {
+  window.clearTimeout(alertTimer);
+  const alert = maybeEl<HTMLElement>("#shelf-alert");
+  if (!alert) return;
+  alert.textContent = "";
+  alert.setAttribute("hidden", "");
 }
 
 /**
@@ -38,7 +65,7 @@ function describeWatch(dirs: readonly string[]): string {
  * worse option — it made an unchecked capture look identical to a checked one.
  */
 export function noteScanUnavailable(): void {
-  const mark = document.querySelector<HTMLElement>("#shelf-mark");
+  const mark = maybeEl<HTMLElement>("#shelf-mark");
   if (!mark) return;
   mark.title = `${mark.title}
 

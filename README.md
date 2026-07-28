@@ -150,8 +150,9 @@ tell the two apart.
 ### The shelf
 
 The shelf is a **popover resting in the bottom-right corner of the screen**, 225×420, not a window that sits on your
-screen. It opens on a tray click or the hotkey — focused, so Esc and clicking away dismiss it
-like any other popover — and when a capture lands it **peeks** for about four seconds without
+screen. It opens on a tray click or the hotkey — focused, so Esc dismisses it, and it stays put
+while you work in other windows rather than vanishing on focus loss — and when a capture lands
+it **peeks** for about a minute without
 ever taking focus, then closes itself. Hovering it holds it open; dragging out of it will not
 dismiss it. A shelf that appears on every screenshot and *stays* is the thing people end up
 turning off, and a shelf that steals focus mid-sentence is the complaint Dropover's users made.

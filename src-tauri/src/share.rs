@@ -20,7 +20,7 @@ use crate::{
     enrich::{self, Findings},
     handoff,
     settings::SettingsStore,
-    webview_path::existing_file,
+    webview_path::{existing_file, read_capture},
 };
 
 /// Recordings have no thumbnail of their own until phase 05, so they drag
@@ -208,7 +208,7 @@ pub fn copy_capture<R: Runtime>(
     let payload = match kind {
         CaptureKind::Image => {
             let handed_over = handoff::file_for(&app, &source, settings.get().downscale_exports);
-            Payload::Pixels(std::fs::read(&handed_over).map_err(|err| err.to_string())?)
+            Payload::Pixels(read_capture(&handed_over).map_err(|err| err.to_string())?)
         }
         // A recording pastes as a file, not as pixels.
         CaptureKind::Video => Payload::File(file_uri(&source)),

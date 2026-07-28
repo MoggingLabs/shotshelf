@@ -98,6 +98,10 @@ test("a comparison that fails says so and keeps both captures", async ({ page })
 
   await page.locator("#shelf-compare").click();
 
+  // The message, not just that the strip is showing one. Start-up writes "No
+  // capture folders found" to the same strip in every test, so asserting only
+  // that it is visible passed with the failure report deleted.
+  await expect(page.locator("#shelf-alert")).toHaveText(/could not be compared/);
   await expect(page.locator("#shelf-alert")).toBeVisible();
   await expect(page.locator(".tile")).toHaveCount(2);
 });

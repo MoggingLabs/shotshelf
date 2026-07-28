@@ -13,31 +13,80 @@
 //! module exactly as it was, which is why this is a module rather than an
 //! `edit.rs` that imports from `share.rs`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// Resolve a webview-supplied path to a file that is actually there.
+/// Accept a webview-supplied path without requiring it to still exist.
 ///
-/// Two checks, both load-bearing:
+/// **Absolute** is the part that always matters: a relative path is resolved
+/// against whatever the process's working directory happens to be — not a
+/// property the front-end knows or should depend on, and on a packaged build
+/// not even stable.
 ///
-/// **Absolute.** A relative path is resolved against whatever the process's
-/// working directory happens to be — which is not a property the front-end
-/// knows or should depend on, and on a packaged build is not even stable.
-///
-/// **Present.** A tile can outlive its file: an emptied Recycle Bin, a cleared
-/// temp folder, a capture moved out from under the shelf. Handing the OS a
-/// missing path makes for a drag that silently does nothing, and every caller
-/// here would rather report that than fail halfway through.
-pub fn existing_file(path: &str) -> Result<PathBuf, String> {
+/// Existence is a separate question, because for one caller it is the wrong
+/// one. `save_edit` takes the source path purely to name the result, and the
+/// editor is holding the composited pixels in memory by then. Refusing to
+/// write because the original has gone — an emptied Recycle Bin, which this
+/// app's own docs call routine — throws away the annotation the user just
+/// spent five minutes on, to protect a file nothing is going to read.
+pub fn absolute(path: &str) -> Result<PathBuf, String> {
     let source = PathBuf::from(path);
 
     if !source.is_absolute() {
         return Err(format!("{path} is not an absolute path"));
     }
+
+    Ok(source)
+}
+
+/// Resolve a webview-supplied path to a file that is actually there.
+///
+/// For every caller that goes on to *read* the file. A tile can outlive its
+/// file, and handing the OS a missing path makes for a drag that silently does
+/// nothing — every caller here would rather report that than fail halfway
+/// through.
+pub fn existing_file(path: &str) -> Result<PathBuf, String> {
+    let source = absolute(path)?;
+
     if !source.is_file() {
         return Err(format!("{path} is no longer on disk"));
     }
 
     Ok(source)
+}
+
+/// The most of one capture that is ever held in memory at a time.
+///
+/// Generous for what it guards — a 6K screenshot is a few megabytes — and the
+/// point is only that there *is* a ceiling. Every caller below hands a whole
+/// file to something in a single allocation, and the path reaches them from
+/// the webview, so an unbounded read turns one stray path into an
+/// out-of-memory kill of the app.
+pub const MAX_CAPTURE_BYTES: u64 = 96 * 1024 * 1024;
+
+/// Read a capture into memory, refusing one that is implausibly large.
+///
+/// Here rather than beside any one caller because there are three, in three
+/// modules, and the last round bounded the two that had been named in a review
+/// while the third — `copy_capture`, reading whatever `handoff` handed back,
+/// which with export sizing off is the original — kept reading without a
+/// ceiling. Same argument, same input, different file.
+pub fn read_capture(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(path)?;
+    let size = file.metadata()?.len();
+    if size > MAX_CAPTURE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{size} bytes is past the ceiling for a single capture"),
+        ));
+    }
+
+    let mut bytes = Vec::new();
+    // Capped a second time on the read itself: the file can grow between the
+    // metadata call and here.
+    file.take(MAX_CAPTURE_BYTES).read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 #[cfg(test)]

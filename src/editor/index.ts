@@ -75,6 +75,16 @@ let opening = false;
  * unwinds when it notices, and the close reports that it consumed the key.
  */
 let openTicket = 0;
+/**
+ * Why the in-flight open was invalidated.
+ *
+ * The ticket says *that* it was superseded; it does not say by what, and the
+ * two cases need opposite endings. Backing out owes the browse window back.
+ * The window being put away owes nothing — restoring there puts an
+ * always-on-top window the user just dismissed back on screen, focused, which
+ * is the exact thing `discard*` exists to avoid.
+ */
+let abandoned = false;
 /** Guards the save the same way; a double click wrote two files. */
 let saving = false;
 
@@ -94,6 +104,7 @@ export async function openEditor(
   discardEditor();
 
   opening = true;
+  abandoned = false;
   const ticket = ++openTicket;
   try {
     await open(ticket, item, host, callbacks);
@@ -124,7 +135,7 @@ async function open(
   // close that cancelled this is still owed the restore it could not do
   // against an editor that did not exist yet.
   if (ticket !== openTicket) {
-    void browseShelf();
+    if (!abandoned) void browseShelf();
     return;
   }
 
@@ -175,6 +186,7 @@ async function open(
 export function closeEditor(): boolean {
   const pending = opening;
   openTicket += 1;
+  abandoned = false;
   if (!live) return pending;
 
   teardown();
@@ -193,6 +205,7 @@ export function closeEditor(): boolean {
  */
 export function discardEditor(): void {
   openTicket += 1;
+  abandoned = true;
   teardown();
 }
 

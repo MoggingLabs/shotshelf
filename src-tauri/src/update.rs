@@ -1,14 +1,26 @@
-//! In-place updates from the internal release feed.
+//! Asking the internal release feed whether a newer build exists.
 //!
 //! This is the *only* thing Shotshelf ever sends over the network, and it sends
-//! nothing but its own version: the endpoint is asked whether something newer
-//! exists. No capture ever leaves the device, and there is no telemetry.
+//! nothing but its own version. No capture ever leaves the device, and there is
+//! no telemetry.
 //!
-//! Updates are refused unless they are signed by the key whose public half is
-//! in `tauri.conf.json`, so a compromised feed cannot push arbitrary code.
+//! **It asks, and stops there.** It used to call `download_and_install` at every
+//! launch — unattended, with no prompt and no way to decline — while this file,
+//! `lib.rs` and the usage guide all described it as a check. Silently replacing
+//! its own executable is not something an app whose entire pitch is restraint
+//! gets to do without being asked, and an app that says it only checks must
+//! only check. Installing is the user's decision, taken by running the
+//! installer they choose to download.
+//!
+//! The payload is signed, and the signature is verified by the updater plugin
+//! against the public key in `tauri.conf.json` — that remains true and is what
+//! makes the *offer* trustworthy, but a valid signature is not consent.
 
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Emitter, Runtime};
 use tauri_plugin_updater::UpdaterExt;
+
+/// Event carrying the version that is available, for the shelf to mention.
+pub const UPDATE_EVENT: &str = "update://available";
 
 /// Look for a newer build in the background at startup.
 ///
@@ -25,11 +37,9 @@ pub fn check_on_launch<R: Runtime>(app: &AppHandle<R>) {
                         "shotshelf: update {} available (running {})",
                         update.version, update.current_version
                     );
-
-                    match update.download_and_install(|_, _| {}, || {}).await {
-                        Ok(()) => println!("shotshelf: update installed — restart to run it"),
-                        Err(err) => eprintln!("shotshelf: could not install the update: {err}"),
-                    }
+                    // Told, not done. The shelf mentions it once; nothing is
+                    // downloaded and nothing is replaced.
+                    let _ = app.emit(UPDATE_EVENT, update.version.clone());
                 }
                 Ok(None) => println!("shotshelf: already up to date"),
                 Err(err) => eprintln!("shotshelf: update check failed: {err}"),

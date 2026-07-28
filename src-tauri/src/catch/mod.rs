@@ -110,12 +110,17 @@ impl CaptureSink {
         };
 
         match app.emit(CAPTURE_EVENT, &capture) {
-            Ok(()) => println!(
-                "shotshelf: caught {:?} {} [{}]",
-                kind,
-                capture.path,
-                capture.context.label.as_deref().unwrap_or("unknown app"),
-            ),
+            // The window title is deliberately absent from this line.
+            //
+            // It is chosen by whatever program was in front, and a terminal
+            // sets its title to the command line — `PGPASSWORD=... psql` in
+            // front when you press PrtSc. USAGE tells people to run the binary
+            // from a terminal, and on macOS and Linux a GUI app's stdout is
+            // routinely collected by the unified log or the journal: on disk,
+            // outside the app, unredacted, and untouched by any retention
+            // setting. The capture beside it gets masked previews and a
+            // careful `Findings` split; this went out in plaintext.
+            Ok(()) => println!("shotshelf: caught {:?} {}", kind, capture.path),
             Err(err) => eprintln!("shotshelf: could not emit {CAPTURE_EVENT}: {err}"),
         }
     }

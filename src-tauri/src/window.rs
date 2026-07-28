@@ -29,6 +29,26 @@ fn is_opened() -> bool {
     OPENED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Mark the shelf as up because you asked for it, and tell the front-end.
+///
+/// One function because these are one fact kept in two places, and the two
+/// must move together. They did not: `open` set the flag and emitted, while
+/// `preview` set the same flag and emitted nothing — so the webview went on
+/// rendering its column shape around a full-size editor. That shape hides the
+/// alert strip, which is where a failed save is reported, and it keeps the
+/// column's expiry timer running, which dismissed the window and took the
+/// user's unsaved marks with it.
+///
+/// `peek` deliberately does not use this: it sets the flag *false*, and the
+/// window is still on screen, so there is nothing for the front-end to adopt
+/// beyond what it already knows.
+fn mark_opened<R: Runtime>(shelf: &WebviewWindow<R>) {
+    set_opened(true);
+    // The front-end owns the shape: tell it this was deliberate, so it swaps
+    // out of the auto-popup column and stops running its timers.
+    let _ = shelf.emit("shelf://opened", ());
+}
+
 /// How far the popover sits from the corner it rests in.
 const SCREEN_MARGIN: f64 = 12.0;
 
@@ -85,15 +105,11 @@ pub fn open<R: Runtime>(app: &AppHandle<R>) {
         return;
     };
 
-    set_opened(true);
     let _ = shelf.set_size(tauri::LogicalSize::new(BROWSE_SIZE.0, BROWSE_SIZE.1));
     place(&shelf, BROWSE_SIZE);
     let _ = shelf.show();
     let _ = shelf.set_focus();
-
-    // The front-end owns the shape: tell it this was deliberate, so it swaps
-    // out of the auto-popup column and stops running its timers.
-    let _ = shelf.emit("shelf://opened", ());
+    mark_opened(&shelf);
 }
 
 /// Show the narrow column without taking focus, sized to just the cards it
@@ -167,11 +183,13 @@ pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) {
     let width = max_width.min(max_height * aspect).max(BROWSE_SIZE.0);
     let height = (width / aspect).min(max_height).max(200.0);
 
-    set_opened(true);
     let _ = shelf.set_size(tauri::LogicalSize::new(width, height));
     let _ = shelf.center();
     let _ = shelf.show();
     let _ = shelf.set_focus();
+    // Safe when already browsing: `adoptBrowse` is front-end state only and
+    // never calls back into Rust, so this cannot re-enter.
+    mark_opened(&shelf);
 }
 
 pub fn hide<R: Runtime>(app: &AppHandle<R>) {
