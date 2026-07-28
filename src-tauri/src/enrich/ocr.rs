@@ -13,12 +13,14 @@
 //!
 //! * **Windows** — `Windows.Media.Ocr`, part of the OS since 10. No extra
 //!   permission, no model to download, no network.
-//! * **macOS** — Vision would do this well, but reading a *window title*
-//!   there needs Screen Recording permission and Shotshelf documents that it
-//!   does not need it. Vision itself does not, so this is a gap rather than a
-//!   refusal; see the note on the stub below.
-//! * **Linux** — nothing built in. Tesseract is the obvious candidate and is
-//!   a system package rather than something to vendor.
+//! * **macOS** — the Vision framework, the same recogniser Preview and Quick
+//!   Look use. No permission either: reading a *window title* on macOS needs
+//!   Screen Recording, but reading a file you were handed does not.
+//! * **Linux** — Tesseract, if it is installed. There is nothing built into
+//!   the platform, and vendoring an OCR engine to guarantee a feature almost
+//!   nobody on Linux is asking for is a poor trade against the binary size and
+//!   the build complexity. Shelling out to a system package it may already
+//!   have costs nothing when it is absent.
 //!
 //! Every platform that cannot do it returns `None`, and `None` is ordinary:
 //! an unenriched capture behaves exactly as every capture did before.
@@ -43,10 +45,12 @@ pub fn recognise(path: &Path) -> Option<String> {
 /// Asked once at start-up so the shelf can say plainly that credential
 /// checking is unavailable here, rather than leaving every capture looking as
 /// though it had been checked and come back clean.
+/// Not `const`: on Linux this depends on whether the machine has Tesseract,
+/// so it is a question about the running system rather than about the build.
 #[tauri::command]
 #[must_use]
-pub const fn text_recognition_available() -> bool {
-    platform::AVAILABLE
+pub fn text_recognition_available() -> bool {
+    platform::available()
 }
 
 #[cfg(target_os = "windows")]
@@ -59,7 +63,9 @@ mod platform {
         Storage::Streams::{DataWriter, InMemoryRandomAccessStream},
     };
 
-    pub const AVAILABLE: bool = true;
+    pub const fn available() -> bool {
+        true
+    }
 
     /// Windows' own OCR engine, driven synchronously.
     ///
@@ -114,21 +120,129 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
 mod platform {
     use std::path::Path;
 
-    pub const AVAILABLE: bool = false;
+    use objc2_foundation::{NSArray, NSData, NSDictionary};
+    use objc2_vision::{
+        VNImageRequestHandler, VNRecognizeTextRequest, VNRecognizedTextObservation, VNRequest,
+    };
 
-    /// Not yet implemented off Windows.
+    pub const fn available() -> bool {
+        true
+    }
+
+    /// Vision's text recogniser, run synchronously.
     ///
-    /// macOS could use Vision and Linux could shell out to Tesseract, and both
-    /// are worth doing. Neither is stubbed with something that pretends to
-    /// work: a scanner that silently finds nothing would make the secret
-    /// warning quietly useless on those platforms, which is worse than the
-    /// front-end saying plainly that text recognition is unavailable here.
-    pub fn recognise(_path: &Path) -> Option<String> {
-        None
+    /// `performRequests` blocks until the request finishes, which is what this
+    /// wants: it already runs on a worker off the catch pipeline, so there is
+    /// nothing to gain from threading a completion handler through a module
+    /// with one job.
+    pub fn recognise(path: &Path) -> Option<String> {
+        let bytes = std::fs::read(path).ok()?;
+
+        // Handed the file's bytes rather than a URL: the URL initialiser needs
+        // ImageIO, and this way the same read serves any format Vision knows.
+        let data = NSData::with_bytes(&bytes);
+        let options = NSDictionary::new();
+        // SAFETY: `alloc` produces the uninitialised instance this consumes,
+        // and neither the data nor the options outlive the handler.
+        let handler = unsafe {
+            VNImageRequestHandler::initWithData_options(
+                VNImageRequestHandler::alloc(),
+                &data,
+                &options,
+            )
+        };
+
+        let request = unsafe { VNRecognizeTextRequest::new() };
+        let requests = NSArray::from_slice(&[&*request as &VNRequest]);
+
+        // A failure here is "no text", the same as every other failure in this
+        // module — there is nothing a user could do about a codec refusing one
+        // screenshot.
+        handler.performRequests_error(&requests).ok()?;
+
+        // SAFETY: read after the request has been performed, which is the only
+        // time the framework documents `results` as valid.
+        let results = unsafe { request.results() }?;
+
+        let mut out = String::new();
+        for observation in &results {
+            let Ok(text) = observation
+                .downcast_ref::<VNRecognizedTextObservation>()
+                .ok_or(())
+            else {
+                continue;
+            };
+            // One candidate: this is a screenshot, not handwriting, and the
+            // alternatives are for interactive correction rather than for a
+            // scanner deciding whether a token is on screen.
+            let candidates = text.topCandidates(1);
+            let Some(best) = candidates.iter().next() else {
+                continue;
+            };
+
+            if !out.is_empty() {
+                // One observation per line, joined as they were laid out:
+                // layout is most of what makes a stack trace readable.
+                out.push('\n');
+            }
+            out.push_str(&best.string().to_string());
+        }
+
+        Some(out)
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+mod platform {
+    use std::path::Path;
+
+    /// Tesseract, if the machine has it.
+    ///
+    /// Shelled out to rather than linked: `leptess` would make an OCR engine a
+    /// hard build dependency of an app that is compile-verified on Linux and
+    /// run on it by nobody yet, and the binary is a package most distributions
+    /// already carry. Absent, this is simply unavailable — which the shelf says
+    /// out loud rather than letting an unchecked capture look checked.
+    ///
+    /// Probed once and remembered: this asks the machine a question, and
+    /// spawning a process to re-ask it per capture would be absurd.
+    static PRESENT: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
+        std::process::Command::new("tesseract")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    });
+
+    pub fn available() -> bool {
+        *PRESENT
+    }
+
+    pub fn recognise(path: &Path) -> Option<String> {
+        if !available() {
+            return None;
+        }
+
+        // `-` writes the text to stdout instead of to a file beside the
+        // capture, which matters: the folder being read is a folder Shotshelf
+        // is watching, and writing into it would catch our own output.
+        let output = std::process::Command::new("tesseract")
+            .arg(path)
+            .arg("-")
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
     }
 }
 
@@ -148,7 +262,13 @@ mod tests {
         // Asked at start-up so the shelf can say plainly that credential
         // checking is off here, rather than letting every unchecked capture
         // look like one that was checked and came back clean.
-        assert_eq!(text_recognition_available(), cfg!(target_os = "windows"));
+        //
+        // Not asserted to a fixed value: on Linux the answer depends on
+        // whether the machine has Tesseract, which is the point.
+        let answer = text_recognition_available();
+        if cfg!(any(target_os = "windows", target_os = "macos")) {
+            assert!(answer, "both have a recogniser built into the OS");
+        }
     }
 
     #[cfg(target_os = "windows")]
