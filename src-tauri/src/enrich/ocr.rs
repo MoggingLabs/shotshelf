@@ -149,17 +149,18 @@ mod platform {
         // ImageIO, and this way the same read serves any format Vision knows.
         let data = NSData::with_bytes(&bytes);
         let options = NSDictionary::new();
-        // SAFETY: `alloc` produces the uninitialised instance this consumes,
-        // and neither the data nor the options outlive the handler.
-        let handler = unsafe {
-            VNImageRequestHandler::initWithData_options(
-                VNImageRequestHandler::alloc(),
-                &data,
-                &options,
-            )
-        };
+        // No `unsafe` on any of these three: objc2 marks them safe, because an
+        // allocation consumed by its own initialiser, a request with no
+        // arguments, and reading a property all have no invariant for a caller
+        // to uphold. An `unsafe` block that guards nothing is worse than none
+        // — it spends the reader's attention on a promise never at risk.
+        let handler = VNImageRequestHandler::initWithData_options(
+            VNImageRequestHandler::alloc(),
+            &data,
+            &options,
+        );
 
-        let request = unsafe { VNRecognizeTextRequest::new() };
+        let request = VNRecognizeTextRequest::new();
         let requests = NSArray::from_slice(&[&*request as &VNRequest]);
 
         // A failure here is "no text", the same as every other failure in this
@@ -167,9 +168,8 @@ mod platform {
         // screenshot.
         handler.performRequests_error(&requests).ok()?;
 
-        // SAFETY: read after the request has been performed, which is the only
-        // time the framework documents `results` as valid.
-        let results = unsafe { request.results() }?;
+        // Only valid once the request has been performed, which it has.
+        let results = request.results()?;
 
         let mut out = String::new();
         for observation in &results {
