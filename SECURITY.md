@@ -70,3 +70,19 @@ None of these can leak a capture off the machine — the network surface is one 
 that seals the webview is written to allow nothing else. But that policy is itself on the list
 above: it is verified by inspection, not by having ever been enforced. "It starts and works" is
 not among the things this repository can currently demonstrate.
+
+## Known advisories in dependencies
+
+One open advisory, carried knowingly:
+
+- **`glib` 0.18.5 — RUSTSEC unsoundness in the `Iterator` and `DoubleEndedIterator` impls for
+  `VariantStrIter`** (moderate). Linux only: `glib` reaches this tree through GTK and WebKitGTK,
+  which Tauri depends on for the Linux webview. It is not resolvable from here — `cargo update -p
+  glib` reports 0.18.5 as the newest compatible release, and the fix is in 0.20, which arrives
+  only when Tauri's GTK stack moves. Shotshelf does not use `VariantStrIter`, directly or
+  transitively through any call it makes; the exposure is that the code is linked in, not that it
+  is reached. It will clear when Tauri updates, and it is listed here rather than dismissed
+  because "a dependency we cannot patch" is exactly the kind of thing that goes unrecorded and
+  then unnoticed.
+
+`npm audit` reports no vulnerabilities in the front-end tree.
