@@ -200,3 +200,31 @@ async function lastShowHeight(page: import("@playwright/test").Page): Promise<nu
   const calls = await page.evaluate(() => window.__shotshelf__.callsTo("show_shelf"));
   return calls.at(-1)?.args["height"] as number | undefined;
 }
+
+test("a card is labelled with what was in front when it was taken", async ({ page }) => {
+  await bootShelf(page);
+  await page.evaluate(() =>
+    window.__shotshelf__.emit("capture://new", {
+      path: "/captures/wide.png",
+      kind: "image",
+      ts: 1,
+      context: { app: "Code", title: "auth.ts", label: "Code — auth.ts" },
+    }),
+  );
+
+  // A capture is named after the clock, which identifies it to a filesystem
+  // and to nobody else. What was in front is how a person remembers which
+  // screenshot this is.
+  await expect(page.locator(".tile__label")).toHaveText("Code — auth.ts");
+  // The filename is still what the file is called, so it stays reachable.
+  await expect(page.locator(".tile__label")).toHaveAttribute("title", /wide\.png/);
+});
+
+test("a card with no context falls back to the filename", async ({ page }) => {
+  // Linux says nothing, and macOS says only the application — absence has to
+  // be ordinary rather than a blank label.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+
+  await expect(page.locator(".tile__label")).toHaveText("wide.png");
+});

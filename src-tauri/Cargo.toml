@@ -58,11 +58,22 @@ regex = "1"
 # Rounded window corners, which CSS cannot deliver on its own — see
 # `window::round_corners`. Same version Tauri already depends on, so this only
 # turns on an extra feature rather than pulling a second copy of the crate.
+# The frontmost application's name, which needs no permission at all — unlike
+# its window title, which on macOS needs Screen Recording. See enrich/foreground.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSWorkspace",
+    "NSRunningApplication",
+] }
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",   # rounded window corners
     "Media_Ocr",            # the OS text recogniser
+    "Win32_UI_WindowsAndMessaging", # which window was in front
+    "Win32_System_Threading",       # and which program owns it
     "Graphics_Imaging",     # decoding a capture for it
     "Storage_Streams",      # feeding it bytes without going through StorageFile
     "Globalization",        # it follows the user's own language list

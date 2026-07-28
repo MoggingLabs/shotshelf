@@ -44,6 +44,14 @@ pub struct Capture {
     pub kind: CaptureKind,
     /// Unix milliseconds.
     pub ts: u64,
+    /// What was in front when this landed.
+    ///
+    /// Read here rather than when a card is drawn, because by then it is no
+    /// longer true — the whole value of "VS Code — auth.ts" is that it names
+    /// the moment the capture was taken, and a second later the answer is
+    /// "Shotshelf".
+    #[serde(skip_serializing_if = "crate::enrich::foreground::Context::is_empty")]
+    pub context: crate::enrich::foreground::Context,
 }
 
 /// Classify by extension. `None` means "not a capture" — ignore the file.
@@ -98,10 +106,16 @@ impl CaptureSink {
             path: path.display().to_string(),
             kind,
             ts: now_ms(),
+            context: crate::enrich::foreground::current(),
         };
 
         match app.emit(CAPTURE_EVENT, &capture) {
-            Ok(()) => println!("shotshelf: caught {:?} {}", kind, capture.path),
+            Ok(()) => println!(
+                "shotshelf: caught {:?} {} [{}]",
+                kind,
+                capture.path,
+                capture.context.label.as_deref().unwrap_or("unknown app"),
+            ),
             Err(err) => eprintln!("shotshelf: could not emit {CAPTURE_EVENT}: {err}"),
         }
     }

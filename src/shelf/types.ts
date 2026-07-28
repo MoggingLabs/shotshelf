@@ -10,11 +10,26 @@
 export type CaptureKind = "image" | "video";
 
 /** Payload of the Rust `capture://new` event. */
+/**
+ * What was in front when a capture landed.
+ *
+ * Read at catch time, not when a card is drawn: by then the answer is
+ * "Shotshelf". Absent on platforms that cannot say without asking for a
+ * permission the app promises not to need.
+ */
+interface CaptureContext {
+  app?: string;
+  title?: string;
+  /** The two as one line, composed in Rust so there is only one answer. */
+  label?: string;
+}
+
 export interface Capture {
   path: string;
   kind: CaptureKind;
   /** Unix milliseconds. */
   ts: number;
+  context?: CaptureContext;
 }
 
 /**

@@ -14,6 +14,7 @@
 //! Nothing here is on the critical path. A capture appears on the shelf the
 //! moment it lands; enrichment catches up and fills it in.
 
+pub mod foreground;
 pub mod ocr;
 pub mod secrets;
 

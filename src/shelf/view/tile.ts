@@ -24,11 +24,22 @@ export interface TileCallbacks extends TileHandlers {
   pick(id: string, event: PointerEvent): void;
 }
 
-/** The filename only earns its space on hover; the picture is the identity. */
-function label(name: string): HTMLElement {
+/**
+ * The line along the bottom of a card, shown on hover.
+ *
+ * "VS Code — auth.ts" where the OS could tell us, and the filename otherwise.
+ * A capture is named after the clock, which identifies it to a filesystem and
+ * to nobody else; what was in front when it was taken is how a person actually
+ * remembers which screenshot this is.
+ */
+function label(item: ShelfItem): HTMLElement {
   const el = document.createElement("div");
   el.className = "tile__label";
-  el.textContent = name;
+  const context = item.context?.label;
+  el.textContent = context ?? fileName(item.path);
+  // The filename is still what the file is called, so it stays reachable.
+  el.title = context ? `${context}
+${fileName(item.path)}` : fileName(item.path);
   return el;
 }
 
@@ -101,7 +112,7 @@ export function buildTile(item: ShelfItem, callbacks: TileCallbacks): HTMLElemen
   }
 
   tile.append(
-    label(name),
+    label(item),
     actions(item.id, item.path, item.kind, name, item.pinned, callbacks),
   );
 
