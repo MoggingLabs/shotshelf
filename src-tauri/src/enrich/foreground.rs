@@ -42,14 +42,19 @@ pub struct Context {
 }
 
 impl Context {
-    /// Build a context, working out how it reads.
+    /// Build a context from whatever the platform could find.
     ///
-    /// The application leads, because it is the part that stays the same
-    /// across a session and so is what the eye scans a list for. A title that
-    /// merely repeats the application earns no space beside it — plenty of
-    /// programs title their window after themselves.
+    /// Takes raw strings and tidies them here rather than at each call site,
+    /// so every platform — including the one that finds nothing — goes through
+    /// the same construction. Splitting that out left the cleaning and the
+    /// labelling with no caller at all on Linux, which the dead-code gate
+    /// refused, and rightly: a helper only some platforms reach is a helper
+    /// whose behaviour differs by platform for no stated reason.
     #[must_use]
-    pub fn new(app: Option<String>, title: Option<String>) -> Self {
+    pub fn new(app: Option<&str>, title: Option<&str>) -> Self {
+        let app = app.and_then(tidy);
+        let title = title.and_then(tidy);
+
         let label = match (app.as_deref(), title.as_deref()) {
             (Some(app), Some(title)) if !title.eq_ignore_ascii_case(app) => {
                 Some(format!("{app} — {title}"))
@@ -105,7 +110,7 @@ mod platform {
         },
     };
 
-    use super::{tidy, Context};
+    use super::Context;
 
     pub fn current() -> Context {
         // SAFETY: every call below takes a handle this function obtained and
@@ -117,7 +122,7 @@ mod platform {
                 return Context::default();
             }
 
-            Context::new(app_name(window), title(window))
+            Context::new(app_name(window).as_deref(), title(window).as_deref())
         }
     }
 
@@ -135,7 +140,7 @@ mod platform {
         }
 
         #[allow(clippy::cast_sign_loss)] // Guarded positive above.
-        tidy(&String::from_utf16_lossy(&buffer[..written as usize]))
+        Some(String::from_utf16_lossy(&buffer[..written as usize]))
     }
 
     /// The owning executable, as a person would name it: `Code.exe` → `Code`.
@@ -166,13 +171,13 @@ mod platform {
 
         let path = String::from_utf16_lossy(&buffer[..length as usize]);
         let stem = std::path::Path::new(&path).file_stem()?.to_string_lossy();
-        tidy(&stem)
+        Some(stem.into_owned())
     }
 }
 
 #[cfg(target_os = "macos")]
 mod platform {
-    use super::{tidy, Context};
+    use super::Context;
 
     /// The frontmost application, and deliberately not its window title.
     ///
@@ -182,17 +187,14 @@ mod platform {
     pub fn current() -> Context {
         use objc2_app_kit::NSWorkspace;
 
-        // SAFETY: a main-thread-agnostic read of a shared singleton; the
-        // returned objects are autoreleased and not held past this scope.
-        let app = unsafe {
-            let workspace = NSWorkspace::sharedWorkspace();
-            workspace
-                .frontmostApplication()
-                .and_then(|app| app.localizedName())
-                .map(|name| name.to_string())
-        };
+        // No `unsafe` needed: objc2 exposes these as safe, because reading a
+        // shared workspace singleton has no invariant for a caller to uphold.
+        let app = NSWorkspace::sharedWorkspace()
+            .frontmostApplication()
+            .and_then(|app| app.localizedName())
+            .map(|name| name.to_string());
 
-        Context::new(app.as_deref().and_then(tidy), None)
+        Context::new(app.as_deref(), None)
     }
 }
 
@@ -206,7 +208,9 @@ mod platform {
     /// per-compositor portal dance is a great deal of surface to maintain for
     /// a label on a card. An empty context is ordinary rather than an error.
     pub fn current() -> Context {
-        Context::default()
+        // Through the same constructor as everywhere else, so "found nothing"
+        // is one shape of the same answer rather than a separate path.
+        Context::new(None, None)
     }
 }
 
@@ -224,25 +228,25 @@ mod tests {
     fn the_label_leads_with_the_application() {
         // The application is what stays the same across a session, so it is
         // what the eye scans a list for.
-        let context = Context::new(Some("Code".into()), Some("auth.ts".into()));
+        let context = Context::new(Some("Code"), Some("auth.ts"));
         assert_eq!(context.label.as_deref(), Some("Code — auth.ts"));
     }
 
     #[test]
     fn a_title_that_only_repeats_the_app_earns_no_space() {
         // Plenty of applications title their window after themselves.
-        let context = Context::new(Some("Firefox".into()), Some("firefox".into()));
+        let context = Context::new(Some("Firefox"), Some("firefox"));
         assert_eq!(context.label.as_deref(), Some("Firefox"));
     }
 
     #[test]
     fn either_half_alone_is_still_a_label() {
         assert_eq!(
-            Context::new(Some("Code".into()), None).label.as_deref(),
+            Context::new(Some("Code"), None).label.as_deref(),
             Some("Code"),
         );
         assert_eq!(
-            Context::new(None, Some("auth.ts".into())).label.as_deref(),
+            Context::new(None, Some("auth.ts")).label.as_deref(),
             Some("auth.ts"),
         );
     }
