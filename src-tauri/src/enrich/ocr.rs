@@ -124,6 +124,9 @@ mod platform {
 mod platform {
     use std::path::Path;
 
+    // `AnyThread` is what puts `alloc` in scope; without it the allocation
+    // method the initialiser consumes simply does not exist on the type.
+    use objc2::AnyThread;
     use objc2_foundation::{NSArray, NSData, NSDictionary};
     use objc2_vision::{
         VNImageRequestHandler, VNRecognizeTextRequest, VNRecognizedTextObservation, VNRequest,

@@ -77,6 +77,8 @@ objc2-vision = { version = "0.3", default-features = false, features = [
     "VNRequestHandler",
     "VNTypes",
 ] }
+# The runtime itself, for the `AnyThread` trait that provides `alloc`.
+objc2 = { version = "0.6", default-features = false, features = ["std"] }
 objc2-foundation = { version = "0.3", default-features = false, features = [
     "std",
     "NSString",
