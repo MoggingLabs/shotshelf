@@ -121,6 +121,16 @@ export class ShelfView {
     }
   }
 
+  /**
+   * Bring a card into view.
+   *
+   * For the keyboard: arrowing past the fold has to move the list, or the
+   * selection walks somewhere the user cannot see.
+   */
+  scrollIntoView(id: string): void {
+    this.#tiles.get(id)?.scrollIntoView({ block: "nearest" });
+  }
+
   /** Pinning is applied to the live card rather than by rebuilding it. */
   reflectPin(id: string, pinned: boolean): void {
     const tile = this.#tiles.get(id);

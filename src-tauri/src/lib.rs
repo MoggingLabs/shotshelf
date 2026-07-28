@@ -45,6 +45,8 @@ pub fn run() {
             settings::set_pinned,
             tray::set_capture_count,
             window::show_shelf,
+            window::preview_shelf,
+            window::close_preview,
             window::hide_shelf,
         ])
         // ── Adopted plugins — don't hand-roll what these already solve ──

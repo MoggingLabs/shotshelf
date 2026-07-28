@@ -87,3 +87,18 @@ export function textRecognitionAvailable(): Promise<boolean> {
 export function compareCaptures(before: string, after: string): Promise<string> {
   return invoke<string>("compare_captures", { before, after });
 }
+
+/**
+ * Grow the popover to show one capture at readable size.
+ *
+ * Rust chooses the size and reports it back: only it knows the work area, and
+ * a preview that spills off the screen is not a preview.
+ */
+export function previewShelf(aspect: number): Promise<[number, number]> {
+  return invoke<[number, number]>("preview_shelf", { aspect });
+}
+
+/** Put the popover back to the browse view after a preview. */
+export async function closePreview(): Promise<void> {
+  await invoke("close_preview");
+}

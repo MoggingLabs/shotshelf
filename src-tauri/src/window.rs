@@ -113,6 +113,63 @@ pub fn peek<R: Runtime>(app: &AppHandle<R>, height: f64) {
     let _ = shelf.show();
 }
 
+/// The largest a preview may be, as a fraction of the screen's work area.
+///
+/// Not the whole screen: a preview that fills the display is a window you have
+/// to dismiss before you can see what you were comparing it against, and the
+/// point of a quick look is that it is quick.
+const PREVIEW_FRACTION: f64 = 0.72;
+
+/// Show a capture large enough to read.
+///
+/// The shelf is 225 wide, which is enough to recognise a screenshot and not
+/// enough to read one — so a preview is the only way to check *which* of two
+/// similar captures you are about to send without opening it in another app.
+///
+/// Sized to the capture's own shape, capped to the work area so it always
+/// fits, and centred rather than cornered: this one is meant to be looked at.
+/// The caller passes the capture's aspect because only the front-end, which
+/// has the image loaded, knows it.
+pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) -> (f64, f64) {
+    let Some(shelf) = app.get_webview_window(SHELF) else {
+        return BROWSE_SIZE;
+    };
+
+    let (max_width, max_height) = match shelf.primary_monitor().or_else(|_| shelf.current_monitor())
+    {
+        Ok(Some(monitor)) => {
+            let scale = monitor.scale_factor();
+            let area = monitor.work_area();
+            (
+                f64::from(area.size.width) / scale * PREVIEW_FRACTION,
+                f64::from(area.size.height) / scale * PREVIEW_FRACTION,
+            )
+        }
+        // No monitor to measure means no better answer than the browse size.
+        _ => return BROWSE_SIZE,
+    };
+
+    // A sane aspect or nothing: a zero or negative one would divide by zero,
+    // and it arrives from the front-end.
+    let aspect = if aspect.is_finite() && aspect > 0.0 {
+        aspect
+    } else {
+        16.0 / 9.0
+    };
+
+    // Fit inside the box without distorting: whichever edge hits first wins.
+    let width = max_width.min(max_height * aspect).max(BROWSE_SIZE.0);
+    let height = (width / aspect).min(max_height).max(200.0);
+
+    set_opened(true);
+    let _ = shelf.set_size(tauri::LogicalSize::new(width, height));
+    let _ = shelf.center();
+    let _ = shelf.show();
+    let _ = shelf.set_focus();
+
+    (width, height)
+}
+
 pub fn hide<R: Runtime>(app: &AppHandle<R>) {
     let Some(shelf) = app.get_webview_window(SHELF) else {
         return;
@@ -230,4 +287,19 @@ pub fn show_shelf<R: Runtime>(app: AppHandle<R>, focus: bool, height: Option<f64
 #[tauri::command]
 pub fn hide_shelf<R: Runtime>(app: AppHandle<R>) {
     hide(&app);
+}
+
+/// Grow the popover to show one capture large, and report the size chosen.
+///
+/// The front-end needs the size back so it can lay the picture out inside it;
+/// it cannot compute it alone, because only Rust knows the work area.
+#[tauri::command]
+pub fn preview_shelf<R: Runtime>(app: AppHandle<R>, aspect: f64) -> (f64, f64) {
+    preview(&app, aspect)
+}
+
+/// Put the popover back to the browse view after a preview.
+#[tauri::command]
+pub fn close_preview<R: Runtime>(app: AppHandle<R>) {
+    open(&app);
 }

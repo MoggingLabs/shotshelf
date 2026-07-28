@@ -62,8 +62,52 @@ popover.scheduleLaunchDismissal();
 root.addEventListener("pointerenter", () => shelf.holdColumn("pointer", true));
 root.addEventListener("pointerleave", () => shelf.holdColumn("pointer", false));
 
+/**
+ * The keyboard path.
+ *
+ * The shelf is a popover you summon with a hotkey, so reaching for the mouse
+ * to act on what it shows undoes the point of summoning it that way. Only
+ * bound when the shelf is genuinely open — the auto-popup column never takes
+ * focus, so it never sees these.
+ */
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") popover.dismiss();
+  if (event.defaultPrevented) return;
+  // Typing a hotkey into the settings panel is not a shelf command.
+  if (settingsOpen() && event.key !== "Escape") return;
+
+  switch (event.key) {
+    case "Escape":
+      // Escape backs out one level at a time: out of a preview first, and
+      // only then out of the shelf. One key that closes two things at once is
+      // one key that loses your place.
+      if (!shelf.closePreview()) popover.dismiss();
+      return;
+
+    case "ArrowDown":
+    case "ArrowUp":
+      event.preventDefault();
+      shelf.moveSelection(event.key === "ArrowDown" ? 1 : -1);
+      return;
+
+    case " ":
+      event.preventDefault();
+      shelf.togglePreview();
+      return;
+
+    case "Enter":
+      event.preventDefault();
+      shelf.copyPicked();
+      return;
+
+    case "Delete":
+    case "Backspace":
+      event.preventDefault();
+      shelf.removePicked();
+      return;
+
+    default:
+      return;
+  }
 });
 
 hideButton.addEventListener("click", () => popover.dismiss());

@@ -14,7 +14,7 @@
  */
 
 import { persistPinned, type Settings } from "../settings.ts";
-import { compareCaptures, forgetVideo, setCaptureCount } from "./bridge.ts";
+import { compareCaptures, copyCapture, forgetVideo, setCaptureCount } from "./bridge.ts";
 import { ColumnQueue, type HoldReason } from "./column.ts";
 import { armDrag, beginDrag } from "./drag.ts";
 import { columnHeight } from "./geometry.ts";
@@ -22,6 +22,7 @@ import { Selection } from "./selection.ts";
 import { ShelfStore } from "./store.ts";
 import { type Capture, captureId, type ShelfItem } from "./types.ts";
 import { ShelfView } from "./view/index.ts";
+import { hidePreview, previewIsOpen, showPreview } from "./view/preview.ts";
 
 export type { Capture } from "./types.ts";
 
@@ -68,8 +69,11 @@ export class Shelf {
   #dragging = false;
   #timers: number[] = [];
 
+  readonly #list: HTMLElement;
+
   constructor(list: HTMLElement, count: HTMLElement, options: ShelfOptions) {
     this.#options = options;
+    this.#list = list;
     this.#view = new ShelfView(list, count, {
       togglePin: (id) => this.#togglePin(id),
       remove: (id) => this.remove(id),
@@ -324,6 +328,69 @@ export class Shelf {
     } finally {
       this.#comparing = false;
     }
+  }
+
+  // ── Quick look and the keyboard ────────────────────────────────────────
+
+  /** Whether a capture is being shown at readable size. */
+  get previewing(): boolean {
+    return previewIsOpen();
+  }
+
+  /** Close the preview. Returns false if there was nothing to close. */
+  closePreview(): boolean {
+    if (!previewIsOpen()) return false;
+    hidePreview(this.#list);
+    return true;
+  }
+
+  /**
+   * Show the picked capture large, or close the preview if one is open.
+   *
+   * One key, both directions: a quick look you cannot dismiss with the key
+   * that opened it is a modal, and this is meant to be quick.
+   */
+  togglePreview(): void {
+    if (this.closePreview()) return;
+
+    const [item] = this.#pickedItems();
+    if (item) void showPreview(item, this.#list);
+  }
+
+  /**
+   * Move the selection by one card.
+   *
+   * Works off what is on screen rather than the store, so the arrows follow
+   * the order you can see — which is what "the next one" means to someone
+   * looking at it.
+   */
+  moveSelection(delta: number): void {
+    const visible = this.#visibleIds();
+    if (visible.length === 0) return;
+
+    const current = this.#selection.ids().at(-1);
+    const index = current === undefined ? -1 : visible.indexOf(current);
+    // From nothing, the first press lands on the newest — the top of the list
+    // — whichever direction it was.
+    const next = index === -1 ? 0 : Math.min(Math.max(index + delta, 0), visible.length - 1);
+
+    const id = visible[next];
+    if (id === undefined) return;
+
+    this.#selection.only(id);
+    this.#reflectSelection();
+    this.#view.scrollIntoView(id);
+  }
+
+  /** Copy the picked capture, for the keyboard path. */
+  copyPicked(): void {
+    const [item] = this.#pickedItems();
+    if (item) void copyCapture(item.path, item.kind);
+  }
+
+  /** Take the picked captures off the shelf. The files are untouched. */
+  removePicked(): void {
+    for (const item of this.#pickedItems()) this.remove(item.id);
   }
 
   // ── Pins ───────────────────────────────────────────────────────────────

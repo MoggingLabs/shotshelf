@@ -97,6 +97,9 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
 - **Remove** (the cross) — takes it off the shelf. **It never deletes the file.**
 - **Pick several** — click one, then ctrl-click (⌘-click) others, or shift-click for a range.
   Dragging any one of them carries them all, in the order you picked them.
+- **Quick look** — press space to open the picked capture at readable size, and
+  space or Esc to close it. A 225px card is enough to recognise a screenshot and
+  not enough to read one, which is the whole reason this exists.
 - **Compare** — pick exactly two and a Compare button appears in the title strip. It puts them
   side by side with whatever changed outlined, as a single new capture you can drag out. The
   first one you picked is the "before".
@@ -104,6 +107,22 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
 Those three appear on a tile when you hover it.
 - **Show/hide** — the tray icon, its right-click menu, or the global hotkey
   (`Ctrl+Shift+S` on Windows, `⌘⇧S` on macOS by default).
+
+### From the keyboard
+
+The shelf is summoned with a hotkey, so reaching for the mouse to act on what it
+shows rather defeats the point.
+
+| Key | What it does |
+| :-- | :-- |
+| `↑` `↓` | Move between captures, in the order they are shown |
+| `Space` | Open the picked capture at readable size, and close it again |
+| `Enter` | Copy it to the clipboard |
+| `Delete` | Take it off the shelf — **the file stays on disk** |
+| `Esc` | Close the preview, or the shelf if no preview is open |
+
+Escape backs out one level at a time on purpose: one key that closes two things
+at once is one key that loses your place.
 
 Recordings show a frame from themselves plus a badge with their length and size. If a recording
 can't be decoded the tile keeps a film icon and still drags out fine.
