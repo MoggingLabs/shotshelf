@@ -13,13 +13,17 @@
  * without being looked at is a regression signed off by accident.
  */
 
-import { bootShelf, expect, FIXTURE, land, openBrowse, test } from "../harness/app.ts";
+import { bootShelf, DAY, expect, FIXTURE, land, NOW, openBrowse, test } from "../harness/app.ts";
 
 test.describe("appearance", () => {
   test.skip(
     process.platform !== "linux",
     "goldens are taken on Linux; other platforms rasterise text differently",
   );
+
+  test.beforeEach(async ({ page }) => {
+    await page.clock.install({ time: new Date(NOW) });
+  });
 
   /** Wait for every picture to finish loading, so a golden is never a race. */
   async function settled(page: import("@playwright/test").Page): Promise<void> {
@@ -58,8 +62,8 @@ test.describe("appearance", () => {
 
   test("the browse view, grouped by day", async ({ page }) => {
     await bootShelf(page);
-    await land(page, FIXTURE.wide, { ts: Date.UTC(2026, 6, 27, 12) });
-    await land(page, FIXTURE.tall, { ts: Date.UTC(2026, 6, 26, 12) });
+    await land(page, FIXTURE.wide, { ts: NOW - DAY });
+    await land(page, FIXTURE.tall, { ts: NOW - 2 * DAY });
     await openBrowse(page);
     await settled(page);
     await expect(page.locator(".shelf")).toHaveScreenshot("browse.png");

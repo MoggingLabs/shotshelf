@@ -28,12 +28,22 @@ export const FIXTURE = {
   missing: "/captures/gone.png",
 } as const;
 
+/**
+ * A fixed "now" for every test that cares what day it is.
+ *
+ * Day headings read "Today" and "Yesterday" relative to the clock, so anything
+ * asserting on them — or screenshotting them — has to pin it, or the gate
+ * starts failing on the calendar rather than on a change.
+ */
+export const NOW = Date.UTC(2026, 6, 28, 12);
+export const DAY = 86_400_000;
+
 /** A capture payload as Rust would emit it. */
 function capture(
   file: string,
   options: { ts?: number; kind?: "image" | "video" } = {},
 ): { path: string; kind: "image" | "video"; ts: number } {
-  return { path: file, kind: options.kind ?? "image", ts: options.ts ?? Date.UTC(2026, 6, 27, 12) };
+  return { path: file, kind: options.kind ?? "image", ts: options.ts ?? NOW };
 }
 
 /**

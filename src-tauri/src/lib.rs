@@ -10,6 +10,7 @@
 
 mod catch;
 mod hotkey;
+mod imaging;
 mod poster;
 mod settings;
 mod share;
