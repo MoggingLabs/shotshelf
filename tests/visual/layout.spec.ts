@@ -113,24 +113,29 @@ test("the popover's corner radius matches what rounds the window", async ({ page
   await bootShelf(page);
 
   const radius = await page.locator(".shelf").evaluate((el) => getComputedStyle(el).borderRadius);
-  // Which OS this is comes from the test process, not from the page.
+  // The expectation comes from the user agent — the *input* to the decision —
+  // rather than from `data-os`, which is the app's own output.
   //
-  // The page's answer is `data-os`, which `main.ts` sets by sniffing the user
-  // agent — and the radius is selected by that same attribute. Asking the page
-  // therefore compared the stylesheet against itself: if the sniff regressed,
-  // `data-os` went undefined, the expectation moved to "14px", the CSS
-  // override stopped matching, and the test passed while the window showed the
-  // exact wedge it exists to catch.
-  const onWindows = process.platform === "win32";
+  // That is the whole chain: UA → `main.ts` sets `data-os` → the stylesheet
+  // selects a radius. Asserting the radius against `data-os` compared the
+  // stylesheet with itself, so a regressed sniff moved the expectation along
+  // with the result and the test passed while the window showed the wedge.
+  //
+  // Not `process.platform`: that describes the machine, and the page is not on
+  // it. Playwright's Desktop Chrome descriptor carries a Windows UA on every
+  // runner, so the host and the page genuinely disagree — and it is the page's
+  // UA the app reads.
+  const pageOnWindows = await page.evaluate(() => navigator.userAgent.includes("Windows"));
 
   // On Windows the window itself is rounded by DWM at a fixed 8px, and a panel
   // that disagrees leaves the acrylic backdrop showing as a wedge in each
   // corner — which is exactly what "the corners look square" turned out to be.
-  expect(radius).toBe(onWindows ? "8px" : "14px");
+  expect(radius).toBe(pageOnWindows ? "8px" : "14px");
 
-  // And the sniff that selects it is asserted rather than assumed.
+  // And the sniff in between is asserted rather than assumed, so a regression
+  // there fails here instead of quietly moving the goalposts.
   const flagged = await page.evaluate(() => document.documentElement.dataset["os"]);
-  expect(flagged).toBe(onWindows ? "windows" : undefined);
+  expect(flagged).toBe(pageOnWindows ? "windows" : undefined);
 });
 
 test("card controls stay out of the way until you hover", async ({ page }) => {

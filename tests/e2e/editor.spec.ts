@@ -476,5 +476,17 @@ test("a double click on save writes one file", async ({ page }) => {
   await page.locator("#editor-save").click();
   await page.locator("#editor-save").click({ force: true });
 
+  // Waited for rather than read straight away. A save composites the canvas
+  // and encodes it before the call is made, so the count is legitimately 0 for
+  // a moment — reading it immediately asserted that the click had done nothing
+  // yet, which is a race the macOS runner lost.
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("save_edit").length))
+    .toBe(1);
+
+  // And it stays one. This half is a negative — the guard is what stops the
+  // second click starting a second save — so it needs the second click to have
+  // had its chance before the count means anything.
+  await page.waitForTimeout(200);
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("save_edit").length)).toBe(1);
 });
