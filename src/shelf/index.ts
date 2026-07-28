@@ -439,17 +439,35 @@ export class Shelf {
         this.add({ path, kind: "image", ts: Date.now() });
       },
       failed: (message) => this.#options.onProblem(message),
-    }).then(() => {
-      // The editor either mounted or refused. Either way the title-strip
-      // controls depend on whether an overlay is up, and this is the moment
-      // that answer changed.
-      this.#reflectSelection();
-      // And if it refused after the quick look was torn down, the window it
-      // grew is still large with nothing in it. `discardPreview` above owes no
-      // restore by contract, so the debt lands here — the only place that
-      // knows a preview was thrown away for an editor that never opened.
-      if (!this.overlayOpen) void browseShelf();
-    });
+    })
+      // Before the settlement below, not after it, and this ordering is the
+      // whole point. `openEditor` can reject — `Overlay.show` has a `finally`
+      // and no `catch`, so anything thrown while building propagates — and a
+      // bare `.then` is skipped on rejection. That skipped the restore, which
+      // is the one thing that cannot be skipped here: the quick look has
+      // already been discarded, the window has already been grown, and
+      // nothing else in the app knows it is owed back. The user was left with
+      // an always-on-top window at preview size showing the browse list, which
+      // is verbatim what the comment below exists to prevent.
+      .catch((error: unknown) => {
+        console.error("[shotshelf] the editor could not open", error);
+        this.#options.onProblem("That capture could not be opened for editing.");
+      })
+      .then(() => {
+        // The editor either mounted or refused. Either way the title-strip
+        // controls depend on whether an overlay is up, and this is the moment
+        // that answer changed.
+        this.#reflectSelection();
+        // And if it refused after the quick look was torn down, the window it
+        // grew is still large with nothing in it. `discardPreview` above owes
+        // no restore by contract, so the debt lands here — the only place that
+        // knows a preview was thrown away for an editor that never opened.
+        if (!this.overlayOpen) {
+          void browseShelf().catch((error: unknown) => {
+            console.error("[shotshelf] could not restore the browse window", error);
+          });
+        }
+      });
   }
 
   get editing(): boolean {

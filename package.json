@@ -10,7 +10,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "deadcode": "knip && node scripts/check-commands.mjs",
+    "deadcode": "knip && node scripts/check-commands.mjs && node scripts/check-references.mjs",
     "test:unit": "node --test \"src/**/*.test.ts\"",
     "test:e2e": "playwright test tests/e2e",
     "test:visual": "playwright test tests/visual",

@@ -208,3 +208,136 @@ test("a discarded open does not collapse the window under a later one", async ()
   assert.equal(overlay.live, "second", "the later surface is untouched");
   assert.equal(restores.length, 0, "the abandoned open owed nothing");
 });
+
+/**
+ * A fake picture and a fake clock, so the deadline can be reached in a test.
+ *
+ * `readable` touches exactly two things — `window.setTimeout`/`clearTimeout`
+ * and the picture's listeners — which is what makes it testable here at all,
+ * without a browser or a real fifteen-second wait.
+ */
+function fakeClock(): {
+  pending: { fire: () => void; delay: number }[];
+  restore: () => void;
+} {
+  const pending: { fire: () => void; delay: number }[] = [];
+  const cleared = new Set<number>();
+  const previous = (globalThis as { window?: unknown }).window;
+
+  (globalThis as { window?: unknown }).window = {
+    setTimeout: (fn: () => void, delay: number): number => {
+      pending.push({
+        fire: () => {
+          if (!cleared.has(pending.length)) fn();
+        },
+        delay,
+      });
+      return pending.length;
+    },
+    clearTimeout: (id: number): void => void cleared.add(id),
+  };
+
+  return {
+    pending,
+    restore: () => {
+      (globalThis as { window?: unknown }).window = previous;
+    },
+  };
+}
+
+function fakePicture(): {
+  node: HTMLImageElement;
+  fire: (event: "load" | "error") => void;
+} {
+  const handlers = new Map<string, () => void>();
+  const node = {
+    complete: false,
+    naturalWidth: 0,
+    addEventListener: (event: string, handler: () => void): void => void handlers.set(event, handler),
+  };
+  return {
+    node: node as unknown as HTMLImageElement,
+    fire: (event) => handlers.get(event)?.(),
+  };
+}
+
+test("a picture that never loads gives up instead of wedging the overlay", async () => {
+  // Neither `load` nor `error` is guaranteed to fire — a capture on a
+  // disconnected share, one still being written. Without a deadline the open
+  // never ends, the overlay reports itself open forever, and the shelf stops
+  // answering the keyboard for the rest of the session.
+  //
+  // That is the bug this module was extracted to end, and the deadline was
+  // the one part of it with no test anywhere: `readable` had no coverage, so
+  // raising the timeout to an hour or deleting it outright changed nothing
+  // that any gate could see.
+  const clock = fakeClock();
+  try {
+    const { readable } = await import("./overlay.ts");
+    const picture = fakePicture();
+    const waiting = readable(picture.node);
+
+    const deadline = clock.pending[0];
+    assert.ok(deadline, "a deadline was armed");
+    assert.equal(clock.pending.length, 1);
+    assert.equal(
+      deadline.delay,
+      15_000,
+      "long enough for a slow share, short enough to be a wait rather than a hang",
+    );
+
+    deadline.fire();
+    assert.equal(await waiting, undefined, "gave up rather than never resolving");
+  } finally {
+    clock.restore();
+  }
+});
+
+test("a picture that loads settles with the picture and drops its deadline", async () => {
+  const clock = fakeClock();
+  try {
+    const { readable } = await import("./overlay.ts");
+    const picture = fakePicture();
+    const waiting = readable(picture.node);
+
+    picture.fire("load");
+    assert.equal(await waiting, picture.node);
+
+    // The deadline must not still be able to fire: it resolves `undefined`,
+    // and a promise already settled ignores it — but an armed timer that
+    // outlives its promise is a leak per quick look.
+    clock.pending[0]?.fire();
+    assert.equal(await waiting, picture.node, "still the picture");
+  } finally {
+    clock.restore();
+  }
+});
+
+test("a picture that fails settles as unreadable rather than hanging", async () => {
+  const clock = fakeClock();
+  try {
+    const { readable } = await import("./overlay.ts");
+    const picture = fakePicture();
+    const waiting = readable(picture.node);
+
+    picture.fire("error");
+    assert.equal(await waiting, undefined);
+  } finally {
+    clock.restore();
+  }
+});
+
+test("a picture already decoded needs no deadline at all", async () => {
+  // The common case: a thumbnail the browse view has already fetched. Arming
+  // a timer and waiting a microtask for it would delay every quick look.
+  const clock = fakeClock();
+  try {
+    const { readable } = await import("./overlay.ts");
+    const decoded = { complete: true, naturalWidth: 800 } as unknown as HTMLImageElement;
+
+    assert.equal(await readable(decoded), decoded);
+    assert.equal(clock.pending.length, 0, "no timer was armed");
+  } finally {
+    clock.restore();
+  }
+});

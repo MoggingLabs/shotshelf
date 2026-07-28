@@ -52,11 +52,7 @@ pub fn file_for<R: Runtime>(app: &AppHandle<R>, source: &Path, downscale: bool) 
 fn sized_copy<R: Runtime>(app: &AppHandle<R>, source: &Path) -> Result<Option<PathBuf>, String> {
     let dir = cache_dir(app)?.join(key(source));
 
-    // The original filename, so a drop produces the file the user recognises.
-    // The extension becomes .png because the bytes are PNG — handing over a
-    // file whose contents contradict its name breaks whatever opens it.
-    let name = source.file_stem().unwrap_or_default();
-    let target = dir.join(Path::new(name).with_extension("png"));
+    let target = dir.join(handoff_name(source));
 
     // The cache is checked *before* the work it exists to avoid. It used to
     // sit after the re-encode, which meant every drag and every copy paid a
@@ -100,6 +96,39 @@ fn sized_copy<R: Runtime>(app: &AppHandle<R>, source: &Path) -> Result<Option<Pa
     }
 
     Ok(Some(target))
+}
+
+/// What the sized copy is called: the original's name, with a `.png` extension.
+///
+/// The extension has to change because the bytes really are PNG, and handing
+/// over a file whose contents contradict its name breaks whatever opens it.
+/// Everything before the extension is the original's, because the module's
+/// promise at the top of this file is that a drop produces the file the user
+/// recognises.
+///
+/// Appending rather than `with_extension`, which is what this was and which
+/// quietly broke that promise. `with_extension` replaces everything after the
+/// **last dot of the stem** — and macOS names screenshots
+/// `Screenshot 2026-07-27 at 1.30.12 PM.png` by default, whose stem ends
+/// `1.30.12 PM`. So the handed-over file arrived as
+/// `Screenshot 2026-07-27 at 1.30.png`: a different timestamp, silently, on a
+/// first-class platform's out-of-the-box naming.
+///
+/// `OsString` rather than a `String`, so a capture whose name is not valid
+/// UTF-8 keeps its bytes instead of being replaced or dropped.
+fn handoff_name(source: &Path) -> std::ffi::OsString {
+    let stem = source.file_stem().unwrap_or_default();
+    // Only for a path with no file name at all — a bare root. Not reachable
+    // from a watched capture folder, but joining an empty name onto the cache
+    // directory would target the directory itself, and `write` failing on a
+    // directory is a worse way to find that out.
+    let mut name = if stem.is_empty() {
+        std::ffi::OsString::from("capture")
+    } else {
+        stem.to_os_string()
+    };
+    name.push(".png");
+    name
 }
 
 fn cache_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
@@ -235,6 +264,39 @@ mod tests {
         let keyed = fingerprint("/pictures/Screenshot.png", None);
         assert_eq!(keyed.len(), 16);
         assert!(keyed.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn the_sized_copy_keeps_a_name_containing_dots() {
+        // macOS's default screenshot name. `with_extension` treated
+        // `1.30.12 PM` as an extension and replaced it, so the copy claimed a
+        // different time than the capture it came from.
+        let named = handoff_name(Path::new("/p/Screenshot 2026-07-27 at 1.30.12 PM.png"));
+        assert_eq!(named, "Screenshot 2026-07-27 at 1.30.12 PM.png");
+    }
+
+    #[test]
+    fn the_sized_copy_is_named_after_the_original() {
+        assert_eq!(handoff_name(Path::new("/p/shot.jpg")), "shot.png");
+        assert_eq!(handoff_name(Path::new("/p/shot.png")), "shot.png");
+        // A path with no file name would otherwise join nothing onto the cache
+        // directory and target the directory itself.
+        assert_eq!(handoff_name(Path::new("/")), "capture.png");
+    }
+
+    #[test]
+    fn the_sized_copy_is_always_a_png() {
+        // The bytes are PNG regardless of what went in; a name that says
+        // otherwise breaks whatever opens the dropped file.
+        for source in ["/p/a.jpeg", "/p/a.b.c", "/p/a", "/p/a.PNG"] {
+            let named = handoff_name(Path::new(source));
+            assert!(
+                Path::new(&named)
+                    .extension()
+                    .is_some_and(|ext| ext == "png"),
+                "{source} became {named:?}",
+            );
+        }
     }
 
     #[test]

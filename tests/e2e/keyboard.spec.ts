@@ -168,23 +168,34 @@ test("changing a setting saves it and applies it to the shelf", async ({ page })
   await bootShelf(page, { settings: { maxItems: 50 } });
   await land(page, FIXTURE.wide, { ts: 1 });
   await land(page, FIXTURE.tall, { ts: 2 });
+  await land(page, FIXTURE.square, { ts: 3 });
   await openBrowse(page);
-  await expect(page.locator(".tile")).toHaveCount(2);
+  await expect(page.locator(".tile")).toHaveCount(3);
 
-  // Rust clamps and returns what it stored; the front end adopts that answer.
+  // Rust clamps and returns what it stored; the front end adopts **that**
+  // answer, not the value it sent.
+  //
+  // The stub answers with something different from the request on purpose.
+  // It used to echo `args["settings"]` straight back, which made request and
+  // response identical — so a `save()` that ignored the result entirely and
+  // kept `{...current, ...patch}` passed a test named for adopting the answer.
   await page.evaluate(() =>
-    window.__shotshelf__.respondWith("set_settings", (args) => args["settings"]),
+    window.__shotshelf__.respondWith("set_settings", (args) => ({
+      ...(args["settings"] as Record<string, unknown>),
+      maxItems: 1,
+    })),
   );
   await page.locator("#shelf-settings").click();
-  await page.locator("#setting-max").fill("1");
+  await page.locator("#setting-max").fill("25");
   await page.locator("#setting-max").dispatchEvent("change");
 
   const saved = await page.evaluate(
     () => window.__shotshelf__.callsTo("set_settings").at(-1)?.args,
   );
-  expect((saved?.["settings"] as Record<string, unknown>)["maxItems"]).toBe(1);
+  expect((saved?.["settings"] as Record<string, unknown>)["maxItems"]).toBe(25);
 
-  // And the shelf honours the new limit immediately rather than at next launch.
+  // One tile rather than three: the shelf honoured the 1 that came back, not
+  // the 25 it asked for, and did it immediately rather than at next launch.
   await expect(page.locator(".tile")).toHaveCount(1);
 });
 

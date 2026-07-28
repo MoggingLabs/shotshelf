@@ -23,8 +23,11 @@ use crate::{
     webview_path::{existing_file, read_capture},
 };
 
-/// Recordings have no thumbnail of their own until phase 05, so they drag
-/// under the app icon.
+/// The drag image for a recording whose poster frame is not available.
+///
+/// `poster.rs` extracts a real frame for most recordings, but it can fail —
+/// no ffmpeg, an unreadable container, a clip still being written — and a drag
+/// with no image at all is a drag the user cannot see they have started.
 const VIDEO_PREVIEW: &[u8] = include_bytes!("../icons/128x128.png");
 
 /// How long the clipboard watcher should disregard a write we made ourselves.
@@ -340,4 +343,47 @@ fn video_preview<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     }
 
     Ok(preview)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_scan_key_names_a_version_of_a_file_not_just_a_path() {
+        // This module had no tests at all, and this key is the thing standing
+        // between a re-saved capture and the previous file's findings — where
+        // "no findings" is not rendered as "unknown" but as read-and-clean.
+        //
+        // What this can state without depending on the runner's timestamp
+        // granularity: that an existing file gets a version at all, and that
+        // an unreadable one degrades to `None` rather than panicking. The
+        // "a different mtime is a different key" half is the tuple's own
+        // definition, and `handoff::fingerprint` learned the hard way that
+        // going through the filesystem to say so tests the filesystem.
+        let dir = std::env::temp_dir().join(format!("shotshelf-scan-key-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        let file = dir.join("capture.png");
+        std::fs::write(&file, b"pixels").expect("a temp file");
+
+        let (path, version) = scan_key(&file);
+        assert_eq!(path, file, "the key carries which file it is about");
+        assert!(version.is_some(), "an existing capture has a version");
+
+        let (_, missing) = scan_key(&dir.join("never-existed.png"));
+        assert_eq!(missing, None, "an unreadable timestamp is not a panic");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_two_concurrency_limits_leave_the_shelf_usable() {
+        // Both guard CPU-bound work on a machine the user is doing something
+        // else on. Zero would deadlock every caller on a semaphore that never
+        // admits anyone; a large number is the burst these exist to prevent —
+        // pinned captures are exempt from the item cap, so "one per tile" is
+        // unbounded.
+        assert!((1..=4).contains(&SIZING_CONCURRENCY));
+        assert!((1..=4).contains(&SCAN_CONCURRENCY));
+    }
 }

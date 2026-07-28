@@ -84,7 +84,22 @@ export default defineConfig({
     // out its whole timeout against a server that is already up.
     command: "npm run build && npx vite preview --port 4173 --strictPort --host 127.0.0.1",
     url: "http://127.0.0.1:4173",
-    reuseExistingServer: !process.env["CI"],
+    // Never reused, including locally, and this is not a performance oversight.
+    //
+    // `reuseExistingServer: !process.env["CI"]` is the idiom, and it is wrong
+    // for a gate whose whole premise is the line above: a `vite preview` left
+    // over from an earlier run keeps serving the bundle it was started with,
+    // so every subsequent local run tests **the previous build**. Source edits
+    // are invisible to it. That cost a full review round here — a real crop
+    // fix looked unverifiable because the spec probing it, the spec's three
+    // rewrites, and the run that "confirmed the fix was already correct" were
+    // all measuring a bundle from before the fix existed. A gate that reports
+    // on code that was never built is worse than no gate, because it is
+    // believed.
+    //
+    // The price is one `tsc && vite build` per invocation, a few seconds. That
+    // is the cost of the result meaning what it says.
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });

@@ -52,10 +52,17 @@ export function dayLabel(ts: number, now: number = Date.now()): string {
  * Groups captures onto the same day heading, and orders those headings.
  *
  * `YYYY-MM-DD`, so comparing two keys as strings compares them as dates —
- * which is the whole point, and has been wrong twice. Without zero-padding,
- * `2026-11-5` sorted before `2026-5-9` and put December above June. And
- * `getMonth()` is zero-based, so writing it out unadjusted dated every capture
- * to the month before the one it was taken in.
+ * which is the whole point, and has been wrong twice.
+ *
+ * Without zero-padding the comparison is character by character, so
+ * `2026-11-5` sorts *below* `2026-5-9`: `1` is less than `5` at the fifth
+ * character, and the rest is never read. The shelf sorts descending, so that
+ * put May at the top of the list and November underneath it — an older day
+ * above a newer one, which is exactly the ordering the grouping exists to
+ * provide.
+ *
+ * And `getMonth()` is zero-based, so writing it out unadjusted dated every
+ * capture to the month before the one it was taken in.
  *
  * Local time, deliberately: captures are grouped by the day *you* took them,
  * not by the day it was in UTC.

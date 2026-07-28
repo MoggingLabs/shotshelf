@@ -5,9 +5,10 @@
  * somewhere to rest and makes "the one from yesterday" findable.
  *
  * Pure, and separate from the rendering that uses it, because the ordering is
- * the part that has been wrong before: day keys were once built without
- * zero-padding, so `2026-11-5` and `2026-5-9` compared as strings put December
- * before June.
+ * the part that has been wrong before — twice, both times inside `dayKey`,
+ * whose docstring in `format.ts` is where the two failures are written down.
+ * Not repeated here: this file carried its own paraphrase of that example and
+ * had it backwards, which is what a second copy of an explanation is for.
  */
 
 import { dayKey } from "../../format.ts";

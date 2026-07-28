@@ -340,13 +340,10 @@ function render(guide?: Rect): void {
     // picture, and drew no selection rectangle at all. Cropping twice is the
     // ordinary case — `EditSession.setCrop` says so itself.
     //
-    // NOT VERIFIED BY A TEST. The single-crop case is covered
-    // (`editor.spec.ts`, "the crop guide dims around the selection"); a
-    // second-crop spec was written and withdrawn because it kept reporting the
-    // selection as dimmed even with this correction applied, and shipping a
-    // test I cannot explain is worse than admitting the gap. Either the fix is
-    // incomplete or the probe is measuring the wrong frame — the next review
-    // should settle which.
+    // Gated by `editor.spec.ts`, "the crop guide still frames the selection on
+    // a second crop", which fails with `- region.x` removed. The single-crop
+    // spec next to it passes either way — with no crop `region.x` is zero and
+    // the two expressions agree — so that one cannot stand in for this.
     const region = live.session.exportRect();
     paintCropGuide(context, live.canvas, {
       x: (guide.x - region.x) * live.scale,

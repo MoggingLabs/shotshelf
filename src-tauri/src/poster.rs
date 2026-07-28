@@ -176,7 +176,7 @@ pub fn forget_video<R: Runtime>(app: AppHandle<R>, path: String) {
         return;
     };
 
-    let prefix = format!("{:016x}_", cache_key(&source, &meta));
+    let prefix = cache_prefix(cache_key(&source, &meta));
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return;
     };
@@ -348,7 +348,7 @@ fn parse_duration(stderr: &str) -> Option<u64> {
 }
 
 fn cached(dir: &Path, key: u64) -> Option<(PathBuf, Option<u64>)> {
-    let prefix = format!("{key:016x}_");
+    let prefix = cache_prefix(key);
 
     for entry in std::fs::read_dir(dir).ok()?.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -362,12 +362,28 @@ fn cached(dir: &Path, key: u64) -> Option<(PathBuf, Option<u64>)> {
     None
 }
 
+/// What every cached frame for one capture is named with.
+///
+/// The one place the layout is written. It had three copies — here, in
+/// `cached`, and in `forget_video` — and the joining test only reached two of
+/// them, so a change to the naming would have left `forget_video` matching
+/// nothing and quietly leaking a frame per removed recording.
+///
+/// The trailing separator is deliberate and load-bearing twice over. It ends
+/// the fixed-width key so `_na` cannot be read as part of it, and it is `_`
+/// where the staging name uses `.` — which is what keeps a half-written frame
+/// out of both `cached`'s scan and `forget_video`'s sweep.
+fn cache_prefix(key: u64) -> String {
+    format!("{key:016x}_")
+}
+
 /// Duration rides along in the file name so a cache hit needs no second ffmpeg
 /// run just to say how long the clip is.
 fn cache_name(key: u64, duration_ms: Option<u64>) -> String {
+    let prefix = cache_prefix(key);
     match duration_ms {
-        Some(ms) => format!("{key:016x}_{ms}.jpg"),
-        None => format!("{key:016x}_na.jpg"),
+        Some(ms) => format!("{prefix}{ms}.jpg"),
+        None => format!("{prefix}na.jpg"),
     }
 }
 
@@ -416,9 +432,12 @@ mod tests {
     fn duration_survives_a_round_trip_through_the_cache_name() {
         // The length rides in the filename so a cache hit needs no second
         // ffmpeg run; a mismatch here would silently show the wrong duration.
+        // Through `cache_prefix`, not a fourth hand-written copy of the
+        // layout: writing the literal again here made the test agree with
+        // itself rather than with the code that reads these names.
         let name = cache_name(0xdead_beef, Some(8_000));
         let suffix = name
-            .strip_prefix(&format!("{:016x}_", 0xdead_beef_u64))
+            .strip_prefix(&cache_prefix(0xdead_beef))
             .expect("prefix must match what `cached` looks for");
         assert_eq!(
             suffix.trim_end_matches(".jpg").parse::<u64>().ok(),
@@ -430,6 +449,32 @@ mod tests {
     fn an_unknown_duration_still_produces_a_usable_name() {
         let name = cache_name(1, None);
         assert!(name.ends_with("_na.jpg"));
-        assert!(name.starts_with(&format!("{:016x}_", 1_u64)));
+        assert!(name.starts_with(&cache_prefix(1)));
+    }
+
+    #[test]
+    fn every_reader_of_the_cache_agrees_on_one_name() {
+        // `cached` finds a frame, `forget_video` deletes one, `cache_name`
+        // writes one — three call sites that must agree exactly. They held
+        // three separate copies of the layout, and the tests above reached
+        // only two of them, so a change here would have left `forget_video`
+        // matching nothing: every removed recording leaking its frame, for
+        // the life of the cache.
+        let key = 0x0123_4567_89ab_cdef_u64;
+        let prefix = cache_prefix(key);
+        assert!(cache_name(key, Some(1)).starts_with(&prefix));
+        assert!(cache_name(key, None).starts_with(&prefix));
+
+        // A different capture's frames must not be swept by this one's
+        // prefix — the key is fixed-width precisely so it cannot be.
+        assert!(!cache_name(key + 1, Some(1)).starts_with(&prefix));
+
+        // And the staged, half-written frame is matched by none of them: it
+        // separates with `.` where a finished one uses `_`.
+        let staged = format!("{key:016x}.7.staging.jpg");
+        assert!(
+            !staged.starts_with(&prefix),
+            "a partial frame must not be served as a cache hit or swept as a finished one",
+        );
     }
 }

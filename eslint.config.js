@@ -34,7 +34,13 @@ export default defineConfig(
     languageOptions: {
       parserOptions: {
         // `eslint.config.js` is not in the TS project and does not need to be.
-        projectService: { allowDefaultProject: ["eslint.config.js", "scripts/check-commands.mjs"] },
+        projectService: {
+          allowDefaultProject: [
+            "eslint.config.js",
+            "scripts/check-commands.mjs",
+            "scripts/check-references.mjs",
+          ],
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },

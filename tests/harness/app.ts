@@ -94,7 +94,7 @@ export interface BootOptions {
  * missing the new field. That is precisely the drift the fixture exists to
  * prevent, reproduced inside the gate meant to catch it.
  */
-const DEFAULT_SETTINGS = JSON.parse(
+export const DEFAULT_SETTINGS = JSON.parse(
   readFileSync(path.join(FIXTURES, "default-settings.json"), "utf8"),
 ) as Record<string, unknown>;
 

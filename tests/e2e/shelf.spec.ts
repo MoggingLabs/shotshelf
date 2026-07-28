@@ -8,7 +8,15 @@
  * only one of them is caught by testing the rule alone.
  */
 
-import { bootShelf, expect, FIXTURE, land, openBrowse, test } from "../harness/app.ts";
+import {
+  bootShelf,
+  DEFAULT_SETTINGS,
+  expect,
+  FIXTURE,
+  land,
+  openBrowse,
+  test,
+} from "../harness/app.ts";
 
 test("an empty shelf says so rather than showing a blank panel", async ({ page }) => {
   await bootShelf(page);
@@ -261,19 +269,17 @@ test("pins come back when the settings read loses a start-up race and wins the r
   // setup hook, and the point of retrying is that the *transient* case
   // recovers — pins restored, writes allowed. Only the permanent case was
   // covered, so shortening the retry to a single attempt changed nothing.
-  await page.addInitScript(() => {
+  // Built from the shared fixture, not written out again. This object was a
+  // fourth hand-maintained copy of the settings shape and had already drifted
+  // — it was missing `checkForUpdates` — so the one spec that exercises the
+  // start-up read was doing it against a payload the app no longer sends.
+  await page.addInitScript((stored) => {
     window.__shotshelfStubs__ = {
-      get_settings: {
-        __rejectsTimes__: 2,
-        then: {
-          retentionHours: null,
-          maxItems: 50,
-          hotkey: "CommandOrControl+Shift+S",
-          downscaleExports: false,
-          pinned: [{ path: "/captures/tall.png", kind: "image", ts: 1 }],
-        },
-      },
+      get_settings: { __rejectsTimes__: 2, then: stored },
     };
+  }, {
+    ...DEFAULT_SETTINGS,
+    pinned: [{ path: "/captures/tall.png", kind: "image", ts: 1 }],
   });
   await bootShelf(page);
   await openBrowse(page);

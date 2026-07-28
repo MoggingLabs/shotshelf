@@ -237,16 +237,23 @@ fn allow_reading_captures<R: Runtime>(app: &AppHandle<R>, dirs: &[PathBuf]) {
     }
 }
 
-/// Watch-path override. Phase 06 will feed this from the settings file; until
-/// then `SHOTSHELF_WATCH_DIRS` (`;`-separated on Windows, `:` elsewhere) is the
-/// override hook, and how synthetic fixtures drive the engine in testing.
+/// Watch-path override: `SHOTSHELF_WATCH_DIRS`, `;`-separated on Windows and
+/// `:` elsewhere.
+///
+/// Deliberately an environment variable and not a setting. The default watch
+/// folders are discovered from the OS, which is what makes the app work with
+/// no configuration; this exists for the cases discovery cannot cover — a
+/// capture tool writing somewhere unusual — and for driving the engine from
+/// synthetic fixtures in testing, which is not something a settings panel
+/// should offer.
 pub fn overrides_from_env() -> Vec<PathBuf> {
     std::env::var_os("SHOTSHELF_WATCH_DIRS")
         .map(|value| std::env::split_paths(&value).collect())
         .unwrap_or_default()
 }
 
-/// Lets the shelf show where it is listening — and phase 06's settings read it back.
+/// Lets the shelf show where it is listening, so "nothing is appearing" has an
+/// answer the user can see rather than a silence they have to guess at.
 #[tauri::command]
 pub fn catch_watch_dirs<R: Runtime>(app: AppHandle<R>) -> Vec<String> {
     app.try_state::<CatchEngine>()

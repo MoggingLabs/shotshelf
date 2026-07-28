@@ -379,4 +379,55 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn a_header_encoded_path_comes_back_exactly_as_it_went_out() {
+        // The source path travels as a request header because the PNG bytes
+        // are the whole IPC payload, and a header must be ASCII. Accented
+        // folder names and non-Latin scripts are ordinary, so this round trip
+        // decides whether an edit of a capture in `C:\Users\Jose\Pictures`
+        // saves next to the original or fails to find it at all.
+        //
+        // It had no test of any kind. Every case below is one `bridge.ts`
+        // really produces with `encodeURIComponent`.
+        for original in [
+            "/home/someone/Pictures/Screenshot.png",
+            "/home/josé/Imágenes/captura.png",
+            "/home/someone/写真/スクリーンショット.png",
+            r"C:\Users\someone\Pictures\a b (1).png",
+            "/tmp/100% done/plus+and&amp.png",
+            "/tmp/emoji 🎯/shot.png",
+        ] {
+            // Exactly what the front end sends, byte for byte.
+            let encoded = encode_uri_component(original);
+            assert!(encoded.is_ascii(), "a header cannot carry {encoded}");
+            assert_eq!(percent_decode(&encoded), original);
+        }
+    }
+
+    #[test]
+    fn a_malformed_header_is_left_as_written_rather_than_guessed_at() {
+        // The result is used only as a *name*, so mangling beats inventing.
+        // A truncated escape at the very end must not read past the buffer.
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("100%2"), "100%2");
+        assert_eq!(percent_decode("%zz"), "%zz");
+        assert_eq!(percent_decode("%%41"), "%A");
+        assert_eq!(percent_decode(""), "");
+    }
+
+    /// `encodeURIComponent`, so the test states the round trip rather than a
+    /// hand-written expectation of what the front end "probably" sends.
+    fn encode_uri_component(raw: &str) -> String {
+        const UNRESERVED: &str = "-_.!~*'()";
+        let mut out = String::new();
+        for byte in raw.bytes() {
+            if byte.is_ascii_alphanumeric() || UNRESERVED.contains(byte as char) {
+                out.push(byte as char);
+            } else {
+                out.push_str(&format!("%{byte:02X}"));
+            }
+        }
+        out
+    }
 }

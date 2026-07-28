@@ -138,8 +138,11 @@ fn pixel_changed(
             // transparent region differs only in alpha.
             distance + u32::from(a.0[3].abs_diff(b.0[3])) > threshold
         }
-        // Present in one and not the other.
+        // Past the edge of both: the captures are different sizes and this
+        // point is outside each of them, so there is nothing to compare.
         (None, None) => false,
+        // Present in one and not the other — one capture is larger, and the
+        // area only it covers is a change.
         _ => true,
     }
 }
@@ -229,14 +232,12 @@ pub fn side_by_side(
     after: &DynamicImage,
     highlights: &[Region],
 ) -> Option<DynamicImage> {
-    let width = before.width() + GUTTER + after.width();
-    let height = before.height().max(after.height());
-
-    // Four bytes per pixel, in `u64` so the multiply cannot wrap.
-    let bytes = u64::from(width) * u64::from(height) * 4;
-    if bytes > MAX_COMPOSITE_BYTES {
-        return None;
-    }
+    // The only place the composite's size is computed, so the ceiling cannot
+    // be bypassed by deriving the dimensions some other way.
+    let (width, height) = composite_size(
+        (before.width(), before.height()),
+        (after.width(), after.height()),
+    )?;
 
     let mut canvas = RgbaImage::from_pixel(width.max(1), height.max(1), BACKGROUND);
 
@@ -249,6 +250,33 @@ pub fn side_by_side(
         outline(&mut canvas, *region, offset);
     }
     Some(canvas)
+}
+
+/// The composite's dimensions, or `None` if it would pass the ceiling.
+///
+/// Takes sizes rather than images so the refusal can be stated without
+/// building the gigabyte it exists to refuse — the test for it used to
+/// allocate two 512 MiB buffers to reach an assert about not allocating.
+///
+/// Arithmetic in `u64` throughout. The composite's width is a *sum* of two
+/// decoded widths plus the gutter, and that sum could wrap a `u32` before the
+/// ceiling was ever consulted — a wrap that produces a small width, passes the
+/// check, and then blits out of a canvas far too small. `imaging::load`'s
+/// dimension cap makes it unreachable today; it should not depend on that.
+fn composite_size(before: (u32, u32), after: (u32, u32)) -> Option<(u32, u32)> {
+    let width = u64::from(before.0) + u64::from(GUTTER) + u64::from(after.0);
+    let height = u64::from(before.1.max(after.1));
+
+    // Four bytes per pixel. Checked, because at the extremes the product of
+    // two `u32`-derived values overflows even a `u64`, and an overflow is a
+    // refusal rather than a wrap.
+    let bytes = width.checked_mul(height).and_then(|px| px.checked_mul(4))?;
+    if bytes > MAX_COMPOSITE_BYTES {
+        return None;
+    }
+
+    // Under the ceiling both fit a `u32` with room to spare.
+    Some((u32::try_from(width).ok()?, u32::try_from(height).ok()?))
 }
 
 fn blit(canvas: &mut RgbaImage, image: &DynamicImage, offset_x: u32) {
@@ -424,14 +452,27 @@ mod tests {
     #[test]
     fn a_pair_too_large_to_composite_is_refused_rather_than_allocated() {
         // The decodes either side are bounded and the composite was not, though
-        // it is larger than both inputs together. Stated against the ceiling so
-        // it does not depend on actually allocating a gigabyte to find out.
-        let wide = MAX_COMPOSITE_BYTES / 4 / 8 + 1;
-        let width = u32::try_from(wide).expect("fits");
-        let before = filled(width, 8, [255, 0, 0, 255]);
-        let after = filled(width, 8, [0, 0, 255, 255]);
+        // it is larger than both inputs together.
+        //
+        // Stated against the dimensions, which is what "rather than allocated"
+        // has to mean. This test used to build two `RgbaImage`s of ~512 MiB
+        // each in order to reach the assert — it spent a gigabyte proving the
+        // code would not spend one, while its own comment claimed otherwise.
+        //
+        // No cheap end-to-end case exists: the composite is always about the
+        // size of its inputs, so an oversized composite requires oversized
+        // inputs. The join to `side_by_side` is structural instead —
+        // `composite_size` is the only thing that produces the canvas's
+        // dimensions there, so the check cannot be dropped without visibly
+        // re-deriving them.
+        let wide = u32::try_from(MAX_COMPOSITE_BYTES / 4 / 8 + 1).expect("fits");
+        assert!(composite_size((wide, 8), (0, 8)).is_none());
+        assert!(composite_size((100, 100), (100, 100)).is_some());
 
-        assert!(side_by_side(&before, &after, &[]).is_none());
+        // The width is a sum of two decoded widths plus the gutter. In `u32`
+        // that wrapped to something small, passed the ceiling, and left the
+        // blits writing outside a canvas sized from the wrapped value.
+        assert!(composite_size((u32::MAX, 4), (u32::MAX, 4)).is_none());
     }
 
     #[test]

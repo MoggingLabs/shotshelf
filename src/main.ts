@@ -159,10 +159,33 @@ compareButton.addEventListener("click", () => {
   });
 });
 
+/**
+ * Register a subscription, and say so if the registration itself fails.
+ *
+ * Every `listen` here returns a promise, and `void`-ing it discarded the one
+ * piece of information it carries: whether the app is actually wired to the
+ * events it depends on. A rejected registration is silent, permanent, and
+ * indistinguishable from "nothing has happened yet" — for `capture://new`
+ * that is the whole product not working, with no indication why.
+ *
+ * The message says what stopped working rather than which channel failed,
+ * because the channel name is not something the user can act on. It goes to
+ * the console too, where it is.
+ */
+function subscribe(registration: Promise<unknown>, lost: string): void {
+  void registration.catch((error: unknown) => {
+    console.error(`[shotshelf] a subscription failed: ${lost}`, error);
+    say(lost);
+  });
+}
+
 // Note what is deliberately absent: nothing dismisses on focus loss. An opened
 // popover is sticky by design, and the column is never focused in the first
 // place — it is the card timers that end it.
-void shelfWindow.onFocusChanged(({ payload: focused }) => popover.onFocusChanged(focused));
+subscribe(
+  shelfWindow.onFocusChanged(({ payload: focused }) => popover.onFocusChanged(focused)),
+  "Shotshelf may not notice when it loses focus. Restarting should fix it.",
+);
 
 if (!import.meta.env.DEV) {
   window.addEventListener("contextmenu", (event) => event.preventDefault());
@@ -170,19 +193,33 @@ if (!import.meta.env.DEV) {
 
 // ── Events out of Rust ───────────────────────────────────────────────────
 
-void listen<Capture>("capture://new", ({ payload }) => popover.catch(payload));
+subscribe(
+  listen<Capture>("capture://new", ({ payload }) => popover.catch(payload)),
+  "New captures will not appear on the shelf. Restarting should fix it.",
+);
 
 // Rust shows or hides the window on a tray click, a menu item or the hotkey;
 // these only reshape the front-end to match. Neither may call back into Rust.
 // The updater asks the feed and reports; it installs nothing. This is the
 // whole of what the user sees of it, and without this listener the event was
 // emitted into a webview that had never subscribed.
-void listen<string>("update://available", ({ payload }) => {
-  say(`Shotshelf ${payload} is available.`);
-});
+subscribe(
+  listen<string>("update://available", ({ payload }) => {
+    say(`Shotshelf ${payload} is available.`);
+  }),
+  "Shotshelf cannot tell you about new versions this session.",
+);
 
-void listen("shelf://opened", () => popover.adoptBrowse());
-void listen("shelf://hidden", () => popover.adoptHidden());
+// Registered together and reported once: they are two halves of one thing —
+// keeping the front-end's idea of the window's shape in step with Rust's —
+// and two separate failures would put the same sentence in the strip twice.
+subscribe(
+  Promise.all([
+    listen("shelf://opened", () => popover.adoptBrowse()),
+    listen("shelf://hidden", () => popover.adoptHidden()),
+  ]),
+  "The shelf may not reshape correctly. Restarting should fix it.",
+);
 
 // ── Start-up ─────────────────────────────────────────────────────────────
 

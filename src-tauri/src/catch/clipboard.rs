@@ -52,9 +52,10 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, sink: Arc<CaptureSink>) {
 
 fn spawn_worker<R: Runtime>(app: AppHandle<R>, rx: mpsc::Receiver<()>, sink: Arc<CaptureSink>) {
     std::thread::spawn(move || {
-        // Copying the same image twice should not shelve it twice. Phase 04's
-        // copy-to-clipboard fallback will land here too, and this is what stops
-        // it from bouncing straight back onto the shelf.
+        // Copying the same image twice should not shelve it twice. The shelf's
+        // own copy-to-clipboard lands here too — see `OWN_WRITE_WINDOW` in
+        // `share.rs`, which is the other half of stopping a copy from bouncing
+        // straight back onto the shelf as a fresh capture.
         let mut last_image: Option<u64> = None;
 
         while rx.recv().is_ok() {

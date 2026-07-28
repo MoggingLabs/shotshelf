@@ -123,10 +123,12 @@ pub fn peek<R: Runtime>(app: &AppHandle<R>, height: f64) {
     };
 
     set_opened(false);
-    // Clamped at both ends. `preview_shelf` validates its float and says why —
-    // "it arrives from the front-end" — and this takes the same kind of value
-    // from the same place with only a floor. A NaN happens to fall out safely
-    // (Rust's `max` returns the operand), which is luck rather than a check.
+    // Clamped at both ends, and NaN is rejected rather than left to fall
+    // through. `preview_shelf` validates its float and says why — "it arrives
+    // from the front-end" — and this takes the same kind of value from the
+    // same place, so it gets the same treatment. `clamp` panics on a NaN
+    // bound and returns NaN for a NaN input, so the finiteness check is the
+    // thing standing between the front-end and a window sized to NaN.
     let height = if height.is_finite() {
         height.clamp(80.0, MAX_COLUMN_HEIGHT)
     } else {

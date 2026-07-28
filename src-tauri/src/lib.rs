@@ -79,8 +79,8 @@ pub fn run() {
             window::hide_shelf,
         ])
         // ── Adopted plugins — don't hand-roll what these already solve ──
-        .plugin(tauri_plugin_clipboard::init()) // clipboard images (phase 02)
-        .plugin(tauri_plugin_drag::init()) // native drag-out (phase 04)
+        .plugin(tauri_plugin_clipboard::init()) // clipboard images, incl. Win+Shift+S
+        .plugin(tauri_plugin_drag::init()) // native drag-out to other apps
         .plugin(tauri_plugin_shell::init()) // runs the bundled ffmpeg sidecar
         .plugin(tauri_plugin_global_shortcut::Builder::new().build()) // show/hide hotkey
         .plugin(tauri_plugin_updater::Builder::new().build()) // internal release feed

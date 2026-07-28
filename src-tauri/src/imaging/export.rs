@@ -142,8 +142,22 @@ mod tests {
     fn an_extreme_panorama_keeps_at_least_one_pixel_of_short_edge() {
         // Rounding the short edge to zero produces an image that cannot be
         // encoded at all, turning a cosmetic step into a failed drag.
+        //
+        // Stated against `scale_edge`, which is the floor this module owns.
+        // The assertion this replaces — `sized.image.height() >= 1` on
+        // `for_handoff`'s output — could not fail: `image`'s own `resize`
+        // floors both output edges at 1 whatever it is handed, so the test
+        // named for our guard was passing on the dependency's.
+        assert_eq!(
+            scale_edge(2, 1000.0 / 9000.0),
+            1,
+            "rounds to zero without the floor"
+        );
+        assert_eq!(scale_edge(1, 0.001), 1);
+        // And the floor is a floor, not a rounding-up rule.
+        assert_eq!(scale_edge(9000, 1000.0 / 9000.0), 1000);
+
         let sized = for_handoff(image(9000, 2), 1000);
         assert_eq!(sized.image.width(), 1000);
-        assert!(sized.image.height() >= 1);
     }
 }

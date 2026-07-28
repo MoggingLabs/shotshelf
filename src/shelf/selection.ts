@@ -11,7 +11,20 @@
  */
 
 export class Selection {
-  /** Insertion-ordered, which is the order they will be handed over in. */
+  /**
+   * Insertion-ordered, which is **not** the order they are handed over in.
+   *
+   * A `Set` remembers when each id was added, and for a range selection that
+   * is the order the shelf shows them in only by coincidence — shift-clicking
+   * upwards, or ctrl-clicking a fourth card between two already picked, both
+   * produce an insertion order that has nothing to do with the list. Handing
+   * over is ordered by capture time in `Shelf.#pickedItems`, which is what
+   * makes a before and an after arrive as a before and an after.
+   *
+   * This docstring used to claim the opposite, which is a live trap: a reader
+   * trusting it could delete that sort as redundant and silently reverse the
+   * pair for one of the two gestures.
+   */
   readonly #picked = new Set<string>();
   /** Where a range selection counts from. */
   #anchor: string | undefined;
@@ -20,7 +33,7 @@ export class Selection {
     return this.#picked.has(id);
   }
 
-  /** In the order they were picked. */
+  /** In the order they were picked, which is not an order to hand over in. */
   ids(): string[] {
     return [...this.#picked];
   }

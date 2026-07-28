@@ -99,20 +99,13 @@ impl SettingsStore {
     }
 
     /// Narrower edit for the pin toggle, which the settings surface never touches.
-    pub fn set_pinned(&self, mut pinned: Vec<PinnedItem>) {
-        // Bounded and checked here too: this path skips `sanitise` entirely,
-        // which is how the cap on the settings surface would have been missed.
-        //
-        // The paths arrive from the webview and are written to disk and read
-        // back at the next launch, so an unchecked one is a stray string that
-        // outlives the session that produced it. Absolute-only is the same
-        // rule `webview_path` applies at the read boundary; this is the write
-        // boundary, which the read fix did not cover.
-        pinned.retain(|item| crate::webview_path::absolute(&item.path).is_ok());
-        pinned.truncate(MAX_PINNED);
+    pub fn set_pinned(&self, pinned: Vec<PinnedItem>) {
+        // Through the same function `sanitise` uses. This path skips
+        // `sanitise` entirely, which is how a rule applied on the settings
+        // surface could miss the pin toggle — and did.
         let snapshot = {
             let mut current = self.lock();
-            current.pinned = pinned;
+            current.pinned = allowed_pins(pinned);
             current.clone()
         };
         self.persist(&snapshot);
@@ -220,17 +213,27 @@ const MAX_PINNED: usize = 500;
 
 /// Keep hand-edited files, and the webview, from producing a shelf that holds
 /// nothing, never forgets anything, or remembers a path it cannot use.
+/// The pinned list as it is allowed to reach the disk.
+///
+/// One function because there are two write paths into the same file —
+/// `set_pinned` for the pin toggle, and `sanitise` for the settings surface,
+/// which carries `pinned` in its payload too. The rule was written out in both
+/// and landed in one of them first; a comment then claimed both were covered
+/// while the only test called `sanitise`. Joined here so a single test reaches
+/// both, and so the next rule added cannot land in one place only.
+///
+/// Absolute-only is the same rule `webview_path` applies at the read boundary.
+/// These paths arrive from the webview and are read back at the next launch,
+/// so an unchecked one is a stray string that outlives the session.
+fn allowed_pins(mut pinned: Vec<PinnedItem>) -> Vec<PinnedItem> {
+    pinned.retain(|item| crate::webview_path::absolute(&item.path).is_ok());
+    pinned.truncate(MAX_PINNED);
+    pinned
+}
+
 fn sanitise(mut settings: Settings) -> Settings {
     settings.max_items = settings.max_items.clamp(1, 200);
-    // The same check `set_pinned` applies, here rather than only there.
-    //
-    // `set_settings` routes through this function and the webview sends the
-    // whole settings object, `pinned` included — so putting the check in one
-    // of the two write paths left the other able to persist a relative path.
-    settings
-        .pinned
-        .retain(|item| crate::webview_path::absolute(&item.path).is_ok());
-    settings.pinned.truncate(MAX_PINNED);
+    settings.pinned = allowed_pins(std::mem::take(&mut settings.pinned));
     settings.retention_hours = settings
         .retention_hours
         .filter(|hours| hours.is_finite() && *hours > 0.0);
@@ -265,22 +268,36 @@ mod tests {
     fn a_relative_pinned_path_is_never_written_to_disk() {
         // Pinned paths arrive from the webview and are read back at the next
         // launch, so an unchecked one outlives the session that produced it.
-        // Both write paths have to drop it — `set_pinned`, and `sanitise`,
-        // because the settings payload carries `pinned` too. The check landed
-        // in one of them first and nothing noticed.
+        //
+        // Both write paths have to drop it — `set_pinned` for the pin toggle,
+        // and `sanitise` because the settings payload carries `pinned` too.
+        // The check landed in one of them first and nothing noticed; this
+        // test's own claim to cover both was false, because it only ever
+        // called `sanitise`. Stated against `allowed_pins`, which is now the
+        // only place either path can get a pinned list past.
         let keep = somewhere("keep.png");
-        let cleaned = sanitise(Settings {
+        let cleaned = allowed_pins(vec![pin("Pictures/relative.png"), pin(&keep)]);
+
+        assert_eq!(cleaned.len(), 1, "the relative path was dropped");
+        assert_eq!(cleaned[0].path, keep);
+
+        // And the settings surface reaches it, so the payload's `pinned` is
+        // filtered on the way through too.
+        let via_settings = sanitise(Settings {
             pinned: vec![pin("Pictures/relative.png"), pin(&keep)],
             ..Settings::default()
         });
-
-        assert_eq!(cleaned.pinned.len(), 1, "the relative path was dropped");
-        assert_eq!(cleaned.pinned[0].path, keep);
+        assert_eq!(via_settings.pinned.len(), 1);
     }
 
     #[test]
     fn the_pinned_list_cannot_grow_without_bound() {
         let keep = somewhere("a.png");
+        assert_eq!(
+            allowed_pins((0..MAX_PINNED + 50).map(|_| pin(&keep)).collect()).len(),
+            MAX_PINNED,
+        );
+
         let cleaned = sanitise(Settings {
             pinned: (0..MAX_PINNED + 50).map(|_| pin(&keep)).collect(),
             ..Settings::default()

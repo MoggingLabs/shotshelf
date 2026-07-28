@@ -193,6 +193,58 @@ export function installTauriMock(): void {
       ...(options?.headers ? { headers: options.headers } : {}),
     });
 
+    // What this call answers with, decided *before* anything is emitted.
+    //
+    // Runs exactly once: the flaky-stub branch below counts down as a side
+    // effect, so this cannot be a predicate consulted twice.
+    const answer = ((): { succeeded: boolean; result: Promise<unknown> } => {
+      const declared = responses.get(cmd);
+      if (declared) {
+        if (declared.kind === "value") {
+          return { succeeded: true, result: Promise.resolve(declared.value) };
+        }
+        if (declared.kind === "from-args") {
+          return { succeeded: true, result: Promise.resolve(declared.answer(named)) };
+        }
+        if (declared.kind === "error") {
+          return { succeeded: false, result: Promise.reject(new Error(declared.message)) };
+        }
+        return { succeeded: false, result: new Promise(() => {}) };
+      }
+
+      if (cmd in defaults) {
+        const seeded = defaults[cmd];
+        // A seeded stub may ask to reject — see `__shotshelfStubs__`. Without
+        // this, a start-up command could only ever be made to *succeed* before
+        // the app ran, and a test wanting a start-up failure had to call
+        // `reject()` after `bootShelf`, by which time the call it meant to
+        // affect had already been answered from the defaults above.
+        if (typeof seeded === "object" && seeded !== null && "__rejects__" in seeded) {
+          return { succeeded: false, result: Promise.reject(new Error(String(seeded.__rejects__))) };
+        }
+        // Fails the first N times and then succeeds, which is what a start-up
+        // race actually looks like: `get_settings` losing to Rust's setup hook
+        // and winning on the retry. Without this the retry could only be tested
+        // by its absence, so shortening it to a single attempt changed nothing.
+        if (typeof seeded === "object" && seeded !== null && "__rejectsTimes__" in seeded) {
+          const flaky = seeded as { __rejectsTimes__: number; then: unknown };
+          if (flaky.__rejectsTimes__ > 0) {
+            flaky.__rejectsTimes__ -= 1;
+            return { succeeded: false, result: Promise.reject(new Error("state not managed")) };
+          }
+          return { succeeded: true, result: Promise.resolve(flaky.then) };
+        }
+        return { succeeded: true, result: Promise.resolve(seeded) };
+      }
+
+      return {
+        succeeded: false,
+        result: Promise.reject(
+          new Error(`[harness] no stub for "${cmd}" — declare one with respond() or reject()`),
+        ),
+      };
+    })();
+
     // Two commands emit `shelf://opened` from Rust, and the front-end depends
     // on it: `window::open` and `window::preview` both set the "opened" flag,
     // and this event is the only thing that tells the webview so.
@@ -202,53 +254,27 @@ export function installTauriMock(): void {
     // shelf kept rendering its column shape around a full-size editor, which
     // hid the alert strip and left the column's expiry timer running — and no
     // browser test could see it while the harness had the same gap.
-    if ((cmd === "show_shelf" && named["focus"] === true) || cmd === "preview_shelf") {
-      queueMicrotask(() => {
-        emitTo("shelf://opened", null);
-      });
-    }
-    if (cmd === "hide_shelf") {
-      queueMicrotask(() => {
-        emitTo("shelf://hidden", null);
-      });
-    }
-
-    const declared = responses.get(cmd);
-    if (declared) {
-      if (declared.kind === "value") return Promise.resolve(declared.value);
-      if (declared.kind === "from-args") return Promise.resolve(declared.answer(named));
-      if (declared.kind === "error") return Promise.reject(new Error(declared.message));
-      return new Promise(() => {});
-    }
-
-    if (cmd in defaults) {
-      const seeded = defaults[cmd];
-      // A seeded stub may ask to reject — see `__shotshelfStubs__`. Without
-      // this, a start-up command could only ever be made to *succeed* before
-      // the app ran, and a test wanting a start-up failure had to call
-      // `reject()` after `bootShelf`, by which time the call it meant to
-      // affect had already been answered from the defaults above.
-      if (typeof seeded === "object" && seeded !== null && "__rejects__" in seeded) {
-        return Promise.reject(new Error(String(seeded.__rejects__)));
+    //
+    // Only on success, and that half was missing. Rust emits from *inside* the
+    // command, after the window has actually been resized, so a call that
+    // fails or never returns emits nothing. Emitting before the answer was
+    // even looked up meant `reject()` and `hang()` could not suppress it: a
+    // spec hanging `preview_shelf` still saw the window report itself opened
+    // and tested a state the real app cannot reach.
+    if (answer.succeeded) {
+      if ((cmd === "show_shelf" && named["focus"] === true) || cmd === "preview_shelf") {
+        queueMicrotask(() => {
+          emitTo("shelf://opened", null);
+        });
       }
-      // Fails the first N times and then succeeds, which is what a start-up
-      // race actually looks like: `get_settings` losing to Rust's setup hook
-      // and winning on the retry. Without this the retry could only be tested
-      // by its absence, so shortening it to a single attempt changed nothing.
-      if (typeof seeded === "object" && seeded !== null && "__rejectsTimes__" in seeded) {
-        const flaky = seeded as { __rejectsTimes__: number; then: unknown };
-        if (flaky.__rejectsTimes__ > 0) {
-          flaky.__rejectsTimes__ -= 1;
-          return Promise.reject(new Error("state not managed"));
-        }
-        return Promise.resolve(flaky.then);
+      if (cmd === "hide_shelf") {
+        queueMicrotask(() => {
+          emitTo("shelf://hidden", null);
+        });
       }
-      return Promise.resolve(seeded);
     }
 
-    return Promise.reject(
-      new Error(`[harness] no stub for "${cmd}" — declare one with respond() or reject()`),
-    );
+    return answer.result;
   }
 
   window.__TAURI_INTERNALS__ = {

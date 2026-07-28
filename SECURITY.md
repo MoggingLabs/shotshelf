@@ -59,7 +59,14 @@ What that leaves unverified, specifically:
 - The tray icon and menu, the global hotkey, and single-instance behaviour.
 - The bundled ffmpeg sidecar as packaged.
 - The update check against a real feed.
+- **The Content Security Policy, and the IPC transport it governs.** No gate in this repository
+  can exercise either: the browser suite runs against a hand-written stub of the Tauri runtime,
+  which has no CSP and no real IPC. This is not a theoretical gap — a CSP missing `connect-src`
+  would have made every annotated save fail, and it was caught by reading Tauri's source rather
+  than by anything that runs. The `postMessage` fallback path, which encodes the source path in a
+  request header, has never carried a byte at runtime.
 
-None of these can leak a capture off the machine — the network surface is one URL and the webview
-is sealed by CSP — but "it starts and works" is not among the things this repository can currently
-demonstrate.
+None of these can leak a capture off the machine — the network surface is one URL, and the CSP
+that seals the webview is written to allow nothing else. But that policy is itself on the list
+above: it is verified by inspection, not by having ever been enforced. "It starts and works" is
+not among the things this repository can currently demonstrate.

@@ -1,8 +1,12 @@
 //! Paths that arrive from the webview.
 //!
-//! The webview is the least-trusted process in the app, and six commands take
-//! a filesystem path straight from it. Checking that path is one rule, so it
-//! lives in one place.
+//! The webview is the least-trusted process in the app, and every command that
+//! touches a capture takes a filesystem path straight from it. Checking that
+//! path is one rule, so it lives in one place.
+//!
+//! Stated without a count on purpose: this said "six commands" while there
+//! were seven, which is the failure mode of any number written into prose next
+//! to code that grows.
 //!
 //! It did not. `share.rs` and `edit.rs` each grew their own copy of the same
 //! ten lines, and the copies did what copies do: `edit.rs` lost the

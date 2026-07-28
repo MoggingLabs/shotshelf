@@ -804,3 +804,45 @@ test("the crop guide dims around the selection without erasing it", async ({ pag
   expect(guided[3]).toBe(255);
   expect(guided).toEqual(before);
 });
+
+test("the crop guide still frames the selection on a second crop", async ({ page }) => {
+  // The fix above corrected the *painting* and left the *coordinates*: `at()`
+  // returns capture-absolute image pixels, canvas-x 0 is image-x `region.x`,
+  // and this one call site scaled without subtracting the origin. With a crop
+  // in effect the dim band was computed off-canvas, so it covered everything
+  // and the selection hole landed outside the picture entirely — the same
+  // symptom as before, reintroduced in offset form.
+  //
+  // Two details decide whether this spec can see that, and both are why the
+  // first attempt at it could not:
+  //
+  //   1. **The first crop must be away from the origin.** With the crop at
+  //      0,0 `region.x` is zero, the broken and the corrected expressions
+  //      produce the same number, and the spec passes either way.
+  //   2. **The second drag must enclose the sampled point.** Sampling
+  //      somewhere the selection does not cover asserts that dimming happens,
+  //      which is true in both versions.
+  await openEditor(page);
+  await page.locator('.editor__tool[data-tool="crop"]').click();
+
+  const whole = await page.locator(".editor__canvas").boundingBox();
+  expect(whole).not.toBeNull();
+  await drag(page, [whole!.width * 0.5, whole!.height * 0.5], [whole!.width * 0.98, whole!.height * 0.98]);
+
+  // The canvas is resized to the crop, so everything below re-measures.
+  const box = await page.locator(".editor__canvas").boundingBox();
+  expect(box).not.toBeNull();
+  const inside: [number, number] = [box!.width * 0.5, box!.height * 0.5];
+
+  const before = await inkAt(page, ...inside);
+
+  await page.mouse.move(box!.x + box!.width * 0.2, box!.y + box!.height * 0.2);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width * 0.8, box!.y + box!.height * 0.8, { steps: 6 });
+
+  const guided = await inkAt(page, ...inside);
+  await page.mouse.up();
+
+  expect(guided[3]).toBe(255);
+  expect(guided).toEqual(before);
+});
