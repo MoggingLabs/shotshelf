@@ -68,13 +68,36 @@ impl From<ImageError> for String {
 /// extension: screen-capture tools are not consistent about what they write,
 /// and a PNG named `.jpg` is common enough to be worth surviving.
 pub fn load(path: &Path) -> Result<DynamicImage, ImageError> {
-    ImageReader::open(path)
+    let mut reader = ImageReader::open(path)
         .map_err(|err| ImageError::Read(err.to_string()))?
         .with_guessed_format()
-        .map_err(|err| ImageError::Read(err.to_string()))?
+        .map_err(|err| ImageError::Read(err.to_string()))?;
+
+    // Bounded, because the path comes from the webview.
+    //
+    // A PNG's header can promise far more pixels than its bytes, and decoding
+    // is where that promise is honoured — so an unbounded decoder turns a
+    // small file into an allocation the size of whatever it claimed. This
+    // branch already put a ceiling on bytes arriving over IPC; the paths that
+    // *read* a webview-chosen file needed the same thought.
+    //
+    // The dimension cap is generous: an 8K display is 7680 wide, and a
+    // stitched or multi-monitor capture is legitimately larger still.
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(MAX_DECODE_BYTES);
+    limits.max_image_width = Some(MAX_DECODE_EDGE);
+    limits.max_image_height = Some(MAX_DECODE_EDGE);
+    reader.limits(limits);
+
+    reader
         .decode()
         .map_err(|err| ImageError::Decode(err.to_string()))
 }
+
+/// The most a single decode may allocate.
+const MAX_DECODE_BYTES: u64 = 1024 * 1024 * 1024;
+/// The longest edge a capture may claim.
+const MAX_DECODE_EDGE: u32 = 32_768;
 
 /// Encode to PNG bytes.
 ///

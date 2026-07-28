@@ -74,6 +74,12 @@
 
       <main class="shelf__items" id="shelf-items" data-empty="true"></main>
 
+      <!-- The editor and quick look live here, not inside #shelf-items.
+           That element is rebuilt wholesale on every render, so a capture
+           landing mid-annotation used to remove the editor from under the
+           user while the module still held a pointer to the detached node. -->
+      <div class="shelf__overlay" id="shelf-overlay"></div>
+
       <!-- Only appears when something actually needs saying. -->
       <p class="shelf__alert" id="shelf-alert" hidden></p>
     </div>

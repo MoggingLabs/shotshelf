@@ -86,10 +86,9 @@ pub fn run() {
             // Sized copies are a cache too, and a cache that only grows is a
             // leak with a nicer name.
             handoff::prune(app.handle());
-            // Edits are the user's own work rather than a cache, but they are
-            // still pictures on a disk with no other ceiling.
+            // Edits are the user's own work; this only lets the webview show
+            // the ones from previous sessions.
             edit::allow_reading_edits(app.handle());
-            edit::prune(app.handle());
 
             if let Some(shelf) = app.get_webview_window(window::SHELF) {
                 window::apply_material(&shelf);

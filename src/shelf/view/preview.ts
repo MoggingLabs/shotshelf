@@ -19,9 +19,17 @@ import type { ShelfItem } from "../types.ts";
 
 /** The preview currently on screen, if any. */
 let open: { id: string; node: HTMLElement } | undefined;
+/**
+ * Set while one is being opened.
+ *
+ * `open` is undefined for the whole span between measuring the picture and
+ * mounting it, so it cannot answer "is one opening?" — and holding Space put a
+ * keydown in every one of those spans, stacking a preview per press.
+ */
+let opening = false;
 
 export function previewIsOpen(): boolean {
-  return open !== undefined;
+  return open !== undefined || opening;
 }
 
 /**
@@ -31,8 +39,18 @@ export function previewIsOpen(): boolean {
  * preview of a video, and playing one is a media player, not a shelf.
  */
 export async function showPreview(item: ShelfItem, host: HTMLElement): Promise<void> {
-  if (item.kind === "video") return;
+  if (item.kind === "video" || opening) return;
   closePreview_(host);
+
+  opening = true;
+  try {
+    await mount(item, host);
+  } finally {
+    opening = false;
+  }
+}
+
+async function mount(item: ShelfItem, host: HTMLElement): Promise<void> {
 
   // The picture is measured before the window is asked for, because the
   // window's shape should follow the capture's rather than the other way

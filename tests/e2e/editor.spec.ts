@@ -212,3 +212,59 @@ test("the shelf keys do not reach the list while the editor is open", async ({ p
 
   await expect(page.locator(".tile")).toHaveCount(1);
 });
+
+test("a capture landing mid-annotation does not destroy the editor", async ({ page }) => {
+  // The editor used to be a child of the card list, which the view rebuilds
+  // wholesale on every render — so any capture arriving while you were marking
+  // one up removed the editor from under you, silently, leaving the module
+  // pointing at a detached node and the keyboard stuck in editor mode.
+  await openEditor(page);
+  await drag(page, [30, 25], [170, 95]);
+
+  await land(page, FIXTURE.tall, { ts: 99 });
+
+  await expect(page.locator(".editor__canvas")).toBeVisible();
+  // And it is still the editor: Escape closes it rather than the shelf.
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".editor")).toHaveCount(0);
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+});
+
+test("holding the edit key does not stack editors", async ({ page }) => {
+  await bootShelf(page);
+  await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", [220, 124]));
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.keyboard.press("ArrowDown");
+
+  // Key auto-repeat puts a keydown inside every await of the open sequence,
+  // and `live` is undefined for all of them.
+  for (let press = 0; press < 5; press += 1) await page.keyboard.press("e");
+
+  await expect(page.locator(".editor")).toHaveCount(1);
+});
+
+test("holding space does not stack previews", async ({ page }) => {
+  await bootShelf(page);
+  await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", [220, 124]));
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.keyboard.press("ArrowDown");
+
+  for (let press = 0; press < 5; press += 1) await page.keyboard.press(" ");
+
+  // An odd number of presses leaves it open; the point is that it is one.
+  expect(await page.locator(".preview").count()).toBeLessThanOrEqual(1);
+});
+
+test("a double click on save writes one file", async ({ page }) => {
+  await openEditor(page);
+  await drag(page, [30, 25], [170, 95]);
+  await page.evaluate(() => window.__shotshelf__.hang("save_edit"));
+
+  await page.locator("#editor-save").click();
+  await page.locator("#editor-save").click({ force: true });
+
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("save_edit").length)).toBe(1);
+});

@@ -122,18 +122,21 @@ test("several findings are counted, worst first", async ({ page }) => {
   await expect(page.locator(".tile__secret")).toHaveAttribute("title", /private key and 2 others/);
 });
 
-test("a platform that cannot read captures marks nothing and says nothing", async ({ page }) => {
+test("a capture that cannot be read is marked unread, not warned about", async ({ page }) => {
   await bootShelf(page);
-  // macOS and Linux take this path today.
+  // A machine with no recogniser at all takes this path.
   await page.evaluate(() =>
     window.__shotshelf__.reject("describe_capture", "text recognition unavailable"),
   );
   await land(page, FIXTURE.wide);
 
   await expect(page.locator(".tile")).toBeVisible();
+  // Not a credential warning — there is nothing to warn about — but not
+  // nothing either, because a bare card claims to have been checked.
+  await expect(page.locator(".tile__unscanned")).toBeVisible();
   await expect(page.locator(".tile__secret")).toHaveCount(0);
-  // No alert strip either: the absence of a warning has never meant "safe",
-  // and saying so on every capture would train people to ignore it.
+  // No alert strip: the absence of a warning has never meant "safe", and
+  // saying so on every capture would train people to ignore it.
   await expect(page.locator("#shelf-alert")).toBeHidden();
 });
 

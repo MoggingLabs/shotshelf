@@ -608,15 +608,6 @@ body {
 /* The window itself grows for a preview, so this only has to fill it. The
    shelf's own chrome steps aside: a preview is one capture and nothing else. */
 
-.shelf__items[data-preview="true"] {
-  padding: 0;
-  overflow: hidden;
-}
-
-.shelf[data-mode="browse"] .shelf__items[data-preview="true"] ~ * {
-  display: none;
-}
-
 .preview {
   display: grid;
   place-items: center;
@@ -636,12 +627,6 @@ body {
 /* The same window the preview uses, with tools. Marking up is looking at a
    capture closely and then pointing at part of it — one view, two intensities,
    rather than a second window with its own lifecycle to get right. */
-
-.shelf__items[data-editing="true"] {
-  position: relative;
-  padding: 0;
-  overflow: hidden;
-}
 
 /* An overlay pinned to its container rather than a block that flows inside it.
    Flowed, the canvas could be laid out wider than the panel and centred into
@@ -730,4 +715,25 @@ body {
   font-weight: 700;
   line-height: 1;
   z-index: 1;
+}
+
+/* The editor and quick look mount here rather than inside the card list.
+   That list is rebuilt wholesale on every render, so anything living in it is
+   removed the moment a capture lands — which used to take an in-progress
+   annotation with it, silently. Empty and inert until something mounts. */
+.shelf__overlay:empty {
+  display: none;
+}
+
+.shelf__overlay {
+  position: absolute;
+  inset: 0;
+  /* Above the list and the alert strip; the panel's radius still clips it. */
+  z-index: 2;
+  border-radius: inherit;
+  overflow: hidden;
+}
+
+.shelf {
+  position: relative;
 }

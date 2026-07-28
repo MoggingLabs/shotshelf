@@ -88,6 +88,17 @@ pub fn prepare_drag<R: Runtime>(
 pub async fn describe_capture(path: String) -> Result<Findings, String> {
     let source = existing_file(&path)?;
 
+    // Keyed on which *version* of the file, not just which path.
+    //
+    // A capture overwritten at the same path — a fixed ShareX pattern, a
+    // re-save — would otherwise return the previous file's findings, and
+    // "no findings" is not rendered as "unknown" but as read-and-clean. The
+    // hand-off cache next door keys on path and mtime for exactly this
+    // reason, and its comment calls delivering different pixels than the ones
+    // on screen a disclosure bug rather than a stale cache. The same is true
+    // here, with worse consequences: this one decides whether a warning shows.
+    let version = scan_key(&source);
+
     // Answered from memory when it has been asked before.
     //
     // The shelf asks once per image tile as it is built, and opening a full
@@ -98,7 +109,7 @@ pub async fn describe_capture(path: String) -> Result<Findings, String> {
     if let Some(cached) = scan_cache()
         .lock()
         .ok()
-        .and_then(|c| c.get(&source).cloned())
+        .and_then(|cache| cache.get(&version).cloned())
     {
         return Ok(cached);
     }
@@ -129,7 +140,7 @@ pub async fn describe_capture(path: String) -> Result<Findings, String> {
         if cache.len() >= SCAN_CACHE_LIMIT {
             cache.clear();
         }
-        cache.insert(source, findings.clone());
+        cache.insert(version, findings.clone());
     }
 
     Ok(findings)
@@ -144,9 +155,23 @@ const SCAN_CACHE_LIMIT: usize = 500;
 /// something else, and the shelf is usable the whole time either way.
 const SCAN_CONCURRENCY: usize = 2;
 
-fn scan_cache() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, Findings>> {
+/// Identity of a capture's *contents*: where it is, and when it last changed.
+///
+/// An unreadable timestamp only means this file shares a key with its other
+/// versions, which is where we were before.
+fn scan_key(source: &Path) -> (PathBuf, Option<std::time::Duration>) {
+    let modified = std::fs::metadata(source)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok());
+    (source.to_path_buf(), modified)
+}
+
+type ScanKey = (PathBuf, Option<std::time::Duration>);
+
+fn scan_cache() -> &'static std::sync::Mutex<std::collections::HashMap<ScanKey, Findings>> {
     static CACHE: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<PathBuf, Findings>>,
+        std::sync::Mutex<std::collections::HashMap<ScanKey, Findings>>,
     > = std::sync::OnceLock::new();
     CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }

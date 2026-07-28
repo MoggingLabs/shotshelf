@@ -48,9 +48,20 @@ interface Live {
 }
 
 let live: Live | undefined;
+/**
+ * Set the instant an open begins, cleared when it finishes.
+ *
+ * `live` cannot answer "is one opening?" — it is undefined for the whole
+ * window between the first await and the last, and holding `e` down puts a
+ * keydown in every one of those windows. Five presses produced five stacked
+ * editors, only the last of which anything tracked.
+ */
+let opening = false;
+/** Guards the save the same way; a double click wrote two files. */
+let saving = false;
 
 export function editorIsOpen(): boolean {
-  return live !== undefined;
+  return live !== undefined || opening;
 }
 
 /** Open the editor on a capture. Recordings have nothing to annotate. */
@@ -59,9 +70,22 @@ export async function openEditor(
   host: HTMLElement,
   callbacks: EditorHost,
 ): Promise<void> {
-  if (item.kind === "video") return;
+  if (item.kind === "video" || opening) return;
   closeEditor(host, () => callbacks.closed());
 
+  opening = true;
+  try {
+    await open(item, host, callbacks);
+  } finally {
+    opening = false;
+  }
+}
+
+async function open(
+  item: ShelfItem,
+  host: HTMLElement,
+  callbacks: EditorHost,
+): Promise<void> {
   const picture = await load(convertFileSrc(item.path));
   if (!picture) return;
 
@@ -131,9 +155,10 @@ function setTool(tool: Tool): void {
  * a screenshot of the preview instead of an annotated capture.
  */
 async function saveEditedCapture(host: HTMLElement, callbacks: EditorHost): Promise<void> {
-  if (!live) return;
+  if (!live || saving) return;
   const { item, session, picture } = live;
 
+  saving = true;
   try {
     const region = session.exportRect();
     const canvas = document.createElement("canvas");
@@ -155,6 +180,8 @@ async function saveEditedCapture(host: HTMLElement, callbacks: EditorHost): Prom
     // closing on a failed save would throw the work away.
     console.error("[shotshelf] could not save that edit", error);
     callbacks.failed("That edit could not be saved. Your marks are still here.");
+  } finally {
+    saving = false;
   }
 }
 

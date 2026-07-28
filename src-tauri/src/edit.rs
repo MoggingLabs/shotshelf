@@ -19,11 +19,15 @@ use crate::imaging::{self, compare};
 /// Where edits live, under the app's data directory.
 const EDITS_DIR: &str = "edits";
 
-/// How many edits to keep. They are captures in their own right rather than a
-/// cache, so this is generous — but not unbounded: a comparison of two 4K
-/// screenshots is a full-resolution PNG, and this was the only picture-holding
-/// directory in the app with no ceiling at all.
-const EDITS_LIMIT: usize = 200;
+// Deliberately no prune here, unlike the poster and hand-off caches.
+//
+// Those hold derived data nobody chose to keep. An edit is a capture in its
+// own right: it goes on the shelf, it can be pinned, and pinning is the one
+// piece of shelf state documented as surviving a restart. A ceiling that
+// deleted oldest-first would delete pinned work, silently, and bring it back
+// next launch as a "file has gone" tile — which would make this the first
+// path in the app that destroys something the shelf presents as a capture.
+// The directory is documented, and clearing it is the user's call.
 
 /// Let the webview display edits from previous sessions.
 ///
@@ -39,37 +43,6 @@ pub fn allow_reading_edits<R: Runtime>(app: &AppHandle<R>) {
     };
     if let Err(err) = app.asset_protocol_scope().allow_directory(&dir, false) {
         eprintln!("shotshelf: saved edits may not display ({err})");
-    }
-}
-
-/// Drop the oldest edits once there are more than the ceiling allows.
-///
-/// Oldest first by modified time, like the other two caches. These are the
-/// user's own work, so the ceiling is high and the removal is quiet.
-pub fn prune<R: Runtime>(app: &AppHandle<R>) {
-    let Ok(dir) = edits_dir(app) else {
-        return;
-    };
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return;
-    };
-
-    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
-        .flatten()
-        .filter(|entry| entry.path().is_file())
-        .filter_map(|entry| {
-            let modified = entry.metadata().and_then(|meta| meta.modified()).ok()?;
-            Some((modified, entry.path()))
-        })
-        .collect();
-
-    if files.len() <= EDITS_LIMIT {
-        return;
-    }
-
-    files.sort_unstable_by_key(|(modified, _)| *modified);
-    for (_, path) in files.iter().take(files.len() - EDITS_LIMIT) {
-        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -177,7 +150,15 @@ fn write_edit<R: Runtime>(
         {
             Ok(mut file) => {
                 use std::io::Write;
-                file.write_all(bytes).map_err(|err| err.to_string())?;
+                // A failed write leaves a truncated PNG that the shelf would
+                // later read as a capture, so the half-written file goes.
+                // `create_new` already reserved the name, so nothing else can
+                // be holding it.
+                if let Err(err) = file.write_all(bytes) {
+                    drop(file);
+                    let _ = std::fs::remove_file(&target);
+                    return Err(err.to_string());
+                }
                 break;
             }
             // Someone else took this name between the probe and the create.

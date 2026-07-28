@@ -87,11 +87,24 @@ export class Shelf {
   #dragging = false;
   #timers: number[] = [];
 
-  readonly #list: HTMLElement;
+  /**
+   * Where the editor and quick look mount.
+   *
+   * Deliberately not the list: the view rebuilds that wholesale on every
+   * render, so a capture arriving mid-annotation removed the editor from under
+   * the user — silently, with the module still pointing at the detached node
+   * and the keyboard still in editor mode.
+   */
+  readonly #overlay: HTMLElement;
 
-  constructor(list: HTMLElement, count: HTMLElement, options: ShelfOptions) {
+  constructor(
+    list: HTMLElement,
+    count: HTMLElement,
+    overlay: HTMLElement,
+    options: ShelfOptions,
+  ) {
     this.#options = options;
-    this.#list = list;
+    this.#overlay = overlay;
     this.#view = new ShelfView(list, count, {
       togglePin: (id) => this.#togglePin(id),
       remove: (id) => this.remove(id),
@@ -352,7 +365,7 @@ export class Shelf {
     const [item] = this.#pickedItems();
     if (!item) return;
 
-    void openEditor(item, this.#list, {
+    void openEditor(item, this.#overlay, {
       size: (aspect) => previewShelf(aspect),
       saved: (path) => {
         // An edit is a capture in its own right, dated now.
@@ -369,7 +382,7 @@ export class Shelf {
 
   /** Back out of the editor. Returns false if it was not open. */
   closeEditor(): boolean {
-    return closeEditor(this.#list, () => this.#options.onEditorClosed());
+    return closeEditor(this.#overlay, () => this.#options.onEditorClosed());
   }
 
   /** Undo the last mark. Returns false if there was nothing to undo. */
@@ -380,7 +393,7 @@ export class Shelf {
   /** Close the preview. Returns false if there was nothing to close. */
   closePreview(): boolean {
     if (!previewIsOpen()) return false;
-    hidePreview(this.#list);
+    hidePreview(this.#overlay);
     return true;
   }
 
@@ -396,7 +409,7 @@ export class Shelf {
     const [item] = this.#pickedItems();
     if (!item) return;
 
-    void showPreview(item, this.#list).catch((error: unknown) => {
+    void showPreview(item, this.#overlay).catch((error: unknown) => {
       console.error("[shotshelf] could not preview that capture", error);
       this.#options.onProblem("That capture could not be opened.");
     });

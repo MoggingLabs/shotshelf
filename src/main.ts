@@ -41,18 +41,23 @@ const hideButton = el<HTMLButtonElement>("#shelf-hide");
 settingsButton.prepend(icon("settings", 14));
 hideButton.prepend(icon("minus", 14));
 
-const shelf = new Shelf(el<HTMLElement>("#shelf-items"), el<HTMLElement>("#shelf-count"), {
-  onColumnChange: () => popover.onColumnChange(),
-  // A comparison of one capture, or of five, is not a thing.
-  onSelectionChange: (picked) => {
-    compareButton.toggleAttribute("hidden", picked !== 2);
-    editButton.toggleAttribute("hidden", picked !== 1);
+const shelf = new Shelf(
+  el<HTMLElement>("#shelf-items"),
+  el<HTMLElement>("#shelf-count"),
+  el<HTMLElement>("#shelf-overlay"),
+  {
+    onColumnChange: () => popover.onColumnChange(),
+    // A comparison of one capture, or of five, is not a thing.
+    onSelectionChange: (picked) => {
+      compareButton.toggleAttribute("hidden", picked !== 2);
+      editButton.toggleAttribute("hidden", picked !== 1);
+    },
+    // The editor grew the window; putting it away returns to the browse view.
+    onEditorClosed: () => popover.adoptBrowse(),
+    onProblem: (message) => say(message),
+    limits: () => currentSettings(),
   },
-  // The editor grew the window; putting it away returns to the browse view.
-  onEditorClosed: () => popover.adoptBrowse(),
-  onProblem: (message) => say(message),
-  limits: () => currentSettings(),
-});
+);
 
 const popover = new Popover(root, shelf, {
   // An OS drag steals focus and the settings panel is a deliberate act; a
@@ -83,9 +88,13 @@ document.addEventListener("keydown", (event) => {
   if (settingsOpen() && event.key !== "Escape") return;
   // While marking up a capture, the arrows and Delete belong to the editor's
   // own surface, not to the list underneath it.
-  if (shelf.editing && !["Escape", "z"].includes(event.key)) return;
+  // Lower-cased because `key` reports the character produced: with CapsLock
+  // on it is "Z" and "E", which fell through every branch below and left undo
+  // and the editor unreachable.
+  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  if (shelf.editing && !["Escape", "z"].includes(key)) return;
 
-  switch (event.key) {
+  switch (key) {
     case "Escape":
       // Escape backs out one level at a time: the editor, then a preview,
       // then the shelf. One key that closes two things at once is one key
