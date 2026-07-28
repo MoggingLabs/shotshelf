@@ -28,7 +28,7 @@ const HIGHLIGHT: Rgba<u8> = Rgba([245, 158, 11, 255]);
 /// `settings::Settings` holding the user's preferences, and two unrelated
 /// concepts sharing the most generic name in the crate is a reader's problem.
 #[derive(Clone, Copy, Debug)]
-pub struct Sensitivity {
+pub(crate) struct Sensitivity {
     /// Side of the square blocks the image is divided into before comparing.
     ///
     /// Comparing whole blocks rather than single pixels is what makes the

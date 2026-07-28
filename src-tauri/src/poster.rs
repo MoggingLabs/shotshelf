@@ -195,7 +195,12 @@ async fn extract_frame<R: Runtime>(
                 }
             }
             Err(err) => {
-                eprintln!("shotshelf: no poster frame for {}: {err}", source.display());
+                eprintln!(
+                    "shotshelf: no poster frame for {}: {err}",
+                    // The filename only, for the reason `catch/mod.rs` gives:
+                    // stderr lands in the same journal as stdout.
+                    source.file_name().unwrap_or_default().to_string_lossy()
+                );
                 return duration_ms;
             }
         }

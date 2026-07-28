@@ -27,9 +27,12 @@ const LAUNCH_MS = 4000;
 
 export interface PopoverOptions {
   /**
-   * Whether something is mid-flight that must not be interrupted — an OS drag,
-   * or the settings panel being open. Checked before the launch appearance
-   * puts itself away.
+   * Whether something is mid-flight that must not be interrupted — an OS
+   * drag, an open editor or quick look, or the settings panel. Checked before
+   * the launch appearance puts itself away.
+   *
+   * The overlay is in that list because the launch timer discarded an editor
+   * opened inside its four seconds, marks and all.
    */
   busy(): boolean;
 }

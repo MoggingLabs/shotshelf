@@ -100,7 +100,15 @@ pub async fn compare_captures<R: Runtime>(
     .map_err(|err| err.to_string())?
     .map_err(String::from)?;
 
-    write_edit(&app, &name_source, "compared", &bytes)
+    // On a blocking worker like the decode above it: `write_edit` does
+    // `create_dir_all`, an `exists()` probe loop and a `write_all` of up to
+    // 64 MiB, and this is the runtime that serves every other command.
+    let app_for_write = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        write_edit(&app_for_write, &name_source, "compared", &bytes)
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 /// Save an annotated copy of a capture.
@@ -123,9 +131,37 @@ pub async fn save_edit<R: Runtime>(
     // integers. See `bridge.ts` for why; the short version is that the JSON
     // shape cost roughly four bytes of string per byte of image, and the size
     // ceiling below could not apply until all of it had already been built.
-    let tauri::ipc::InvokeBody::Raw(png) = request.body() else {
-        return Err("the edited capture did not arrive as bytes".to_owned());
+    // Either transport, deliberately.
+    //
+    // Tauri sends an `invoke` as a fetch to `ipc://localhost` (or
+    // `http://ipc.localhost` on Windows) — a different origin from the page,
+    // so the CSP has to grant it, and `tauri.conf.json` now does. When that
+    // request is refused Tauri falls back to `postMessage`, which JSON-encodes
+    // the envelope and turns a `Uint8Array` back into an array of numbers.
+    //
+    // Accepting only `Raw` made every save fail on that fallback — the app's
+    // headline feature depending on a directive nothing in the repo could
+    // check, on a build nobody has run. The raw path is the one that avoids
+    // four bytes of JSON per byte of image; the JSON path is what keeps the
+    // work saved if it is ever taken.
+    let png: std::borrow::Cow<'_, [u8]> = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => std::borrow::Cow::Borrowed(bytes),
+        tauri::ipc::InvokeBody::Json(value) => {
+            let numbers = value
+                .as_array()
+                .ok_or_else(|| "the edited capture did not arrive as bytes".to_owned())?;
+            let mut bytes = Vec::with_capacity(numbers.len());
+            for number in numbers {
+                let byte = number
+                    .as_u64()
+                    .and_then(|byte| u8::try_from(byte).ok())
+                    .ok_or_else(|| "the edited capture is not image data".to_owned())?;
+                bytes.push(byte);
+            }
+            std::borrow::Cow::Owned(bytes)
+        }
     };
+    let png = png.as_ref();
 
     let source = request
         .headers()
@@ -157,7 +193,10 @@ pub async fn save_edit<R: Runtime>(
         ));
     }
 
-    write_edit(&app, &source, "edited", png)
+    let owned = png.to_vec();
+    tauri::async_runtime::spawn_blocking(move || write_edit(&app, &source, "edited", &owned))
+        .await
+        .map_err(|err| err.to_string())?
 }
 
 /// Write a new capture beside the shelf's own data, and hand back its path.

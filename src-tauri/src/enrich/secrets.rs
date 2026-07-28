@@ -191,7 +191,7 @@ const MAX_FINDINGS: usize = 50;
 #[must_use]
 pub fn scan(text: &str) -> Vec<Finding> {
     let mut findings: Vec<Finding> = Vec::new();
-    let mut seen: std::collections::HashSet<Finding> = std::collections::HashSet::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for pattern in PATTERNS.iter() {
         for hit in pattern.regex.find_iter(text) {
@@ -201,27 +201,35 @@ pub fn scan(text: &str) -> Vec<Finding> {
                 preview: mask(pattern.kind, hit.as_str(), pattern.marker),
                 severity: pattern.kind.severity(),
             };
-            // The same key printed twice on one screen is one problem.
+            // The same secret printed twice on one screen is one problem.
             //
-            // Through a set rather than a linear scan of the vec: the scan was
-            // O(n) per hit over a list bounded only *after* both loops closed,
-            // so the case the ceiling exists for — a screenshot of a contact
-            // list, thousands of distinct addresses — was also the case that
-            // made it quadratic. Keyed on the whole finding, so two different
-            // tokens that mask to the same preview stay two findings.
-            if seen.insert(finding.clone()) {
+            // Keyed on the **matched text**, which is the only thing that says
+            // whether two hits are the same secret. Keying on the `Finding`
+            // looked equivalent and was not: its only varying field is the
+            // *masked* preview, so every GitHub token reduces to `ghp_…` and
+            // five distinct credentials on one screen collapsed into a single
+            // warning with no count. The raw match never leaves this function.
+            //
+            // A set rather than a scan of the vec, because the case the
+            // ceiling exists for — a screenshot of a contact list — was also
+            // the case that made the scan quadratic.
+            if seen.insert(hit.as_str().to_owned()) {
                 findings.push(finding);
-                if findings.len() >= MAX_FINDINGS {
-                    break;
-                }
             }
         }
     }
 
     // Reverse severity: the worst thing is what you see first.
     findings.sort_by_key(|finding| std::cmp::Reverse(finding.severity));
-    // Already bounded above; the sort decides *which* of the bounded set is
-    // shown first, worst thing at the top.
+    // Truncated *after* sorting, so what survives is the most serious of what
+    // was found rather than whichever pattern happened to run first.
+    //
+    // Bounding inside the loop instead looked tidier and broke both halves of
+    // that: `break` left the *inner* loop only, so each remaining pattern
+    // could add one more and the real ceiling was 59 — and which findings
+    // survived depended on `PATTERNS` happening to be listed worst-first, a
+    // dependency nothing stated or enforced.
+    findings.truncate(MAX_FINDINGS);
     findings
 }
 
@@ -296,6 +304,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn two_different_secrets_that_mask_alike_stay_two_findings() {
+        // The masked preview is identical for every token of a kind, so
+        // keying the dedupe on the `Finding` collapsed distinct credentials
+        // into one warning — telling the user a single secret is exposed when
+        // several are.
+        let text = concat!(
+            "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+",
+            "ghp_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+",
+        );
+
+        assert_eq!(scan(text).len(), 2);
+    }
+
+    #[test]
+    fn the_same_secret_twice_is_one_finding() {
+        let token = "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let text = format!(
+            "{token}
+and again: {token}
+"
+        );
+
+        assert_eq!(scan(&text).len(), 1);
+    }
+
+    #[test]
     fn a_capture_full_of_findings_reports_the_worst_of_them_and_stops() {
         // A screenshot of a contact list is thousands of distinct addresses,
         // and every one of them crossed IPC and became a tooltip.
@@ -303,14 +339,23 @@ mod tests {
             "-----BEGIN RSA PRIVATE KEY-----
 ",
         );
+        // Addresses at *different* domains, so each is a distinct finding.
+        // An earlier version used 400 addresses at one domain: they all mask
+        // to the same preview, deduped to a single finding, and the scan
+        // returned two — so the assertion below passed with the cap deleted
+        // outright, which is the opposite of what this test is named for.
         for n in 0..400 {
             text.push_str(&format!(
-                "person{n}@example.com
+                "person@example{n}.com
 "
             ));
         }
 
         let findings = scan(&text);
+        assert!(
+            findings.len() > 1,
+            "the fixture must produce more than one finding to bound",
+        );
         assert!(
             findings.len() <= MAX_FINDINGS,
             "{} findings",

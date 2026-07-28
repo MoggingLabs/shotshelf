@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { expect, type Page, test as base } from "@playwright/test";
 
+import type { Settings } from "../../src/settings.ts";
 import { installTauriMock } from "./tauri-mock.ts";
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
@@ -74,13 +75,13 @@ export interface BootOptions {
    * runs, because the shelf has already read its limits by the time a test
    * could stub them from the outside.
    */
-  settings?: Partial<{
-    retentionHours: number | null;
-    maxItems: number;
-    hotkey: string;
-    downscaleExports: boolean;
-    pinned: { path: string; kind: "image" | "video"; ts: number }[];
-  }>;
+  /**
+   * Imported rather than restated. A hand-written copy drifted the moment a
+   * setting was added — `checkForUpdates` existed in Rust, in the front end
+   * and in the shared fixture while this type still had five fields, so no
+   * spec could seed it.
+   */
+  settings?: Partial<Settings>;
 }
 
 /**

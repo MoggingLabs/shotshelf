@@ -95,7 +95,6 @@ export function buildTile(item: ShelfItem, callbacks: TileCallbacks): HTMLElemen
   const tile = document.createElement("article");
   tile.className = "tile";
   tile.title = item.path;
-  tile.dataset["id"] = item.id;
   tile.classList.toggle("tile--pinned", item.pinned);
 
   if (item.kind === "video") {

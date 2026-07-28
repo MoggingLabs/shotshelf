@@ -27,9 +27,15 @@ const CALLOUT_RADIUS = 13;
  * Draw the capture and everything on it.
  *
  * `scale` maps image pixels to canvas pixels: 1 when exporting at full size,
- * less when the capture is shown scaled to fit a window. Line widths are
- * divided by it so an outline stays the same visual weight on screen as it
- * will be in the exported file.
+ * less when the capture is shown scaled to fit a window.
+ *
+ * Line widths are in **image** pixels and are deliberately not compensated for
+ * it. A 3px outline is 3px of the capture, so on screen it shrinks with
+ * everything else and what you see is a faithful preview of the exported
+ * file — dividing by `scale` would hold the stroke at a constant thickness on
+ * screen and therefore make it thinner, relative to the picture, in the file
+ * you actually send. (This docstring used to claim the division was done. It
+ * never was, and it should not be.)
  */
 export function paint(
   context: CanvasRenderingContext2D,
@@ -153,10 +159,21 @@ export function paintCropGuide(
 ): void {
   context.save();
   context.fillStyle = "rgba(8, 9, 14, 0.62)";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  // Punching the selection out is clearer than four rectangles around it, and
-  // it cannot leave a seam.
-  context.clearRect(rect.x, rect.y, rect.width, rect.height);
+
+  // Four bands around the selection, not a full cover with the middle punched
+  // out. `clearRect` was the obvious way to write this and the wrong one: it
+  // makes those pixels *transparent*, and there is nothing underneath —
+  // `paint` drew the capture onto this same canvas moments earlier, and the
+  // element's CSS background is near-black. So the region you were selecting
+  // rendered as a solid dark rectangle, and the crop tool hid exactly the
+  // thing you were using it to frame. The comment that used to sit here
+  // reasoned about an overlay canvas this renderer does not have.
+  const right = rect.x + rect.width;
+  const bottom = rect.y + rect.height;
+  context.fillRect(0, 0, canvas.width, rect.y);
+  context.fillRect(0, bottom, canvas.width, canvas.height - bottom);
+  context.fillRect(0, rect.y, rect.x, rect.height);
+  context.fillRect(right, rect.y, canvas.width - right, rect.height);
 
   context.strokeStyle = INK;
   context.lineWidth = 2;

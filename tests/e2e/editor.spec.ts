@@ -776,3 +776,31 @@ test("a quick look then an editor that will not open gives the window back", asy
     .toBeGreaterThan(0);
   await expect(page.locator(".editor")).toHaveCount(0);
 });
+
+test("the crop guide dims around the selection without erasing it", async ({ page }) => {
+  // `clearRect` on the selection made those pixels transparent, and there is
+  // no layer underneath — the capture was painted onto this same canvas, and
+  // the element's CSS background is near-black. So the region being framed
+  // rendered as a solid dark rectangle: the crop tool hid the thing you were
+  // using it to frame.
+  await openEditor(page);
+  await page.locator('.editor__tool[data-tool="crop"]').click();
+
+  const box = await page.locator(".editor__canvas").boundingBox();
+  expect(box).not.toBeNull();
+  const inside: [number, number] = [box!.width * 0.5, box!.height * 0.5];
+
+  const before = await inkAt(page, ...inside);
+
+  // Hold a crop drag open across the middle of the capture.
+  await page.mouse.move(box!.x + box!.width * 0.25, box!.y + box!.height * 0.25);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width * 0.75, box!.y + box!.height * 0.75, { steps: 6 });
+
+  const guided = await inkAt(page, ...inside);
+  await page.mouse.up();
+
+  // The capture is still there, at full opacity, inside the selection.
+  expect(guided[3]).toBe(255);
+  expect(guided).toEqual(before);
+});

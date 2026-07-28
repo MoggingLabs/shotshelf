@@ -187,9 +187,12 @@ fn strip_bom(raw: &str) -> &str {
 /// the two leaves a truncated file — which `load` correctly degrades to
 /// defaults, silently costing the user every pin. This is the one file whose
 /// loss is visible: `handoff.rs` and `poster.rs` both stage-then-rename and
-/// both explain why, and this one did not. (`clipboard.rs` and the drag
-/// preview in `share.rs` still write directly — the first is guarded by a
-/// single writer thread and a grace window, the second is an idempotent icon.)
+/// both explain why, and this one did not.
+///
+/// Three writers still go direct, each for a stated reason: `clipboard.rs` is
+/// guarded by a single writer thread and a grace window, `share.rs`'s drag
+/// preview is an idempotent icon, and `edit.rs` uses `create_new` — which
+/// cannot overwrite — and removes a half-written file itself.
 fn write(path: &PathBuf, settings: &Settings) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -207,8 +210,6 @@ fn write(path: &PathBuf, settings: &Settings) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Keep hand-edited files from producing a shelf that holds nothing or never
-/// forgets anything.
 /// The most pinned captures that will be stored.
 ///
 /// Pins are exempt from the item cap by design, but the list arrives from the
@@ -217,6 +218,8 @@ fn write(path: &PathBuf, settings: &Settings) -> std::io::Result<()> {
 /// pins on purpose.
 const MAX_PINNED: usize = 500;
 
+/// Keep hand-edited files, and the webview, from producing a shelf that holds
+/// nothing, never forgets anything, or remembers a path it cannot use.
 fn sanitise(mut settings: Settings) -> Settings {
     settings.max_items = settings.max_items.clamp(1, 200);
     // The same check `set_pinned` applies, here rather than only there.
@@ -287,26 +290,41 @@ mod tests {
     }
 
     #[test]
-    fn settings_are_written_whole_or_not_at_all() {
+    fn a_failed_settings_write_leaves_the_previous_file_intact() {
         // Staged and renamed, so the file is either the old one or the new
         // one. `fs::write` truncates first, and `load` degrades a truncated
         // file to defaults — silently costing the user every pin.
+        //
+        // Asserted by making the rename *fail*: an earlier version wrote the
+        // defaults twice and compared the file to itself, which holds for any
+        // correct write and passed against plain truncate-then-write.
         let dir = std::env::temp_dir().join("shotshelf-settings-atomic-test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp dir");
-        let path = dir.join("settings.json");
 
-        write(&path, &Settings::default()).expect("first write");
+        let path = dir.join("settings.json");
+        let first = Settings {
+            max_items: 7,
+            ..Settings::default()
+        };
+        write(&path, &first).expect("first write");
         let before = std::fs::read_to_string(&path).expect("readable");
-        write(&path, &Settings::default()).expect("second write");
+
+        // A directory where the staging file needs to go: the write fails
+        // before it can touch the real settings.
+        std::fs::create_dir_all(dir.join("settings.json.part")).expect("blocker");
+        // Sanity: the blocker is what makes this test mean anything.
+        assert!(dir.join("settings.json.part").is_dir());
+        let second = Settings {
+            max_items: 9,
+            ..Settings::default()
+        };
+        assert!(write(&path, &second).is_err(), "the write reported failure");
 
         assert_eq!(
             std::fs::read_to_string(&path).expect("still readable"),
-            before
-        );
-        assert!(
-            !dir.join("settings.json.part").exists(),
-            "the staging file is not left behind",
+            before,
+            "the previous settings survived a failed write",
         );
 
         let _ = std::fs::remove_dir_all(&dir);

@@ -24,6 +24,7 @@ interface CaptureContext {
   label?: string;
 }
 
+/** Payload of the Rust `capture://new` event. */
 export interface Capture {
   path: string;
   kind: CaptureKind;

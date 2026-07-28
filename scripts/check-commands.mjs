@@ -68,28 +68,6 @@ function stripComments(source) {
 
 const source = frontendSource();
 const registered = registeredCommands();
-const unreachable = [];
-const staleExceptions = [];
-
-for (const command of registered) {
-  // The command name appears as a string literal at the invoke site.
-  const called = source.includes(`"${command}"`);
-  if (called && UNWIRED.has(command)) staleExceptions.push(command);
-  if (!called && !UNWIRED.has(command)) unreachable.push(command);
-}
-
-for (const [command, why] of UNWIRED) {
-  if (!staleExceptions.includes(command)) {
-    console.info(`  known unwired: ${command} — ${why}`);
-  }
-}
-
-if (staleExceptions.length > 0) {
-  console.error(
-    `\nThese are wired now and should be removed from UNWIRED in ${import.meta.filename}:\n` +
-      staleExceptions.map((command) => `  ${command}`).join("\n"),
-  );
-}
 
 /**
  * The other direction: an `invoke("…")` naming a command Rust does not expose.
@@ -112,6 +90,35 @@ if (staleExceptions.length > 0) {
 const invoked = [...source.matchAll(/\binvoke\s*(?:<[^>]*>)?\s*\(\s*"([^"]+)"/g)]
   .map((match) => match[1])
   .filter((name) => name !== undefined && !name.includes(":"));
+
+const unreachable = [];
+const staleExceptions = [];
+
+for (const command of registered) {
+  // Asked of the *invocation set* below, not of the raw text.
+  //
+  // This used to be `source.includes(`"${command}"`)` — any double-quoted
+  // occurrence anywhere in `src/`, so a command name surviving only as an
+  // object key or an event string kept the gate green. The precise set is
+  // built a few lines down for the other direction; the half that exists to
+  // close an attack-surface hole was using the looser copy.
+  const called = invoked.includes(command);
+  if (called && UNWIRED.has(command)) staleExceptions.push(command);
+  if (!called && !UNWIRED.has(command)) unreachable.push(command);
+}
+
+for (const [command, why] of UNWIRED) {
+  if (!staleExceptions.includes(command)) {
+    console.info(`  known unwired: ${command} — ${why}`);
+  }
+}
+
+if (staleExceptions.length > 0) {
+  console.error(
+    `\nThese are wired now and should be removed from UNWIRED in ${import.meta.filename}:\n` +
+      staleExceptions.map((command) => `  ${command}`).join("\n"),
+  );
+}
 
 const unregistered = [...new Set(invoked)].filter((name) => !registered.includes(name));
 

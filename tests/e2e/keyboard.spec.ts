@@ -158,3 +158,43 @@ test("the shelf keys do not fire while the settings panel is open", async ({ pag
   await page.keyboard.press("Delete");
   await expect(page.locator(".tile")).toHaveCount(2);
 });
+
+test("changing a setting saves it and applies it to the shelf", async ({ page }) => {
+  // The settings panel's write path had no test of any kind: not the save, not
+  // the clamp coming back from Rust, not the error surface, and not the
+  // `loaded` guard that stops an empty pinned list overwriting the user's
+  // pins. Its twin in `persistPinned` was covered, which made the gap look
+  // deliberate.
+  await bootShelf(page, { settings: { maxItems: 50 } });
+  await land(page, FIXTURE.wide, { ts: 1 });
+  await land(page, FIXTURE.tall, { ts: 2 });
+  await openBrowse(page);
+  await expect(page.locator(".tile")).toHaveCount(2);
+
+  // Rust clamps and returns what it stored; the front end adopts that answer.
+  await page.evaluate(() =>
+    window.__shotshelf__.respondWith("set_settings", (args) => args["settings"]),
+  );
+  await page.locator("#shelf-settings").click();
+  await page.locator("#setting-max").fill("1");
+  await page.locator("#setting-max").dispatchEvent("change");
+
+  const saved = await page.evaluate(
+    () => window.__shotshelf__.callsTo("set_settings").at(-1)?.args,
+  );
+  expect((saved?.["settings"] as Record<string, unknown>)["maxItems"]).toBe(1);
+
+  // And the shelf honours the new limit immediately rather than at next launch.
+  await expect(page.locator(".tile")).toHaveCount(1);
+});
+
+test("a settings save that fails says so in the panel", async ({ page }) => {
+  await bootShelf(page);
+  await page.evaluate(() => window.__shotshelf__.reject("set_settings", "disk is full"));
+
+  await page.locator("#shelf-settings").click();
+  await page.locator("#setting-max").fill("12");
+  await page.locator("#setting-max").dispatchEvent("change");
+
+  await expect(page.locator("#settings-note")).not.toBeEmpty();
+});

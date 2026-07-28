@@ -110,24 +110,14 @@ impl CaptureSink {
         };
 
         match app.emit(CAPTURE_EVENT, &capture) {
-            // The window title is deliberately absent from this line.
+            // Neither the window title nor the folder.
             //
-            // It is chosen by whatever program was in front, and a terminal
-            // sets its title to the command line — `PGPASSWORD=... psql` in
-            // front when you press PrtSc. USAGE tells people to run the binary
-            // from a terminal, and on macOS and Linux a GUI app's stdout is
-            // routinely collected by the unified log or the journal: on disk,
-            // outside the app, unredacted, and untouched by any retention
-            // setting. The capture beside it gets masked previews and a
-            // careful `Findings` split; this went out in plaintext.
-            // Neither the path nor the title.
-            //
-            // The title left this line because a terminal titles itself with
-            // its command line; a capture's *path* carries client and project
-            // names just as readily, and on macOS and Linux stdout is
-            // collected into the journal — on disk, outside the app, untouched
-            // by any retention setting. The name is enough to follow the
-            // pipeline; the folder it sits in is not this log's business.
+            // A terminal titles itself with its command line, and a capture's
+            // path carries client and project names just as readily — and on
+            // macOS and Linux an app's stdout is collected into the unified
+            // log or the journal: on disk, outside the app, unredacted, and
+            // untouched by any retention setting. The filename is enough to
+            // follow a capture through the pipeline.
             Ok(()) => println!(
                 "shotshelf: caught {:?} {}",
                 kind,

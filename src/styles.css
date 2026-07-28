@@ -412,7 +412,6 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .tile--dragging {
-    animation: none;
     transition: none;
   }
 }

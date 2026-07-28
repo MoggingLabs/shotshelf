@@ -246,7 +246,7 @@ clipboard writes so copying a capture doesn't shelve a second copy of it.
 
 Thumbnails are rendered straight from disk over Tauri's asset protocol, never inlined as
 base64. That protocol is scoped shut by default, and the scope is granted at **runtime** from
-the same resolved watch list the engine uses — non-recursively, plus the clipboard folder.
+the same resolved watch list the engine uses, non-recursively, plus the clipboard folder, the edits directory and the poster cache — four grants, and `webview_path::existing_file` consults exactly this scope before Rust reads any capture
 A static scope in `tauri.conf.json` could not express the macOS location, which is only known
 after `defaults read` has run, nor a `SHOTSHELF_WATCH_DIRS` override. The asset URL differs by
 platform (`http://asset.localhost/…` on Windows, `asset://localhost/…` on macOS);

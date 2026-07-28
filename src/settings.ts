@@ -104,9 +104,13 @@ export async function initSettings(
   onChange: (settings: Settings) => void,
 ): Promise<Settings> {
   announce = onChange;
-  current = await readStored();
-  loaded = true;
 
+  // Wired before the read, not after.
+  //
+  // Doing it afterwards meant a failed `get_settings` threw past all of this,
+  // so the Settings button had no listener and the panel could not be opened
+  // at all — a dead control with no explanation. Bound first, clicking it
+  // shows the panel and `save` refuses with a reason.
   el<HTMLButtonElement>("#shelf-settings").addEventListener("click", toggle);
 
   bind<HTMLSelectElement>("#setting-retention", (input) => ({
@@ -118,6 +122,8 @@ export async function initSettings(
     downscaleExports: input.checked,
   }));
 
+  current = await readStored();
+  loaded = true;
   fill();
 
   return current;
@@ -167,10 +173,21 @@ async function save(patch: Partial<Settings>): Promise<void> {
   // Same rule as `persistPinned`: this sends the whole settings object,
   // `pinned` included, so writing it before the stored one was read would
   // replace the user's pins with an empty list.
+  //
+  // Not covered end-to-end. The panel is now wired before the read so this is
+  // genuinely reachable, but driving it from a spec proved unreliable and a
+  // test that cannot be trusted is worse than an honest note. Its sibling in
+  // `persistPinned` is covered by `shelf.spec.ts`, and the two share one rule.
   if (!loaded) {
     note().textContent = "Settings could not be loaded, so they cannot be saved.";
     return;
   }
+  // Same rule as `persistPinned`: this sends the whole settings object,
+  // `pinned` included, so writing it before the stored one was read would
+  // replace the user's pins with an empty list.
+  // Same rule as `persistPinned`: this sends the whole settings object,
+  // `pinned` included, so writing it before the stored one was read would
+  // replace the user's pins with an empty list.
 
   try {
     // The Rust side returns what it actually stored, so any clamping — or a
