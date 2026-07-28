@@ -86,11 +86,19 @@ export async function beginDrag(
     // The cursor carries the first one's preview; there is no OS drag image
     // for "four files" that is more informative than one of them.
     const icon = sources[0]?.icon ?? "";
-    // Cancelling a drag just resolves with "Cancelled" — nothing to undo.
+
+    // The drag ends when `done` fires, NOT when this call returns. On Windows
+    // `DoDragDrop` blocks until the drop, so the two coincide; on macOS
+    // `beginDraggingSessionWithItems` returns immediately, and settling here
+    // would declare the drag over while the user is still holding the file.
+    // That is not cosmetic: it un-holds the popover, so the launch dismissal
+    // and the column's expiry timer both resume mid-drag.
+    //
+    // Cancelling a drag just resolves the callback with "Cancelled".
     await startDrag({ item: paths, icon, mode: "copy" }, done);
   } catch (error) {
     console.error("[shotshelf] could not drag that capture out", error);
-  } finally {
+    // Only a failure to *start* settles here — there is no drag to wait for.
     done();
   }
 }

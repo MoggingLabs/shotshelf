@@ -40,8 +40,13 @@ async function pressCard(
 
 async function threeCaptures(page: import("@playwright/test").Page): Promise<void> {
   await bootShelf(page);
+  // Each capture stages as itself, so the order handed to the OS is
+  // observable. A single shared stub made every ordering look identical.
   await page.evaluate(() =>
-    window.__shotshelf__.respond("prepare_drag", { path: "/x.png", icon: "/x.png" }),
+    window.__shotshelf__.respondWith("prepare_drag", (args) => ({
+      path: args["path"],
+      icon: args["path"],
+    })),
   );
   await land(page, FIXTURE.wide, { ts: 1 });
   await land(page, FIXTURE.tall, { ts: 2 });
@@ -103,6 +108,19 @@ test("dragging a picked card carries every picked capture", async ({ page }) => 
   await expect
     .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("prepare_drag").length))
     .toBe(2);
+
+  // The order is the whole reason this feature exists: a before and an after
+  // are only useful the right way round. Reversing `Selection.ids()` used to
+  // pass every test in this file.
+  const handed = await page.evaluate(
+    () =>
+      window.__shotshelf__.callsTo("plugin:drag|start_drag").at(-1)?.args["item"] as
+        | string[]
+        | undefined,
+  );
+  // Cards render newest-added first, so index 0 is the last capture to land.
+  // Picked in that order, handed over in that order.
+  expect(handed).toEqual([FIXTURE.square, FIXTURE.tall]);
 
   await page.mouse.up();
 });

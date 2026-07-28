@@ -40,10 +40,12 @@ pub fn recognise(path: &Path) -> Option<String> {
 
 /// Whether this build can read text at all.
 ///
-/// The front-end asks so it can tell you *why* nothing is searchable, rather
-/// than leaving you to conclude the feature is broken.
+/// Asked once at start-up so the shelf can say plainly that credential
+/// checking is unavailable here, rather than leaving every capture looking as
+/// though it had been checked and come back clean.
+#[tauri::command]
 #[must_use]
-pub const fn available() -> bool {
+pub const fn text_recognition_available() -> bool {
     platform::AVAILABLE
 }
 
@@ -143,9 +145,10 @@ mod tests {
 
     #[test]
     fn availability_is_answerable_without_a_capture() {
-        // The front-end asks this to explain why nothing is searchable rather
-        // than leaving the user to guess the feature is broken.
-        let _ = available();
+        // Asked at start-up so the shelf can say plainly that credential
+        // checking is off here, rather than letting every unchecked capture
+        // look like one that was checked and came back clean.
+        assert_eq!(text_recognition_available(), cfg!(target_os = "windows"));
     }
 
     #[cfg(target_os = "windows")]

@@ -28,7 +28,7 @@ interface RecordedCall {
 
 /** The controls a test gets, exposed on `window.__shotshelf__`. */
 interface TestHooks {
-  /** Every `invoke` the app has made, oldest first. */
+  /** Every `invoke` the app has made, oldest first, plugin calls included. */
   calls(): RecordedCall[];
   /** Calls for one command only. */
   callsTo(cmd: string): RecordedCall[];
@@ -36,6 +36,14 @@ interface TestHooks {
   clearCalls(): void;
   /** Answer a command with a value, or with a rejection. */
   respond(cmd: string, value: unknown): void;
+  /**
+   * Answer a command from its own arguments.
+   *
+   * A single fixed response makes every call look identical, which is how a
+   * test asserting on *which* captures were handed over, and in what order,
+   * silently asserted nothing.
+   */
+  respondWith(cmd: string, answer: (args: Record<string, unknown>) => unknown): void;
   reject(cmd: string, message: string): void;
   /**
    * Leave a command in flight, never settling.
@@ -90,6 +98,7 @@ export function installTauriMock(): void {
   const listeners = new Map<string, number[]>();
   type Response =
     | { kind: "value"; value: unknown }
+    | { kind: "from-args"; answer: (args: Record<string, unknown>) => unknown }
     | { kind: "error"; message: string }
     | { kind: "pending" };
   const responses = new Map<string, Response>();
@@ -138,6 +147,7 @@ export function installTauriMock(): void {
     const declared = responses.get(cmd);
     if (declared) {
       if (declared.kind === "value") return Promise.resolve(declared.value);
+      if (declared.kind === "from-args") return Promise.resolve(declared.answer(args));
       if (declared.kind === "error") return Promise.reject(new Error(declared.message));
       return new Promise(() => {});
     }
@@ -179,6 +189,7 @@ export function installTauriMock(): void {
       calls.length = 0;
     },
     respond: (cmd, value) => responses.set(cmd, { kind: "value", value }),
+    respondWith: (cmd, answer) => responses.set(cmd, { kind: "from-args", answer }),
     reject: (cmd, message) => responses.set(cmd, { kind: "error", message }),
     hang: (cmd) => responses.set(cmd, { kind: "pending" }),
     emit: (event, payload) => {

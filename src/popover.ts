@@ -122,7 +122,7 @@ export class Popover {
 
   /** Focus arriving means you are using it; the launch timer stands down. */
   onFocusChanged(focused: boolean): void {
-    this.#shelf.holdColumn(focused);
+    this.#shelf.holdColumn("focus", focused);
     if (focused) window.clearTimeout(this.#launchTimer);
   }
 }

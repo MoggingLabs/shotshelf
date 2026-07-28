@@ -68,10 +68,24 @@ export interface SecretFinding {
   kind: SecretKind;
   label: string;
   preview: string;
+  /** How alarming this is. Higher is worse. */
+  severity: number;
 }
 
-/** What Shotshelf worked out about a capture by reading it. */
-export interface Enrichment {
-  text: string | null;
+/**
+ * The part of an enrichment that crosses into the webview.
+ *
+ * Deliberately not the recognised text. That is the capture's full contents in
+ * characters — every token, verbatim — and sending it alongside a masked
+ * preview would defeat the masking. It stays in Rust.
+ */
+export interface Findings {
   secrets: SecretFinding[];
+  /**
+   * Whether the capture was actually read.
+   *
+   * False means "could not look", which is a different answer from "looked and
+   * found nothing" and must never be shown as the same thing.
+   */
+  scanned: boolean;
 }

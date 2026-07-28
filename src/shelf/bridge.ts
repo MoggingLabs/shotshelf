@@ -14,7 +14,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-import type { CaptureKind, DragSource, Enrichment, VideoDetails } from "./types.ts";
+import type { CaptureKind, DragSource, Findings, VideoDetails } from "./types.ts";
 
 /** What ffmpeg could tell us about a recording. Rejects if it could not be read. */
 export function videoDetails(path: string): Promise<VideoDetails> {
@@ -63,6 +63,17 @@ export async function setCaptureCount(count: number): Promise<void> {
  * shelf and draggable long before this returns, and on platforms with no text
  * recogniser it returns nothing at all, which is ordinary.
  */
-export function describeCapture(path: string): Promise<Enrichment> {
-  return invoke<Enrichment>("describe_capture", { path });
+export function describeCapture(path: string): Promise<Findings> {
+  return invoke<Findings>("describe_capture", { path });
+}
+
+/**
+ * Whether this build can read text out of a capture at all.
+ *
+ * Asked once at start-up. Windows has an OS text recogniser; macOS and Linux
+ * do not have one wired up yet, and a user there needs telling — otherwise
+ * every capture looks exactly like one that was checked and came back clean.
+ */
+export function textRecognitionAvailable(): Promise<boolean> {
+  return invoke<boolean>("text_recognition_available");
 }

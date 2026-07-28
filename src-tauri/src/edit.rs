@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager, Runtime};
 
-use crate::imaging::{self, compare, redact::Region};
+use crate::imaging::{self, compare, redact, redact::Region};
 
 /// Where edits live, under the app's data directory.
 const EDITS_DIR: &str = "edits";
@@ -45,8 +45,6 @@ pub async fn redact_capture<R: Runtime>(
     .and_then(|(bytes, source)| write_edit(&app, &source, "redacted", &bytes))
 }
 
-use crate::imaging::redact;
-
 /// Put two captures side by side, with what changed outlined on the second.
 #[tauri::command]
 pub async fn compare_captures<R: Runtime>(
@@ -69,16 +67,6 @@ pub async fn compare_captures<R: Runtime>(
     .map_err(String::from)?;
 
     write_edit(&app, &name_source, "compared", &bytes)
-}
-
-/// Whether this build can read text out of a capture.
-///
-/// Asked by the front-end so it can say why nothing is searchable, rather than
-/// leaving someone to conclude the feature is broken.
-#[tauri::command]
-#[must_use]
-pub const fn text_recognition_available() -> bool {
-    crate::enrich::ocr::available()
 }
 
 /// Write a new capture beside the shelf's own data, and hand back its path.
@@ -134,8 +122,17 @@ fn unique(dir: &Path, stem: &str, kind: &str) -> PathBuf {
         .unwrap_or(first)
 }
 
+/// Reject anything that is not an absolute path to a file that exists.
+///
+/// The absolute check is not decoration. These commands are reachable from the
+/// webview and take a path from it, so a relative path would be resolved
+/// against whatever the process's working directory happens to be. Its sibling
+/// in `share.rs` has always enforced this; this one had drifted.
 fn existing(path: &str) -> Result<PathBuf, String> {
     let source = PathBuf::from(path);
+    if !source.is_absolute() {
+        return Err(format!("{path} is not an absolute path"));
+    }
     if !source.is_file() {
         return Err(format!("{path} is no longer on disk"));
     }
@@ -166,5 +163,13 @@ mod tests {
     #[test]
     fn a_capture_that_has_gone_is_reported_rather_than_panicking() {
         assert!(existing("/definitely/not/here.png").is_err());
+    }
+
+    #[test]
+    fn a_relative_path_from_the_webview_is_refused() {
+        // These commands take a path from the least-trusted process in the
+        // app; a relative one would resolve against the working directory.
+        assert!(existing("../../etc/passwd").is_err());
+        assert!(existing("Screenshot.png").is_err());
     }
 }

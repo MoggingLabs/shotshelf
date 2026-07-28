@@ -33,6 +33,22 @@ function describeWatch(dirs: readonly string[]): string {
   ].join("\n");
 }
 
+/**
+ * Say, once, that captures are not being checked for credentials here.
+ *
+ * In the tooltip rather than the alert strip, and once rather than per tile:
+ * this is a standing property of the platform, not an event, and a warning on
+ * every card is a warning people stop reading. Saying nothing at all was the
+ * worse option — it made an unchecked capture look identical to a checked one.
+ */
+export function noteScanUnavailable(): void {
+  const mark = document.querySelector<HTMLElement>("#shelf-mark");
+  if (!mark) return;
+  mark.title = `${mark.title}
+
+Captures are not checked for credentials on this platform.`;
+}
+
 export function showWatchState(dirs: readonly string[]): void {
   console.info("[shotshelf] watching", dirs);
 

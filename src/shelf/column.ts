@@ -22,11 +22,23 @@ interface ColumnEntry {
   expires: number;
 }
 
+/**
+ * Why the column is being held open.
+ *
+ * There is more than one reason at a time — the pointer is over the popover
+ * *and* the window has focus — and they start and stop independently. Modelled
+ * as a set rather than a flag because releasing a hold is not idempotent: it
+ * pushes every card's deadline forward a full window. With one boolean, the
+ * pointer leaving a focused window released a hold the focus still wanted,
+ * resetting every deadline and resuming ageing behind the other holder's back.
+ */
+export type HoldReason = "pointer" | "focus";
+
 export class ColumnQueue {
   /** Newest first, matching the order they are shown in. */
   #entries: ColumnEntry[] = [];
-  /** While held, cards do not age: you are visibly still using them. */
-  #held = false;
+  /** Every reason the column is currently being held open. */
+  readonly #holds = new Set<HoldReason>();
 
   get size(): number {
     return this.#entries.length;
@@ -37,7 +49,7 @@ export class ColumnQueue {
   }
 
   get held(): boolean {
-    return this.#held;
+    return this.#holds.size > 0;
   }
 
   /** The captures showing, newest first. */
@@ -73,17 +85,28 @@ export class ColumnQueue {
   }
 
   /**
-   * Hold or release the column.
+   * Hold or release the column for one reason.
    *
-   * Releasing pushes every deadline forward by a full window rather than
-   * letting cards vanish the instant the pointer leaves — a card that was
-   * about to expire when you started reading it should still be there when you
-   * look up.
+   * The column ages only once *every* reason has let go. Releasing the last
+   * one pushes every deadline forward by a full window rather than letting
+   * cards vanish the instant the pointer leaves — a card that was about to
+   * expire when you started reading it should still be there when you look up.
    */
-  hold(held: boolean, now: number = Date.now()): void {
-    if (this.#held === held) return;
-    this.#held = held;
-    if (!held) {
+  hold(reason: HoldReason, held: boolean, now: number = Date.now()): void {
+    // Sizes rather than the `held` getter either side of the mutation:
+    // TypeScript treats a `const` alias of a getter as pinned, so narrowing
+    // the alias narrows the getter too, and the compiler concluded the second
+    // read could never be false — which is exactly the transition being
+    // tested for.
+    const holdersBefore = this.#holds.size;
+
+    if (held) this.#holds.add(reason);
+    else this.#holds.delete(reason);
+
+    // Only the transition from "held by something" to "held by nothing" earns
+    // the deadline reset; anything else would let a repeatedly-toggled reason
+    // keep a card alive indefinitely.
+    if (holdersBefore > 0 && this.#holds.size === 0) {
       for (const entry of this.#entries) entry.expires = now + COLUMN_MS;
     }
   }
@@ -93,7 +116,7 @@ export class ColumnQueue {
    * is the caller's cue to resize the window or put it away.
    */
   expire(now: number = Date.now()): boolean {
-    if (this.#held) return false;
+    if (this.held) return false;
 
     const before = this.#entries.length;
     this.#entries = this.#entries.filter((entry) => entry.expires > now);

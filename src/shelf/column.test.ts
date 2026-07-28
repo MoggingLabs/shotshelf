@@ -39,7 +39,7 @@ test("expire reports whether anything went, so the window is only resized when i
 test("a held column does not age", () => {
   const column = new ColumnQueue();
   column.add("a", 0);
-  column.hold(true, 0);
+  column.hold("pointer", true, 0);
 
   assert.equal(column.expire(COLUMN_MS * 10), false, "you are plainly still using it");
   assert.equal(column.size, 1);
@@ -48,8 +48,8 @@ test("a held column does not age", () => {
 test("releasing a hold gives every card a full window again", () => {
   const column = new ColumnQueue();
   column.add("a", 0);
-  column.hold(true, 0);
-  column.hold(false, COLUMN_MS * 10);
+  column.hold("pointer", true, 0);
+  column.hold("pointer", false, COLUMN_MS * 10);
 
   assert.equal(
     column.expire(COLUMN_MS * 10 + 1),
@@ -59,12 +59,37 @@ test("releasing a hold gives every card a full window again", () => {
   assert.equal(column.expire(COLUMN_MS * 11 + 1), true);
 });
 
-test("holding twice is not a way to extend a card twice", () => {
+test("one holder releasing does not release another's hold", () => {
+  // The live defect this models: the window has focus and the pointer is over
+  // the popover. The pointer leaves. Focus still wants the column held, but a
+  // single boolean let the pointer's release speak for both — every deadline
+  // reset and the cards resumed ageing behind focus's back.
   const column = new ColumnQueue();
   column.add("a", 0);
-  column.hold(true, 0);
-  column.hold(true, COLUMN_MS * 5);
-  column.hold(false, COLUMN_MS * 5);
+  column.hold("focus", true, 0);
+  column.hold("pointer", true, 0);
+
+  column.hold("pointer", false, 0);
+
+  assert.equal(column.held, true, "focus is still holding it");
+  assert.equal(column.expire(COLUMN_MS * 10), false, "so nothing ages");
+
+  column.hold("focus", false, COLUMN_MS * 10);
+  assert.equal(column.held, false);
+  assert.equal(
+    column.expire(COLUMN_MS * 10 + 1),
+    false,
+    "the last release still grants a full window",
+  );
+  assert.equal(column.expire(COLUMN_MS * 11 + 1), true);
+});
+
+test("re-holding a reason already held does not extend anything", () => {
+  const column = new ColumnQueue();
+  column.add("a", 0);
+  column.hold("pointer", true, 0);
+  column.hold("pointer", true, COLUMN_MS * 5);
+  column.hold("pointer", false, COLUMN_MS * 5);
   assert.equal(column.expire(COLUMN_MS * 6 + 1), true);
 });
 

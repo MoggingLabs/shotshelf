@@ -128,11 +128,16 @@ test("removing a capture takes it off the shelf and never touches the file", asy
   await expect(page.locator(".tile")).toHaveCount(0);
   await expect(page.locator(".empty__title")).toBeVisible();
 
-  // The shelf is a view of your captures, not their owner. Nothing it does on
-  // removal may reach the file — this asserts the absence deliberately.
+  // The shelf is a view of your captures, not their owner, so nothing it does
+  // on removal may reach the file.
+  //
+  // Asserted as an allowlist rather than by naming commands that must not
+  // appear: the previous version listed two names that have never existed in
+  // this codebase, so it could not have failed. This one fails the moment
+  // removal invokes anything new, whatever it is called.
+  const allowed = new Set(["set_pinned", "set_capture_count", "forget_video", "describe_capture"]);
   const commands = await page.evaluate(() => window.__shotshelf__.calls().map((call) => call.cmd));
-  expect(commands).not.toContain("delete_capture");
-  expect(commands).not.toContain("trash_capture");
+  expect([...new Set(commands)].filter((cmd) => !allowed.has(cmd))).toEqual([]);
 });
 
 test("pinning is persisted so it survives a restart", async ({ page }) => {

@@ -14,8 +14,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { icon } from "./icons.ts";
 import { Popover } from "./popover.ts";
 import { currentSettings, initSettings, settingsOpen } from "./settings.ts";
+import { textRecognitionAvailable } from "./shelf/bridge.ts";
 import { Shelf, type Capture } from "./shelf/index.ts";
-import { say, showWatchState } from "./status.ts";
+import { noteScanUnavailable, say, showWatchState } from "./status.ts";
 
 function el<T extends HTMLElement>(selector: string): T {
   const node = document.querySelector<T>(selector);
@@ -55,8 +56,8 @@ popover.scheduleLaunchDismissal();
 // ── Input ────────────────────────────────────────────────────────────────
 
 // Hovering or focusing the column stops its cards ageing out under the pointer.
-root.addEventListener("pointerenter", () => shelf.holdColumn(true));
-root.addEventListener("pointerleave", () => shelf.holdColumn(false));
+root.addEventListener("pointerenter", () => shelf.holdColumn("pointer", true));
+root.addEventListener("pointerleave", () => shelf.holdColumn("pointer", false));
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") popover.dismiss();
@@ -94,7 +95,11 @@ void initSettings(() => shelf.applySettings())
   });
 
 void invoke<string[]>("catch_watch_dirs")
-  .then((dirs) => showWatchState(dirs))
+  .then(async (dirs) => {
+    showWatchState(dirs);
+    // Said after the watch state, so it lands in the same tooltip.
+    if (!(await textRecognitionAvailable())) noteScanUnavailable();
+  })
   .catch((error: unknown) => {
     console.error("[shotshelf] could not read the watch folders", error);
     say("The catch engine is unavailable — no captures will be picked up.");

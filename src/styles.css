@@ -550,6 +550,18 @@ body {
   z-index: 1;
 }
 
+/* The card itself, when it is carrying something. A warm rim rather than a
+   red one: this is a check-this-before-you-send-it, not a broken tile. */
+.tile--secret {
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.85);
+}
+
+.tile--secret:hover {
+  box-shadow:
+    inset 0 0 0 1px rgba(245, 158, 11, 0.95),
+    0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
 .tile__secret-count {
   font-variant-numeric: tabular-nums;
 }

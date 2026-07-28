@@ -17,7 +17,7 @@ use tauri_plugin_clipboard::Clipboard;
 
 use crate::{
     catch::{CaptureKind, CaptureSink},
-    enrich::{self, Enrichment},
+    enrich::{self, Findings},
     handoff,
     settings::SettingsStore,
 };
@@ -42,7 +42,13 @@ pub struct DragSource {
 /// The check matters: a tile can outlive its file (emptied Recycle Bin, a
 /// cleared temp folder), and handing the OS a missing path makes for a drag
 /// that silently does nothing.
-#[tauri::command]
+///
+/// `command(async)` rather than a bare command: with export sizing on this
+/// decodes, resizes and re-encodes a full-resolution screenshot, and a plain
+/// `#[tauri::command] pub fn` runs inline on the IPC thread. A multi-select
+/// drag calls it once per capture, so the freeze would land at the exact
+/// moment the user starts dragging. The same applies to the copy below.
+#[tauri::command(async)]
 pub fn prepare_drag<R: Runtime>(
     app: AppHandle<R>,
     settings: State<'_, SettingsStore>,
@@ -79,19 +85,19 @@ pub fn prepare_drag<R: Runtime>(
 /// reason recordings are: it is optional detail that arrives when it arrives,
 /// and a capture is on the shelf and draggable long before this returns.
 #[tauri::command]
-pub async fn describe_capture(path: String) -> Result<Enrichment, String> {
+pub async fn describe_capture(path: String) -> Result<Findings, String> {
     let source = existing_file(&path)?;
 
     // OCR is the slowest thing this app does — hundreds of milliseconds on a
     // dense screenshot — so it goes to a blocking worker rather than holding
     // the async runtime that also serves the shelf's other commands.
-    tauri::async_runtime::spawn_blocking(move || enrich::describe(&source))
+    tauri::async_runtime::spawn_blocking(move || Findings::from(enrich::describe(&source)))
         .await
         .map_err(|err| err.to_string())
 }
 
 /// Clipboard fallback, for the apps that will take a paste but not a drop.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn copy_capture<R: Runtime>(
     app: AppHandle<R>,
     sink: State<'_, Arc<CaptureSink>>,

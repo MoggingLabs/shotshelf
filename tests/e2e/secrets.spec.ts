@@ -21,14 +21,18 @@ const TOKEN_FINDING = {
   kind: "serviceToken",
   label: "GitHub token",
   preview: "ghp_A1b…",
+  severity: 3,
 };
 
 async function withFindings(
   page: import("@playwright/test").Page,
   secrets: unknown[],
 ): Promise<void> {
+  // No `text` field: the recognised text deliberately does not cross into the
+  // webview, so a harness that supplied one would be testing a contract the
+  // app no longer has.
   await page.evaluate(
-    (findings) => window.__shotshelf__.respond("describe_capture", { text: "", secrets: findings }),
+    (findings) => window.__shotshelf__.respond("describe_capture", { secrets: findings }),
     secrets,
   );
 }
@@ -97,10 +101,13 @@ test("the warning never puts the secret itself in the page", async ({ page }) =>
 
 test("several findings are counted, worst first", async ({ page }) => {
   await bootShelf(page);
+  // Deliberately delivered in the wrong order. The previous version of this
+  // test fed an already-sorted list, so it asserted the harness's ordering
+  // rather than the app's — it would have passed with the sort deleted.
   await withFindings(page, [
-    { kind: "privateKey", label: "private key", preview: "-----BE…" },
+    { kind: "personalData", label: "email address", preview: "someone…", severity: 1 },
     TOKEN_FINDING,
-    { kind: "personalData", label: "email address", preview: "someone…" },
+    { kind: "privateKey", label: "private key", preview: "-----BE…", severity: 4 },
   ]);
   await land(page, FIXTURE.wide);
 

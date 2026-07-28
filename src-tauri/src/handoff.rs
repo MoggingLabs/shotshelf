@@ -81,17 +81,39 @@ fn cache_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// A directory name derived from the full source path.
+/// A directory name identifying *which version of which file*.
 ///
 /// Two captures can share a filename — `Screenshot.png` in two folders — so
 /// the key has to come from the whole path, and it has to be filesystem-safe
 /// on every platform, which rules out the path itself.
+///
+/// The modified time is in the key for a sharper reason. Plenty of capture
+/// tools reuse a filename: a fixed ShareX pattern, an overwritten
+/// `Screenshot.png`, a file re-saved from an editor. Keyed on path alone, the
+/// cache would hand over the *previous* image's pixels while the shelf showed
+/// the new thumbnail — the app's one job is handing over a specific
+/// screenshot, so delivering different pixels than the ones on screen is a
+/// disclosure bug rather than a stale cache. The poster cache already keys on
+/// path and mtime for exactly this reason.
 fn key(source: &Path) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in source.to_string_lossy().as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    let mut eat = |bytes: &[u8]| {
+        for byte in bytes {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+
+    eat(source.to_string_lossy().as_bytes());
+
+    // An unreadable timestamp is not a reason to fail; it only means this
+    // capture shares a key with its other versions, which is where we were.
+    if let Ok(modified) = std::fs::metadata(source).and_then(|meta| meta.modified()) {
+        if let Ok(age) = modified.duration_since(std::time::UNIX_EPOCH) {
+            eat(&age.as_millis().to_le_bytes());
+        }
     }
+
     format!("{hash:016x}")
 }
 
@@ -141,6 +163,23 @@ mod tests {
     #[test]
     fn the_key_is_stable_for_the_same_capture() {
         assert_eq!(key(Path::new("/a/b.png")), key(Path::new("/a/b.png")));
+    }
+
+    #[test]
+    fn a_replaced_capture_gets_a_new_key() {
+        // A capture tool reusing a filename must not make the shelf hand over
+        // the previous image's pixels under the new thumbnail.
+        let path = std::env::temp_dir().join("shotshelf-handoff-key-test.png");
+        std::fs::write(&path, b"first").expect("write");
+        let first = key(&path);
+
+        // Enough of a gap that the filesystem records a different mtime.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&path, b"second").expect("rewrite");
+        let second = key(&path);
+
+        let _ = std::fs::remove_file(&path);
+        assert_ne!(first, second, "same path, different contents, same key");
     }
 
     #[test]

@@ -64,7 +64,13 @@ function marker(findings: readonly SecretFinding[]): HTMLElement {
 export async function markSecrets(tile: HTMLElement, path: string): Promise<void> {
   let findings: SecretFinding[];
   try {
-    findings = (await describeCapture(path)).secrets;
+    // Sorted here rather than trusted from the wire. Rust sends a severity
+    // with each finding precisely so the "worst first" rule is data both
+    // sides can enforce, instead of an ordering that anything touching the
+    // list in between could silently undo.
+    findings = [...(await describeCapture(path)).secrets].sort(
+      (a, b) => b.severity - a.severity,
+    );
   } catch {
     return;
   }

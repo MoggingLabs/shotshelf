@@ -68,6 +68,14 @@ pub struct Finding {
     pub label: &'static str,
     /// Masked. Never the value itself.
     pub preview: String,
+    /// How alarming this is, on the wire.
+    ///
+    /// Sent rather than left implicit in the order of the list. The front-end
+    /// shows the worst finding first, and making that depend on a `sort` two
+    /// process boundaries away meant anything that touched the list in
+    /// between — a cache, a dedupe, a second producer — silently broke it
+    /// with no test failing.
+    pub severity: u8,
 }
 
 struct Pattern {
@@ -162,7 +170,8 @@ pub fn scan(text: &str) -> Vec<Finding> {
             let finding = Finding {
                 kind: pattern.kind,
                 label: pattern.label,
-                preview: mask(hit.as_str()),
+                preview: mask(pattern.kind, hit.as_str()),
+                severity: pattern.kind.severity(),
             };
             // The same key printed twice on one screen is one problem.
             if !findings.contains(&finding) {
@@ -172,27 +181,70 @@ pub fn scan(text: &str) -> Vec<Finding> {
     }
 
     // Reverse severity: the worst thing is what you see first.
-    findings.sort_by_key(|finding| std::cmp::Reverse(finding.kind.severity()));
+    findings.sort_by_key(|finding| std::cmp::Reverse(finding.severity));
     findings
 }
 
 /// Enough of a match to recognise it, never enough to use it.
 ///
-/// Keeping the leading characters is deliberate: the prefix is what tells you
-/// *which* credential it is — `ghp_` versus `sk-ant-` — and the prefix alone is
-/// not the secret. The tail is dropped entirely rather than partly shown,
-/// because a known prefix plus a known suffix is a materially smaller search
-/// space than either alone.
-fn mask(value: &str) -> String {
+/// What is safe to show depends on *where the value starts*, which differs by
+/// kind — and one rule across all of them leaked. A fixed seven-character
+/// prefix is right for a token, where those characters are a type marker
+/// (`ghp_`, `sk-ant-`) and not the credential. It is wrong for
+/// `TOKEN=abcdefgh`, where it showed the first character of the secret, and
+/// badly wrong for an email, where it showed most of the address — into the
+/// very tooltip this module exists to keep it out of.
+///
+/// So each kind keeps only the part that names it:
+///
+/// * tokens and keys — the type prefix, tail dropped entirely, because a known
+///   prefix *plus* a known suffix is a materially smaller search space than
+///   either alone;
+/// * an assignment — the variable's name, never any of its value;
+/// * an email — the domain, never the local part, which is the identifying half.
+fn mask(kind: SecretKind, value: &str) -> String {
+    match kind {
+        SecretKind::Assignment => mask_assignment(value),
+        SecretKind::PersonalData => mask_email(value),
+        SecretKind::PrivateKey | SecretKind::ServiceToken | SecretKind::Jwt => mask_prefix(value),
+    }
+}
+
+/// Keep a type marker, drop the rest.
+fn mask_prefix(value: &str) -> String {
     const KEEP: usize = 7;
 
-    let visible: String = value.chars().take(KEEP).collect();
     if value.chars().count() <= KEEP {
         // Short enough that any of it is too much of it.
         return "•".repeat(value.chars().count().max(1));
     }
 
+    let visible: String = value.chars().take(KEEP).collect();
     format!("{visible}…")
+}
+
+/// `DATABASE_PASSWORD=hunter2` → `DATABASE_PASSWORD=•••`.
+///
+/// The name is the useful half — it tells you *what* is exposed — and it is
+/// not itself a credential. The value is never shown at any length.
+fn mask_assignment(value: &str) -> String {
+    match value.find(['=', ':']) {
+        Some(split) => format!("{}{}•••", &value[..split], &value[split..=split]),
+        // No separator means the pattern matched something unexpected; show
+        // nothing rather than guess which half was the secret.
+        None => "•••".to_owned(),
+    }
+}
+
+/// `someone@example.com` → `•••@example.com`.
+///
+/// The local part identifies the person and is dropped whole; the domain says
+/// enough to recognise which address without being the address.
+fn mask_email(value: &str) -> String {
+    match value.rfind('@') {
+        Some(at) => format!("•••{}", &value[at..]),
+        None => "•••".to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -277,8 +329,60 @@ mod tests {
     #[test]
     fn a_short_match_is_masked_completely() {
         // Nothing here is long enough for a prefix to be safe.
-        assert_eq!(mask("abc"), "•••");
-        assert_eq!(mask(""), "•");
+        assert_eq!(mask(SecretKind::ServiceToken, "abc"), "•••");
+        assert_eq!(mask(SecretKind::ServiceToken, ""), "•");
+    }
+
+    #[test]
+    fn an_assignment_shows_its_name_and_none_of_its_value() {
+        // A fixed prefix rule showed `TOKEN=a…` here — one character of the
+        // credential, in the tooltip this module exists to keep it out of.
+        let masked = mask(SecretKind::Assignment, "DATABASE_PASSWORD=hunter2hunter2");
+        assert_eq!(masked, "DATABASE_PASSWORD=•••");
+        assert!(
+            !masked.contains('h'),
+            "no part of the value survives: {masked}"
+        );
+
+        assert_eq!(
+            mask(SecretKind::Assignment, "api_key: 9f8e7d6c"),
+            "api_key:•••"
+        );
+    }
+
+    #[test]
+    fn an_email_keeps_its_domain_and_loses_the_person() {
+        // A fixed prefix rule showed `bob@exa…` — most of the address.
+        let masked = mask(SecretKind::PersonalData, "someone@example.com");
+        assert_eq!(masked, "•••@example.com");
+        assert!(!masked.contains("someone"));
+    }
+
+    #[test]
+    fn every_kind_is_masked_by_a_rule_that_names_it_without_showing_it() {
+        for (kind, value, must_not_contain) in [
+            (
+                SecretKind::Assignment,
+                "SECRET_TOKEN=abcdefghijkl",
+                "abcdefgh",
+            ),
+            (
+                SecretKind::PersonalData,
+                "first.last@corp.example",
+                "first.last",
+            ),
+            (
+                SecretKind::ServiceToken,
+                "AKIAIOSFODNN7EXAMPLE",
+                "N7EXAMPLE",
+            ),
+        ] {
+            let masked = mask(kind, value);
+            assert!(
+                !masked.contains(must_not_contain),
+                "{kind:?} leaked {must_not_contain} in {masked}",
+            );
+        }
     }
 
     #[test]

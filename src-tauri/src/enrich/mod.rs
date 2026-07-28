@@ -20,17 +20,49 @@ pub mod secrets;
 use serde::Serialize;
 
 /// What Shotshelf worked out about a capture on its own.
-#[derive(Clone, Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
+///
+/// **`text` never leaves this process.** The recognised text is the capture's
+/// full contents in characters — every token, every address, verbatim — and
+/// the whole point of masking a finding is that the value does not spread.
+/// Handing the front-end the masked preview *and* the unmasked text alongside
+/// it would defeat the exercise entirely, so the command that serves the
+/// webview returns [`Findings`] and this stays in Rust.
+#[derive(Clone, Debug, Default)]
 pub struct Enrichment {
     /// Text recognised in the capture, if the platform can.
     ///
-    /// Kept whole rather than summarised: it is what makes the shelf
-    /// searchable, and what can be handed to a model alongside the picture so
-    /// it reads characters instead of guessing at pixels.
+    /// Kept for what has to happen on this side of the boundary — scanning
+    /// today, searching the shelf later.
     pub text: Option<String>,
     /// Anything in that text worth a second look before the capture leaves.
     pub secrets: Vec<secrets::Finding>,
+}
+
+/// The part of an [`Enrichment`] that is safe to send to the webview.
+///
+/// A response DTO shaped to its one caller, rather than "everything
+/// enrichment happens to know" — that shape is how the raw text ended up
+/// crossing the boundary in the first place.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Findings {
+    pub secrets: Vec<secrets::Finding>,
+    /// Whether the capture was actually read.
+    ///
+    /// False means "could not look" — no text recogniser on this platform, or
+    /// a file that would not decode — which is a different answer from "looked
+    /// and found nothing" and must not be shown as the same thing. Collapsing
+    /// the two is how a safety feature becomes silently inert.
+    pub scanned: bool,
+}
+
+impl From<Enrichment> for Findings {
+    fn from(enrichment: Enrichment) -> Self {
+        Self {
+            scanned: enrichment.text.is_some(),
+            secrets: enrichment.secrets,
+        }
+    }
 }
 
 /// Read a capture and work out what can be worked out.

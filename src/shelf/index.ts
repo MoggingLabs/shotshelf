@@ -15,7 +15,7 @@
 
 import { persistPinned, type Settings } from "../settings.ts";
 import { forgetVideo, setCaptureCount } from "./bridge.ts";
-import { ColumnQueue } from "./column.ts";
+import { ColumnQueue, type HoldReason } from "./column.ts";
 import { armDrag, beginDrag } from "./drag.ts";
 import { columnHeight } from "./geometry.ts";
 import { Selection } from "./selection.ts";
@@ -196,9 +196,15 @@ export class Shelf {
     this.#refresh();
   }
 
-  /** Hovering or focusing the column stops its cards ageing out under you. */
-  holdColumn(held: boolean): void {
-    this.#column.hold(held);
+  /**
+   * Hovering or focusing the column stops its cards ageing out under you.
+   *
+   * The reason is named because both happen at once and stop independently:
+   * with a single flag, the pointer leaving a focused window released a hold
+   * that focus still wanted.
+   */
+  holdColumn(reason: HoldReason, held: boolean): void {
+    this.#column.hold(reason, held);
   }
 
   #ageColumn(): void {
