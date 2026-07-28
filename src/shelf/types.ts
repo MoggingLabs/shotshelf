@@ -54,3 +54,24 @@ export interface DragSource {
 export function captureId(capture: Capture): string {
   return `${capture.ts}:${capture.path}`;
 }
+
+/** How alarming a finding is. Mirrors `enrich::secrets::SecretKind`. */
+type SecretKind = "privateKey" | "serviceToken" | "jwt" | "assignment" | "personalData";
+
+/**
+ * Something in a capture worth a second look before it leaves the machine.
+ *
+ * `preview` is masked on the Rust side and must stay that way: the whole point
+ * is to stop the value spreading, so putting it in a tooltip would defeat it.
+ */
+export interface SecretFinding {
+  kind: SecretKind;
+  label: string;
+  preview: string;
+}
+
+/** What Shotshelf worked out about a capture by reading it. */
+export interface Enrichment {
+  text: string | null;
+  secrets: SecretFinding[];
+}

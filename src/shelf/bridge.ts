@@ -14,7 +14,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-import type { CaptureKind, DragSource, VideoDetails } from "./types.ts";
+import type { CaptureKind, DragSource, Enrichment, VideoDetails } from "./types.ts";
 
 /** What ffmpeg could tell us about a recording. Rejects if it could not be read. */
 export function videoDetails(path: string): Promise<VideoDetails> {
@@ -53,4 +53,16 @@ export async function setCaptureCount(count: number): Promise<void> {
   } catch {
     // Advisory by design; see above.
   }
+}
+
+/**
+ * What Shotshelf worked out about a capture by reading it.
+ *
+ * Slow — text recognition on a dense screenshot is the longest thing this app
+ * does — so it is fetched per tile rather than waited for. A capture is on the
+ * shelf and draggable long before this returns, and on platforms with no text
+ * recogniser it returns nothing at all, which is ordinary.
+ */
+export function describeCapture(path: string): Promise<Enrichment> {
+  return invoke<Enrichment>("describe_capture", { path });
 }

@@ -525,3 +525,40 @@ body {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* ── The credential warning ────────────────────────────────────────────── */
+/* A capture carrying a token is still yours to send; this says so quietly and
+   gets out of the way. Amber rather than red: it is a check-this, not an
+   error, and the card underneath still works exactly as it did. */
+
+.tile__secret {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px;
+  border-radius: 6px;
+  background: rgba(180, 83, 9, 0.92);
+  color: #fff7ed;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1;
+  /* Above the wash and the picture, below nothing — this is the one thing on
+     the card that should never be covered. */
+  z-index: 1;
+}
+
+.tile__secret-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A private key is not the same as an email address in a signature. */
+.tile__secret[data-kind="personalData"] {
+  background: rgba(120, 113, 108, 0.92);
+}
+
+.tile__secret[data-kind="privateKey"] {
+  background: rgba(190, 18, 60, 0.94);
+}

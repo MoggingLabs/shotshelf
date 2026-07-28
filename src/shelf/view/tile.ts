@@ -14,6 +14,7 @@ import { icon, solidIcon } from "../../icons.ts";
 import { videoDetails } from "../bridge.ts";
 import type { ShelfItem, VideoDetails } from "../types.ts";
 import { actions, type TileHandlers } from "./actions.ts";
+import { markSecrets } from "./secrets.ts";
 import { glyphThumb, imageThumb, replaceThumb, setWash } from "./thumb.ts";
 
 /** What a tile needs beyond the buttons: starting a native drag. */
@@ -105,6 +106,10 @@ export function buildTile(item: ShelfItem, callbacks: TileCallbacks): HTMLElemen
   if (item.kind === "video") {
     tile.append(badge());
     void describeVideo(tile, item);
+  } else {
+    // Reading the capture is slow and entirely optional; the card is complete
+    // and draggable whether or not this ever comes back.
+    void markSecrets(tile, item.path);
   }
 
   // Press-and-move on the card itself hands the capture to the OS. The action
