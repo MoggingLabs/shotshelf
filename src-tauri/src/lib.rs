@@ -37,8 +37,16 @@ fn prune_caches<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         loop {
-            poster::prune_cache(&app);
-            handoff::prune(&app);
+            // On a blocking worker, not on the runtime that serves every
+            // command: both sweeps do `read_dir` plus a `metadata` and a
+            // `remove_*` per entry. Cheap at this cadence, and the same class
+            // of work `share.rs` and `edit.rs` are careful to move off.
+            let sweeping = app.clone();
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                poster::prune_cache(&sweeping);
+                handoff::prune(&sweeping);
+            })
+            .await;
             tokio::time::sleep(PRUNE_EVERY).await;
         }
     });

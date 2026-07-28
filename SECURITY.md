@@ -14,7 +14,10 @@ We aim to acknowledge reports within a few business days.
 Screenshots and screen recordings routinely contain sensitive material — client data, credentials or
 tokens visible on screen, private messages. Shotshelf's core privacy guarantee:
 
-- **No cloud, no telemetry, no uploads.** Nothing a capture touches leaves the machine.
+- **No cloud, no telemetry, no uploads.** Nothing a capture touches leaves the machine. Shotshelf
+  makes exactly one network request in its life: on launch it asks an internal release feed whether
+  a newer version exists, sending nothing but its own version number. It does not download or
+  install anything — it says an update is available and stops there.
 - Thumbnails, the capture index, and settings live **only** on the local device.
 - Any change that would introduce a network call touching captures is a privacy regression and will
   be rejected.
@@ -29,3 +32,28 @@ This is a MoggingLabs repository. The following must **never** be committed:
 
 Fixtures for tests must be synthetic (a generated solid-color PNG, a 1-second black clip) — never a
 real capture.
+
+## What has not been verified
+
+Stated plainly, because a security document that overstates its evidence is worse than one that
+admits a gap.
+
+Every claim above is established by reading and testing the code: 80-odd Rust unit tests, a
+front-end suite that drives the real UI in a real browser, and static analysis. **The packaged
+application has never been launched.** The development build is unsigned, and Windows Smart App
+Control refuses to execute it on the machine Shotshelf was written on; disabling that setting is
+irreversible without reinstalling the OS, so it was not done.
+
+What that leaves unverified, specifically:
+
+- The asset-protocol scope, which is what confines every file Rust will read, copy, scan or hand
+  to a drag. Its logic is checked against Tauri's implementation; it has never actually refused
+  anything at runtime.
+- Window chrome — DWM corner rounding, acrylic and vibrancy backdrops.
+- The tray icon and menu, the global hotkey, and single-instance behaviour.
+- The bundled ffmpeg sidecar as packaged.
+- The update check against a real feed.
+
+None of these can leak a capture off the machine — the network surface is one URL and the webview
+is sealed by CSP — but "it starts and works" is not among the things this repository can currently
+demonstrate.

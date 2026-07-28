@@ -161,7 +161,7 @@ fn fingerprint(path: &str, modified: Option<std::time::Duration>) -> String {
     format!("{hash:016x}")
 }
 
-/// Drop the oldest sized copies. Called at startup, like the poster cache:
+/// Drop the oldest sized copies. Called on a timer from `lib.rs`, like the poster cache:
 /// this is a cache, and a cache that only grows is a leak with a nicer name.
 pub fn prune<R: Runtime>(app: &AppHandle<R>) {
     let Ok(dir) = cache_dir(app) else {

@@ -628,3 +628,114 @@ test("the column's timer does not tear down an open editor", async ({ page }) =>
   await expect(page.locator(".editor__canvas")).toBeVisible();
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
 });
+
+test("the edit control is out of reach while the editor is open", async ({ page }) => {
+  // The overlay deliberately does not cover the title strip — that is the
+  // window's only drag handle — so Edit and Compare stayed live and clickable
+  // behind an open editor. One click discarded every unsaved mark, silently:
+  // `openEditor` treated "already open" as "replace me", and the `editing`
+  // guard existed twice on the keyboard path and on neither click path.
+  await openEditor(page);
+  await drag(page, [30, 25], [170, 95]);
+
+  await expect(page.locator("#shelf-edit")).toBeHidden();
+  await expect(page.locator("#shelf-compare")).toBeHidden();
+
+  // And even reached directly — the handler, not the button — it refuses
+  // rather than replacing. Dispatched programmatically because Playwright
+  // will not click a hidden element even with `force`, which is itself the
+  // first lock working.
+  await page.evaluate(() => document.querySelector<HTMLButtonElement>("#shelf-edit")?.click());
+  await expect(page.locator(".editor")).toHaveCount(1);
+  await expect(page.locator("#editor-undo")).toBeVisible();
+});
+
+test("a save still in flight cannot tear down a later editor", async ({ page }) => {
+  // `saveEditedCapture` composites, encodes and writes across three awaits and
+  // then called the module-global close. Backing out mid-save and opening
+  // something else meant the first save tore the *second* editor down and took
+  // its marks with it.
+  await openEditor(page);
+  await drag(page, [30, 25], [170, 95]);
+
+  // A save that is slow but *does* finish. `hang` would not do: it returns a
+  // promise that never settles, and re-stubbing afterwards cannot resolve the
+  // one already handed out — so the save would never land and the test would
+  // pass with the bug present.
+  await page.evaluate(() =>
+    window.__shotshelf__.respondWith(
+      "save_edit",
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => resolve("/edits/wide (edited).png"), 900);
+        }),
+    ),
+  );
+  await page.locator("#editor-save").click();
+
+  // Back out while that save is still outstanding, then open another.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".editor")).toHaveCount(0);
+  await page.keyboard.press("e");
+  await expect(page.locator(".editor__canvas")).toBeVisible();
+  await drag(page, [40, 30], [120, 80]);
+
+  // Let the first save land on top of the second editor.
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("save_edit").length), {
+      timeout: 5000,
+    })
+    .toBeGreaterThan(0);
+  await page.waitForTimeout(1200);
+
+  await expect(page.locator(".editor")).toHaveCount(1);
+});
+
+test("backing out of a slow open leaves the keyboard working", async ({ page }) => {
+  // `editorIsOpen()` reports `opening`, and the keydown handler routes on it,
+  // so a cancelled open that stayed "opening" until its 15-second deadline
+  // left the whole shelf keyboard dead — with Escape itself swallowed.
+  await bootShelf(page);
+  await page.evaluate(() => window.__shotshelf__.hang("preview_shelf"));
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.keyboard.press("ArrowDown");
+
+  await page.keyboard.press("e");
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  // Enter copies the picked capture. If the keyboard is dead this does nothing.
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("copy_capture").length))
+    .toBe(1);
+});
+
+test("a quick look then an editor that will not open gives the window back", async ({ page }) => {
+  // `editPicked` tears the quick look down with `discardPreview`, which owes no
+  // restore by contract — so when the editor then refused, the always-on-top
+  // window was left at 72% of the screen with a 225px list inside it.
+  await bootShelf(page);
+  await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", null));
+  await land(page, FIXTURE.missing);
+  await openBrowse(page);
+  await page.keyboard.press("ArrowDown");
+
+  await page.keyboard.press(" ");
+  await expect(page.locator(".preview")).toHaveCount(1);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  // The file is gone, so the editor reports and never grows the window.
+  await page.keyboard.press("e");
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.__shotshelf__.callsTo("show_shelf").filter((c) => c.args["focus"] === true).length,
+      ),
+    )
+    .toBeGreaterThan(0);
+  await expect(page.locator(".editor")).toHaveCount(0);
+});

@@ -25,6 +25,20 @@ pub fn resolve_watch_dirs<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf])
     let mut seen = HashSet::new();
     candidates
         .into_iter()
+        // Created if it is missing rather than filtered out.
+        //
+        // `Pictures\Screenshots` does not exist on a Windows machine until the
+        // first Win+PrtSc, so filtering on `is_dir()` meant a fresh install
+        // reported "no capture folders found", watched nothing, and stayed
+        // that way until it was restarted — the app's one job failing on first
+        // run for the most ordinary user there is. Creating an empty folder
+        // the OS is about to create anyway is the least surprising fix; if it
+        // cannot be created, the filter below still drops it.
+        .inspect(|dir| {
+            if !dir.exists() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+        })
         .filter(|dir| dir.is_dir())
         .filter(|dir| seen.insert(dedupe_key(dir)))
         .collect()

@@ -44,10 +44,18 @@ const shelf = new Shelf(
     onColumnChange: () => popover.onColumnChange(),
     // A comparison of one capture, or of five, is not a thing.
     onSelectionChange: (picked, editable) => {
-      compareButton.toggleAttribute("hidden", picked !== 2);
+      // Hidden while an overlay is up.
+      //
+      // The overlay deliberately does not cover the title strip — that is the
+      // window's only drag handle — so these two stayed live and clickable
+      // behind an open editor. One click on Edit discarded every unsaved mark,
+      // silently. The keydown handler has guarded this since the editor
+      // existed; the click handlers never did.
+      const busyOverlay = shelf.overlayOpen;
+      compareButton.toggleAttribute("hidden", busyOverlay || picked !== 2);
       // Not `picked !== 1`: a single picked recording has nothing to mark up,
       // and offering the control for it made the button look broken.
-      editButton.toggleAttribute("hidden", !editable);
+      editButton.toggleAttribute("hidden", busyOverlay || !editable);
     },
     onProblem: (message) => say(message),
     limits: () => currentSettings(),
@@ -166,6 +174,13 @@ void listen<Capture>("capture://new", ({ payload }) => popover.catch(payload));
 
 // Rust shows or hides the window on a tray click, a menu item or the hotkey;
 // these only reshape the front-end to match. Neither may call back into Rust.
+// The updater asks the feed and reports; it installs nothing. This is the
+// whole of what the user sees of it, and without this listener the event was
+// emitted into a webview that had never subscribed.
+void listen<string>("update://available", ({ payload }) => {
+  say(`Shotshelf ${payload} is available.`);
+});
+
 void listen("shelf://opened", () => popover.adoptBrowse());
 void listen("shelf://hidden", () => popover.adoptHidden());
 

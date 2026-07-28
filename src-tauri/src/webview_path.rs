@@ -139,6 +139,15 @@ mod tests {
     }
 
     // `existing_file` additionally consults the asset-protocol scope, which
-    // only exists on a running app, so it is exercised by the front-end gate
-    // rather than here. The shape check above is the half that is pure.
+    // needs a running app — so it has **no automated coverage at all**, here or
+    // anywhere. The front-end gate cannot reach it: `tests/harness/tauri-mock.ts`
+    // replaces `window.__TAURI_INTERNALS__` wholesale, so no Playwright spec
+    // ever executes a `#[tauri::command]`. An earlier version of this comment
+    // said the front-end gate exercised it, which was simply false and is the
+    // kind of claim that stops the next reader from looking.
+    //
+    // The shape checks above are the half that is pure and are tested. The
+    // scope half rests on reading Tauri's `FsScope::is_allowed`, which
+    // canonicalizes before matching, and on the watcher and the grant being
+    // non-recursive over the same resolved list.
 }

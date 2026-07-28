@@ -79,10 +79,17 @@ pub async fn prepare_drag<R: Runtime>(
     // recording to save a model some pixels.
     let handed_over = match kind {
         CaptureKind::Image => {
+            let permit = sizing_limit()
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|err| err.to_string())?;
             let worker_app = app.clone();
             let for_worker = source.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                handoff::file_for(&worker_app, &for_worker, downscale)
+                let sized = handoff::file_for(&worker_app, &for_worker, downscale);
+                drop(permit);
+                sized
             })
             .await
             .map_err(|err| err.to_string())?
@@ -169,6 +176,21 @@ pub async fn describe_capture<R: Runtime>(
 /// How many scans to remember before starting over.
 const SCAN_CACHE_LIMIT: usize = 500;
 
+/// How many captures may be *sized* at once.
+///
+/// `prepare_drag` and `copy_capture` decode, Lanczos3-resize and re-encode a
+/// full-resolution screenshot, and a multi-select drag calls `prepare_drag`
+/// once per capture concurrently — so moving that work to blocking threads
+/// without limiting how many was half the fix. The same ceiling as the scan,
+/// for the same reason.
+pub(crate) const SIZING_CONCURRENCY: usize = 2;
+
+pub(crate) fn sizing_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
+    static LIMIT: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::OnceLock::new();
+    LIMIT.get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(SIZING_CONCURRENCY)))
+}
+
 /// How many captures may be read at once.
 ///
 /// Small on purpose: this is CPU-bound work on a machine the user is using for
@@ -230,11 +252,18 @@ pub async fn copy_capture<R: Runtime>(
     let downscale = settings.get().downscale_exports;
     let payload = match kind {
         CaptureKind::Image => {
+            let permit = sizing_limit()
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|err| err.to_string())?;
             let worker_app = app.clone();
             let for_worker = source.clone();
             let bytes = tauri::async_runtime::spawn_blocking(move || {
                 let handed_over = handoff::file_for(&worker_app, &for_worker, downscale);
-                read_capture(&handed_over).map_err(|err| err.to_string())
+                let read = read_capture(&handed_over).map_err(|err| err.to_string());
+                drop(permit);
+                read
             })
             .await
             .map_err(|err| err.to_string())??;
@@ -275,7 +304,10 @@ fn file_uri(path: &Path) -> String {
 /// Written out once because the drag plugin takes a path to a preview image,
 /// not bytes.
 fn video_preview<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|err| err.to_string())?;
+    let dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|err| err.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
 
     let preview = dir.join("video-drag-preview.png");

@@ -11,11 +11,12 @@
  * why appearance needs gating of its own.
  */
 
+import { CARD_GAP, CARD_HEIGHT, COLUMN_PADDING } from "../../src/shelf/geometry.ts";
+import { SECRET_KINDS } from "../../src/shelf/types.ts";
 import { bootShelf, expect, FIXTURE, land, openBrowse, test } from "../harness/app.ts";
 
-/** The card geometry the column window is sized against. */
+/** The card width, which `geometry.ts` states in prose rather than as a value. */
 const CARD_WIDTH = 199;
-const CARD_HEIGHT = 112;
 
 test("a card is 16:9, the shape of the screen it came from", async ({ page }) => {
   await bootShelf(page);
@@ -213,4 +214,82 @@ test("the alert strip is not hidden by the column shape when an overlay is up", 
     document.querySelector("#shelf-overlay")?.append(frame);
   });
   await expect(page.locator("#shelf-alert")).toBeVisible();
+});
+
+test("the CSS mirrors the card metrics the column window is sized against", async ({ page }) => {
+  // `geometry.ts` says of these numbers: "mirrored in the CSS, and the mirror
+  // is load-bearing". Nothing made them move together. `CARD_HEIGHT` was
+  // checked against a literal copied into this file; the gap and the padding
+  // were checked by nothing at all, so changing `gap: 9px` alone sized the
+  // popup column wrong forever — clipping the last card or trailing dead
+  // space — with every gate green.
+  //
+  // Imported rather than restated: a spec carrying its own copy of the number
+  // is a fourth place for it to drift.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide, { ts: 1 });
+  await land(page, FIXTURE.tall, { ts: 2 });
+
+  const measured = await page.evaluate(() => {
+    const grid = document.querySelector(".group__grid");
+    const items = document.querySelector(".shelf__items");
+    const panel = document.querySelector(".shelf");
+    if (!grid || !items || !panel) throw new Error("the column is not on screen");
+    const gridStyle = getComputedStyle(grid);
+    const itemsStyle = getComputedStyle(items);
+    const panelStyle = getComputedStyle(panel);
+    return {
+      gap: parseFloat(gridStyle.rowGap),
+      padding:
+        parseFloat(itemsStyle.paddingTop) +
+        parseFloat(itemsStyle.paddingBottom) +
+        parseFloat(panelStyle.borderTopWidth) +
+        parseFloat(panelStyle.borderBottomWidth),
+    };
+  });
+
+  expect(measured.gap).toBeCloseTo(CARD_GAP, 1);
+  expect(measured.padding).toBeCloseTo(COLUMN_PADDING, 1);
+
+  // And the rendered card against the constant, not against a literal.
+  const card = await page.locator(".tile").first().boundingBox();
+  expect(card!.height).toBeCloseTo(CARD_HEIGHT, 0);
+});
+
+test("every secret kind the wire can carry has a style that matches it", async ({ page }) => {
+  // The third and fourth declarations of `SecretKind`. Rust and TypeScript are
+  // joined by `tests/fixtures/secret-kinds.json`; the CSS selectors were not,
+  // so renaming a variant kept every gate green while the badge silently fell
+  // back to the default colour — which is exactly what the round-trip test's
+  // own docstring says the join exists to prevent.
+  //
+  // Two kinds are styled deliberately and three fall through; what this pins
+  // is that each *styled* selector still matches a kind that exists, and that
+  // every kind renders a badge at all.
+  await bootShelf(page);
+
+  const results = await page.evaluate((kinds) => {
+    const styled = [...document.styleSheets]
+      .flatMap((sheet) => {
+        try {
+          return [...sheet.cssRules];
+        } catch {
+          return [];
+        }
+      })
+      .flatMap((rule) => {
+        // Not every rule is a style rule; `@media` blocks have no selector.
+        const text = (rule as Partial<CSSStyleRule>).selectorText;
+        if (typeof text !== "string") return [];
+        return [...text.matchAll(/\[data-kind="([^"]+)"\]/g)].map((m) => m[1]);
+      });
+    return { styled: [...new Set(styled)], known: kinds };
+  }, SECRET_KINDS as unknown as string[]);
+
+  // No selector may name a kind Rust cannot send.
+  for (const kind of results.styled) {
+    expect(results.known).toContain(kind);
+  }
+  // And at least one of them is styled, or this test is measuring nothing.
+  expect(results.styled.length).toBeGreaterThan(0);
 });

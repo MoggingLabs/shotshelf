@@ -52,7 +52,10 @@ pub fn allow_reading_edits<R: Runtime>(app: &AppHandle<R>) {
 fn edits_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app
         .path()
-        .app_data_dir()
+        // Local, not roaming: see `catch/clipboard.rs`. An edit is a picture
+        // of the user's screen, and `%APPDATA%` is copied to a network share
+        // under a roaming profile.
+        .app_local_data_dir()
         .map_err(|err| err.to_string())?
         .join(EDITS_DIR);
     std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
@@ -70,7 +73,17 @@ pub async fn compare_captures<R: Runtime>(
     let after_path = existing_file(&app, &after)?;
     let name_source = after_path.clone();
 
+    // One comparison at a time from the same pool the sizing uses: this decodes
+    // two capped images and allocates a composite larger than both, so several
+    // at once is gigabytes.
+    let permit = crate::share::sizing_limit()
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|err| err.to_string())?;
+
     let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
         let before = imaging::load(&before_path)?;
         let after = imaging::load(&after_path)?;
         let changes = compare::changed_regions(&before, &after, compare::Sensitivity::default());
@@ -144,10 +157,26 @@ fn write_edit<R: Runtime>(
 ) -> Result<String, String> {
     let dir = edits_dir(app)?;
 
-    let stem = source.file_stem().map_or_else(
-        || "capture".to_owned(),
-        |stem| stem.to_string_lossy().into_owned(),
-    );
+    // The stem is a *name*, never a path.
+    //
+    // `PathBuf::join` truncates its base when the pushed component carries a
+    // Windows prefix, so a source of `C:\dir\D:evil.png` has a `file_stem` of
+    // `D:evil`, and joining that to the edits directory produced a
+    // drive-relative path outside it. `create_new` meant it could only ever
+    // create, never overwrite — but "cannot overwrite" is not the same as
+    // "cannot escape".
+    let stem = source
+        .file_stem()
+        .map_or_else(
+            || "capture".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        )
+        .replace([':', '/', '\\'], "_");
+    let stem = if stem.trim().is_empty() {
+        "capture".to_owned()
+    } else {
+        stem
+    };
 
     // Created exclusively rather than probed-then-written. `unique` checking
     // `!exists()` and writing afterwards is a race the doc below says this
@@ -205,6 +234,30 @@ fn unique(dir: &Path, stem: &str, kind: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_edit_cannot_be_named_out_of_the_edits_directory() {
+        // `PathBuf::join` truncates its base when the pushed component carries
+        // a Windows prefix, so `C:\dir\D:evil.png` produced a `file_stem` of
+        // `D:evil` and wrote to `D:evil (edited).png` — outside the edits
+        // directory entirely. Separators go the same way for the same reason.
+        let dir = std::env::temp_dir().join("shotshelf-stem-test");
+        for hostile in ["C:/dir/D:evil.png", "/dir/../../evil.png", "/dir/a/b.png"] {
+            let stem = std::path::Path::new(hostile)
+                .file_stem()
+                .map_or_else(
+                    || "capture".to_owned(),
+                    |s| s.to_string_lossy().into_owned(),
+                )
+                .replace([':', '/', '\\'], "_");
+            let target = dir.join(format!("{stem} (edited).png"));
+            assert!(
+                target.starts_with(&dir),
+                "{hostile} escaped to {}",
+                target.display(),
+            );
+        }
+    }
 
     #[test]
     fn an_edit_of_an_edit_does_not_overwrite_its_own_input() {

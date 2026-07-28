@@ -276,8 +276,18 @@ To go back a version, install the older build over the top.
 - **Windows** — Settings → Apps → Installed apps → Shotshelf → Uninstall.
 - **macOS** — drag Shotshelf from Applications to the Bin.
 
-Then delete the folders in the table above if you want its settings and caches gone too. Your
-screenshots and recordings are untouched by any of this.
+Then, if you want its leftovers gone too:
+
+- **Safe to delete, always** — `posters` and `handoff`. Both are caches of things Shotshelf can
+  work out again from your captures. Deleting them costs a few seconds of re-reading.
+- **Safe to delete, and you lose your settings** — the settings folder. Pins go with it.
+- **Read this before deleting** — `clipboard` and `edits`. `clipboard` holds captures taken with
+  Win+Shift+S or ⌘⇧⌃4, which never touched your disk anywhere else — **these are originals, and
+  Shotshelf is the only place they exist.** `edits` holds the annotated copies and comparisons you
+  made. Neither is a cache and neither is pruned; drag out anything you still want first.
+
+Your screenshots and recordings in Pictures, Desktop and Videos are untouched by any of this —
+Shotshelf never wrote to those folders and does not delete from them on the way out.
 
 ---
 

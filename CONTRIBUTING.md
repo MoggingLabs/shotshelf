@@ -7,7 +7,7 @@ Thanks for taking the time to contribute!
 1. **Never commit captures or user data.** No screenshots, recordings, thumbnails, or capture-index
    files. See [SECURITY.md](./SECURITY.md).
 2. **Reuse before rewriting.** Shotshelf deliberately forks/adopts existing OSS for the hard parts
-   (native drag-out, capture-folder watching) where a good option exists — see `prompts/RESEARCH.md`.
+   (native drag-out, capture-folder watching) where a good option exists.
    Don't hand-roll what a maintained library already does.
 3. **Keep both platforms working.** Every change is verified on **Windows and macOS**, or clearly
    flagged as platform-specific. Catch + drag-out are the two features that must never regress on

@@ -37,7 +37,7 @@ export function videoDetails(path: string): Promise<VideoDetails> {
 
 /**
  * Drop a recording's cached poster frame. Advisory: a frame left behind is
- * wasted disk, not a broken shelf, and the cache is pruned at startup anyway.
+ * wasted disk, not a broken shelf, and the cache is swept on a timer anyway.
  */
 export async function forgetVideo(path: string): Promise<void> {
   try {

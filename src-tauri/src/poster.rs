@@ -39,7 +39,7 @@ pub struct VideoDetails {
 /// legitimately need more, so anything beyond it is an orphan.
 const POSTER_CACHE_LIMIT: usize = 200;
 
-/// Drop the oldest cached frames on launch.
+/// Drop the oldest cached frames. Called on a timer from `lib.rs`.
 ///
 /// Frames are deleted when their tile leaves the shelf, but that relies on
 /// every route out remembering to ask — and one of them didn't. This is the

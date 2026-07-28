@@ -88,8 +88,15 @@ impl SettingsStore {
 
     /// Narrower edit for the pin toggle, which the settings surface never touches.
     pub fn set_pinned(&self, mut pinned: Vec<PinnedItem>) {
-        // Bounded here too: this path skips `sanitise` entirely, which is how
-        // the cap on the settings surface would have been missed.
+        // Bounded and checked here too: this path skips `sanitise` entirely,
+        // which is how the cap on the settings surface would have been missed.
+        //
+        // The paths arrive from the webview and are written to disk and read
+        // back at the next launch, so an unchecked one is a stray string that
+        // outlives the session that produced it. Absolute-only is the same
+        // rule `webview_path` applies at the read boundary; this is the write
+        // boundary, which the read fix did not cover.
+        pinned.retain(|item| crate::webview_path::absolute(&item.path).is_ok());
         pinned.truncate(MAX_PINNED);
         let snapshot = {
             let mut current = self.lock();

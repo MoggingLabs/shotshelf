@@ -21,7 +21,13 @@ import {
   undoEdit,
 } from "../editor/index.ts";
 import { persistPinned, type Settings } from "../settings.ts";
-import { compareCaptures, copyCapture, forgetVideo, setCaptureCount } from "./bridge.ts";
+import {
+  browseShelf,
+  compareCaptures,
+  copyCapture,
+  forgetVideo,
+  setCaptureCount,
+} from "./bridge.ts";
 import { ColumnQueue, type HoldReason } from "./column.ts";
 import { armDrag, beginDrag } from "./drag.ts";
 import { columnHeight } from "./geometry.ts";
@@ -433,6 +439,16 @@ export class Shelf {
         this.add({ path, kind: "image", ts: Date.now() });
       },
       failed: (message) => this.#options.onProblem(message),
+    }).then(() => {
+      // The editor either mounted or refused. Either way the title-strip
+      // controls depend on whether an overlay is up, and this is the moment
+      // that answer changed.
+      this.#reflectSelection();
+      // And if it refused after the quick look was torn down, the window it
+      // grew is still large with nothing in it. `discardPreview` above owes no
+      // restore by contract, so the debt lands here — the only place that
+      // knows a preview was thrown away for an editor that never opened.
+      if (!this.overlayOpen) void browseShelf();
     });
   }
 
@@ -442,7 +458,9 @@ export class Shelf {
 
   /** Back out of the editor. Returns false if there was nothing to back out of. */
   closeEditor(): boolean {
-    return closeEditor();
+    const closed = closeEditor();
+    if (closed) this.#reflectSelection();
+    return closed;
   }
 
   /** Undo the last mark. Returns false if there was nothing to undo. */
@@ -452,7 +470,9 @@ export class Shelf {
 
   /** Close the preview. Returns false if there was nothing to close. */
   closePreview(): boolean {
-    return hidePreview();
+    const closed = hidePreview();
+    if (closed) this.#reflectSelection();
+    return closed;
   }
 
   /**
@@ -471,6 +491,7 @@ export class Shelf {
   discardOverlay(): void {
     discardEditor();
     discardPreview();
+    this.#reflectSelection();
   }
 
   /**
@@ -485,10 +506,13 @@ export class Shelf {
     const [item] = this.#pickedItems();
     if (!item) return;
 
-    void showPreview(item, this.#overlay).catch((error: unknown) => {
-      console.error("[shotshelf] could not preview that capture", error);
-      this.#options.onProblem("That capture could not be opened.");
-    });
+    void showPreview(item, this.#overlay)
+      .catch((error: unknown) => {
+        console.error("[shotshelf] could not preview that capture", error);
+        this.#options.onProblem("That capture could not be opened.");
+      })
+      // The title-strip controls depend on whether an overlay is up.
+      .finally(() => this.#reflectSelection());
   }
 
   /**

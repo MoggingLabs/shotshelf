@@ -205,3 +205,41 @@ test("a shift-selected range drags out oldest first", async ({ page }) => {
 
   await page.mouse.up();
 });
+
+test("a drag hands the OS a copy, never a move", async ({ page }) => {
+  // The invariant the whole product rests on, and it was enforced by a single
+  // string literal with nothing asserting it. `tauri-plugin-drag` maps
+  // `Move` to DROPEFFECT_MOVE on Windows, so the wrong value here relocates
+  // the user's original capture off their disk. Three docstrings promise this;
+  // now something checks it.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.evaluate(() => {
+    window.__shotshelf__.respondWith("prepare_drag", (args) => ({
+      path: args["path"],
+      icon: args["path"],
+    }));
+    window.__shotshelf__.hang("plugin:drag|start_drag");
+  });
+
+  const card = page.locator(".tile").first();
+  const box = await card.boundingBox();
+  await page.mouse.move(box!.x + 20, box!.y + 25);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + 60, box!.y + 70, { steps: 6 });
+
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("plugin:drag|start_drag").length))
+    .toBeGreaterThan(0);
+
+  const call = await page.evaluate(
+    () => window.__shotshelf__.callsTo("plugin:drag|start_drag").at(-1)?.args,
+  );
+  // The plugin sends the drag options under `options`, alongside the file
+  // list and the cursor image.
+  const options = call?.["options"] as Record<string, unknown> | undefined;
+  expect(options?.["mode"]).toBe("copy");
+
+  await page.mouse.up();
+});

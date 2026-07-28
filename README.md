@@ -17,12 +17,17 @@ take and keeps it one drag away — so you never dig through folders for the cli
 
 ---
 
-> **Status: it works.** Cross-platform desktop app on **Tauri v2**. The catch engine, the corner
+> **Status: built and gated, not yet run end-to-end.** Every gate below is green on Windows,
+> macOS and Linux, and the front-end suite drives the real UI in a browser — but the packaged
+> app has not been launched on a desktop, because the unsigned development build is refused by
+> Windows Smart App Control on the machine it was written on. What that leaves unverified is
+> named in [SECURITY.md](./SECURITY.md#what-has-not-been-verified). Cross-platform desktop app
+> on **Tauri v2**. The catch engine, the corner
 > popover, native drag-out, recordings, settings and packaging are all in — and on top of them:
 > on-device text recognition, a credential warning, a five-tool annotation editor with real
 > redaction, before/after comparison, quick look, multi-select and a keyboard map. Prior-art
 > research settled fork-vs-build (nothing forkable does cross-platform auto-catch, so we build)
-> and confirmed the scary part, native drag-out, is a solved plugin. See `prompts/RESEARCH.md`. Part of
+> and confirmed the scary part, native drag-out, is a solved plugin. The research notes behind those choices are kept locally and are not in the repo. Part of
 > [MoggingLabs Internals](https://github.com/MoggingLabs/mogginglabs-internals), in a new category:
 > an **internal desktop utility** (not a platform driver like the `-wire` tools).
 
@@ -67,7 +72,7 @@ that auto-catches screenshots** — every one that does (Dropover, FlowShelf) is
 which is exactly our opening. So we **build the combination**, but **adopt** the hard parts:
 `tauri-plugin-drag`/`drag-rs` (drag-out), `notify` + `tauri-plugin-clipboard` (capture detection), and
 bundled ffmpeg (video thumbnails). We **interoperate** with ShareX rather than fork it (watch its output
-folder). Full detail in `prompts/RESEARCH.md`.
+folder).
 
 ## 🚀 Run it
 

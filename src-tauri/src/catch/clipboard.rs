@@ -137,7 +137,14 @@ fn digest_of(bytes: &[u8]) -> u64 {
 /// here too, which is why this is shared rather than inlined below.
 pub(super) fn capture_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     app.path()
-        .app_data_dir()
+        // *Local* app data, deliberately.
+        //
+        // `app_data_dir()` is `%APPDATA%` on Windows — the **roaming** profile,
+        // which a domain or Enterprise State Roaming setup copies to a network
+        // share at logoff. These files are screen captures, and they are the
+        // only copy: an app whose headline is that captures never leave the
+        // machine cannot put them somewhere Windows syncs off it.
+        .app_local_data_dir()
         .ok()
         .map(|dir| dir.join("clipboard"))
 }

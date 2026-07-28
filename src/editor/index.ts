@@ -98,10 +98,15 @@ export async function openEditor(
   host: HTMLElement,
   callbacks: EditorHost,
 ): Promise<void> {
-  if (item.kind === "video" || opening) return;
-  // Discarded rather than closed: this is replacing the editor, not going back
-  // to the browse view, so it must not hand the window back on the way.
-  discardEditor();
+  // Refuses rather than replaces.
+  //
+  // It used to discard whatever was open and start again, which made the Edit
+  // control — visible in the title strip, which the overlay deliberately does
+  // not cover — a one-click shredder for every unsaved mark. The `editing`
+  // guard existed twice on the keyboard path and on neither click path. The
+  // control is hidden while an overlay is up now; this is the half that does
+  // not depend on remembering to hide it.
+  if (item.kind === "video" || opening || live) return;
 
   opening = true;
   abandoned = false;
@@ -187,6 +192,11 @@ export function closeEditor(): boolean {
   const pending = opening;
   openTicket += 1;
   abandoned = false;
+  // Cleared here, not left to the open's `finally`. `editorIsOpen()` reports
+  // `opening`, and the keydown handler routes on it — so a cancelled open that
+  // stayed "opening" until its 15-second deadline left the whole shelf
+  // keyboard dead, with Escape itself swallowed by this function.
+  opening = false;
   if (!live) return pending;
 
   teardown();
@@ -206,6 +216,7 @@ export function closeEditor(): boolean {
 export function discardEditor(): void {
   openTicket += 1;
   abandoned = true;
+  opening = false;
   teardown();
 }
 
@@ -243,6 +254,15 @@ async function saveEditedCapture(callbacks: EditorHost): Promise<void> {
   if (!live || saving) return;
   const { item, session, picture } = live;
 
+  // The save belongs to *this* editor.
+  //
+  // It composites, encodes and writes across three awaits, and then called the
+  // module-global close — so a save still in flight when the user backed out
+  // and opened a different capture tore that second editor down and took its
+  // marks with it. The ticket exists to answer "is this still the operation
+  // being waited for"; the save was the one async path not asking.
+  const ticket = openTicket;
+
   saving = true;
   try {
     const region = session.exportRect();
@@ -258,7 +278,10 @@ async function saveEditedCapture(callbacks: EditorHost): Promise<void> {
     if (!blob) throw new Error("the edit could not be encoded");
 
     const path = await saveEdit(item.path, new Uint8Array(await blob.arrayBuffer()));
-    closeEditor();
+    // The file is written either way — it is the user's work and it is on
+    // disk. Only the editor this save started in is closed, and only if it is
+    // still the one on screen.
+    if (ticket === openTicket) closeEditor();
     callbacks.saved(path);
   } catch (error) {
     // The editor deliberately stays open: the marks are still there, and
