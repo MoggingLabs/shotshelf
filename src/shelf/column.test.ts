@@ -126,3 +126,27 @@ test("the measured window sizes the shelf actually ships", () => {
   assert.equal(columnHeight(1), 136);
   assert.equal(columnHeight(3), 378);
 });
+
+test("every hold can be dropped at once when the events that release them cannot arrive", () => {
+  // A hidden window stops delivering pointer events, and a native drag takes
+  // the pointer away from the webview entirely — so the `pointerleave` that
+  // would have released the hover hold never comes. Left armed, the column
+  // never ages again and the popover stops dismissing itself for the session.
+  const column = new ColumnQueue();
+  column.add("a", 0);
+  column.hold("pointer", true, 0);
+  column.hold("focus", true, 0);
+
+  column.releaseAll(COLUMN_MS * 3);
+
+  assert.equal(column.held, false);
+  assert.equal(column.expire(COLUMN_MS * 3 + 1), false, "counts as the last release");
+  assert.equal(column.expire(COLUMN_MS * 4 + 1), true);
+});
+
+test("releasing nothing does not reset the deadlines", () => {
+  const column = new ColumnQueue();
+  column.add("a", 0);
+  column.releaseAll(COLUMN_MS * 3);
+  assert.equal(column.expire(COLUMN_MS + 1), true, "an unheld column ages normally");
+});

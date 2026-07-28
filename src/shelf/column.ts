@@ -85,6 +85,19 @@ export class ColumnQueue {
   }
 
   /**
+   * Drop every hold at once.
+   *
+   * For the moments where the events that would have released them cannot
+   * arrive: the window is hidden, or a native drag has taken the pointer.
+   * Counts as the last release, so the cards still get a full window.
+   */
+  releaseAll(now: number = Date.now()): void {
+    if (this.#holds.size === 0) return;
+    this.#holds.clear();
+    for (const entry of this.#entries) entry.expires = now + COLUMN_MS;
+  }
+
+  /**
    * Hold or release the column for one reason.
    *
    * The column ages only once *every* reason has let go. Releasing the last

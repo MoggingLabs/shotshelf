@@ -62,6 +62,8 @@ export class Shelf {
   readonly #options: ShelfOptions;
 
   #mode: Mode = "browse";
+  /** True while a comparison is being rendered; a second click must not start another. */
+  #comparing = false;
   /** An OS drag steals focus; the popover must not read that as a dismissal. */
   #dragging = false;
   #timers: number[] = [];
@@ -214,6 +216,17 @@ export class Shelf {
     this.#column.hold(reason, held);
   }
 
+  /**
+   * Let go of the column entirely.
+   *
+   * Used when the events that would have released each hold cannot arrive —
+   * the window has been hidden, or a native drag has taken the pointer away
+   * from the webview. Without it a hold leaks and the column never ages again.
+   */
+  releaseColumn(): void {
+    this.#column.releaseAll();
+  }
+
   #ageColumn(): void {
     if (this.#mode !== "column" || this.#dragging) return;
     if (!this.#column.expire()) return;
@@ -247,27 +260,7 @@ export class Shelf {
     this.#options.onSelectionChange(this.#selection.size);
   }
 
-  /**
-   * Put the two picked captures side by side, with what changed outlined.
-   *
-   * The result is a new capture on the shelf rather than a file written back
-   * over either input — a comparison is a third thing, and the originals are
-   * never touched.
-   *
-   * Order matters and comes from the selection: the first picked is the
-   * before. Comparing an after against a before reads as every change
-   * reversed.
-   */
-  async compare(): Promise<void> {
-    const [before, after] = this.#selection.ids().map((id) => this.#store.find(id));
-    if (!before || !after) return;
-
-    const path = await compareCaptures(before.path, after.path);
-    this.#selection.clear();
-    this.#reflectSelection();
-    // Dated now rather than from either input: it is a capture made now.
-    this.add({ path, kind: "image", ts: Date.now() });
-  }
+  /** What the shelf is showing, in the order it is showing it. */
   #visibleIds(): string[] {
     return this.#mode === "column"
       ? this.#columnItems().map((item) => item.id)
@@ -282,6 +275,46 @@ export class Shelf {
       .ids()
       .map((id) => this.#store.find(id))
       .filter((picked): picked is ShelfItem => picked !== undefined);
+  }
+
+  /**
+   * Put the two picked captures side by side, with what changed outlined.
+   *
+   * The **older** capture is the before. Not the one clicked first: shift-
+   * selecting rebuilds the selection in the order the shelf is showing, so
+   * pick order is only meaningful for a ctrl-click and silently reversed for
+   * a range — which produced a comparison that read every change backwards
+   * while looking entirely correct. Capture time is unambiguous however the
+   * pair was chosen.
+   *
+   * The result is a new capture on the shelf rather than a file written back
+   * over either input.
+   */
+  async compare(): Promise<void> {
+    if (this.#comparing) return;
+
+    const picked = this.#selection
+      .ids()
+      .map((id) => this.#store.find(id))
+      .filter((item): item is ShelfItem => item !== undefined)
+      .sort((a, b) => a.ts - b.ts);
+
+    const [before, after] = picked;
+    if (!before || !after || picked.length !== 2) return;
+
+    // Guarded because the button stays on screen for the length of a
+    // full-resolution decode of two captures, and a second click would run a
+    // second comparison and write a second file nobody asked for.
+    this.#comparing = true;
+    try {
+      const path = await compareCaptures(before.path, after.path);
+      this.#selection.clear();
+      this.#reflectSelection();
+      // Dated now rather than from either input: it is a capture made now.
+      this.add({ path, kind: "image", ts: Date.now() });
+    } finally {
+      this.#comparing = false;
+    }
   }
 
   // ── Pins ───────────────────────────────────────────────────────────────
@@ -308,6 +341,9 @@ export class Shelf {
       this.#dragging = true;
       void beginDrag(target, this.#dragSet(capture), () => {
         this.#dragging = false;
+        // The OS had the pointer for the length of the drag, so the webview
+        // saw no `pointerleave` and the hover hold is still armed.
+        this.#column.hold("pointer", false);
       });
     });
   }

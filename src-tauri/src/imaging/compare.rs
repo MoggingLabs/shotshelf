@@ -12,7 +12,7 @@
 
 use image::{DynamicImage, GenericImage, GenericImageView, Rgba, RgbaImage};
 
-use super::redact::Region;
+use super::Region;
 
 /// How the two captures are laid out.
 const GUTTER: u32 = 16;

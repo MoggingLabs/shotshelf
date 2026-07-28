@@ -21,8 +21,11 @@ export default defineConfig(
       "test-results",
       "playwright-report",
       "node_modules",
-      // Plain Node build scripts, deliberately outside the app's TS project.
-      "scripts/**",
+      // Build scripts that only run under Node and are not part of the app's
+      // TS project. `check-commands.mjs` is deliberately NOT here: it is a
+      // gate, and a gate nobody checks is a gate that can quietly stop biting.
+      "scripts/prepare-sidecar.mjs",
+      "scripts/build-release.mjs",
     ],
   },
   js.configs.recommended,
@@ -31,7 +34,7 @@ export default defineConfig(
     languageOptions: {
       parserOptions: {
         // `eslint.config.js` is not in the TS project and does not need to be.
-        projectService: { allowDefaultProject: ["eslint.config.js"] },
+        projectService: { allowDefaultProject: ["eslint.config.js", "scripts/check-commands.mjs"] },
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -75,6 +78,19 @@ export default defineConfig(
       eqeqeq: ["error", "always"],
       "prefer-const": "error",
       "no-var": "error",
+    },
+  },
+  {
+    // Node build scripts: globals the browser config does not declare, and
+    // JSDoc-free JS where the type-aware rules have nothing to work with.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: { globals: { console: "readonly", process: "readonly" } },
+    rules: {
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
     },
   },
   {

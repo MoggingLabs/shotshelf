@@ -89,6 +89,7 @@ jobs:
         run: npm run build
 
       - name: Install Playwright browser
+        if: '!cancelled()'
         run: npx playwright install chromium --with-deps
 
       # The real front-end in a real browser, with the Tauri runtime stubbed.

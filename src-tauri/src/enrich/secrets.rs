@@ -82,6 +82,15 @@ struct Pattern {
     kind: SecretKind,
     label: &'static str,
     regex: Regex,
+    /// How much of a match is the type marker rather than the credential.
+    ///
+    /// A per-pattern length because it *is* per-pattern: `ghp_` is four
+    /// characters and `xoxb-` is five. A single constant across all of them
+    /// showed two to four characters of credential body in every preview —
+    /// the module's stated rule is "keep only the part that names it", and a
+    /// fixed seven does not implement that rule for any pattern but the
+    /// longest.
+    marker: usize,
 }
 
 /// Patterns anchored on distinctive prefixes rather than on entropy.
@@ -92,9 +101,10 @@ struct Pattern {
 /// prefix like `ghp_` is unambiguous, survives a misread of the payload, and
 /// almost never appears by accident.
 static PATTERNS: LazyLock<Vec<Pattern>> = LazyLock::new(|| {
-    let compile = |kind, label, source: &str| Pattern {
+    let compile = |kind, label, marker, source: &str| Pattern {
         kind,
         label,
+        marker,
         // These are fixed literals in this file, not user input; a failure here
         // is a programming error and should be loud at first use.
         regex: Regex::new(source).expect("shotshelf: built-in secret pattern is invalid"),
@@ -104,46 +114,55 @@ static PATTERNS: LazyLock<Vec<Pattern>> = LazyLock::new(|| {
         compile(
             SecretKind::PrivateKey,
             "private key",
+            "-----BEGIN".len(),
             r"-----BEGIN[ A-Z]*PRIVATE KEY-----",
         ),
         compile(
             SecretKind::ServiceToken,
             "GitHub token",
+            4,
             r"\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,})\b",
         ),
         compile(
             SecretKind::ServiceToken,
             "OpenAI or Anthropic API key",
+            3,
             r"\bsk-(?:ant-)?[A-Za-z0-9_-]{16,}\b",
         ),
         compile(
             SecretKind::ServiceToken,
             "AWS access key ID",
+            4,
             r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b",
         ),
         compile(
             SecretKind::ServiceToken,
             "Google API key",
+            4,
             r"\bAIza[A-Za-z0-9_-]{35}\b",
         ),
         compile(
             SecretKind::ServiceToken,
             "Slack token",
+            5,
             r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b",
         ),
         compile(
             SecretKind::ServiceToken,
             "Stripe secret key",
+            3,
             r"\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}\b",
         ),
         compile(
             SecretKind::Jwt,
             "signed token",
+            3,
             r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b",
         ),
         compile(
             SecretKind::Assignment,
             "secret in a config value",
+            0,
             // The name carries the signal. A value of at least eight
             // non-space characters keeps `PASSWORD=` in a blank template from
             // being reported as a leak.
@@ -152,6 +171,7 @@ static PATTERNS: LazyLock<Vec<Pattern>> = LazyLock::new(|| {
         compile(
             SecretKind::PersonalData,
             "email address",
+            0,
             r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
         ),
     ]
@@ -170,7 +190,7 @@ pub fn scan(text: &str) -> Vec<Finding> {
             let finding = Finding {
                 kind: pattern.kind,
                 label: pattern.label,
-                preview: mask(pattern.kind, hit.as_str()),
+                preview: mask(pattern.kind, hit.as_str(), pattern.marker),
                 severity: pattern.kind.severity(),
             };
             // The same key printed twice on one screen is one problem.
@@ -202,24 +222,28 @@ pub fn scan(text: &str) -> Vec<Finding> {
 ///   either alone;
 /// * an assignment — the variable's name, never any of its value;
 /// * an email — the domain, never the local part, which is the identifying half.
-fn mask(kind: SecretKind, value: &str) -> String {
+fn mask(kind: SecretKind, value: &str, marker: usize) -> String {
     match kind {
         SecretKind::Assignment => mask_assignment(value),
         SecretKind::PersonalData => mask_email(value),
-        SecretKind::PrivateKey | SecretKind::ServiceToken | SecretKind::Jwt => mask_prefix(value),
+        SecretKind::PrivateKey | SecretKind::ServiceToken | SecretKind::Jwt => {
+            mask_prefix(value, marker)
+        }
     }
 }
 
-/// Keep a type marker, drop the rest.
-fn mask_prefix(value: &str) -> String {
-    const KEEP: usize = 7;
-
-    if value.chars().count() <= KEEP {
-        // Short enough that any of it is too much of it.
-        return "•".repeat(value.chars().count().max(1));
+/// Keep exactly the type marker, drop the rest.
+///
+/// `keep` is the marker's own length, so nothing after it survives. A constant
+/// here — seven, as it was — leaves two to four characters of the credential
+/// showing for every pattern whose marker is shorter than that.
+fn mask_prefix(value: &str, keep: usize) -> String {
+    if value.chars().count() <= keep || keep == 0 {
+        // Nothing here is long enough for any of it to be safe.
+        return "•".repeat(value.chars().count().clamp(1, 8));
     }
 
-    let visible: String = value.chars().take(KEEP).collect();
+    let visible: String = value.chars().take(keep).collect();
     format!("{visible}…")
 }
 
@@ -319,7 +343,16 @@ mod tests {
             !preview.contains("Q7r8"),
             "the tail must not survive: {preview}"
         );
-        assert!(!secret.contains(preview.trim_end_matches('…')) || preview.len() < 12);
+        // Stated as two separate properties. Combined into one `||` they
+        // cancelled: the length clause was unconditionally true, so the
+        // containment clause — the actual safety property — never ran, and a
+        // preview leaking four characters of credential passed for weeks.
+        let shown = preview.trim_end_matches('…');
+        assert_eq!(shown, "ghp_", "only the marker may survive, got {shown}");
+        assert!(
+            secret.starts_with(shown),
+            "the marker is the head of the match: {shown}"
+        );
         assert!(
             preview.starts_with("ghp_"),
             "the prefix is what names it: {preview}"
@@ -329,15 +362,19 @@ mod tests {
     #[test]
     fn a_short_match_is_masked_completely() {
         // Nothing here is long enough for a prefix to be safe.
-        assert_eq!(mask(SecretKind::ServiceToken, "abc"), "•••");
-        assert_eq!(mask(SecretKind::ServiceToken, ""), "•");
+        assert_eq!(mask(SecretKind::ServiceToken, "abc", 4), "•••");
+        assert_eq!(mask(SecretKind::ServiceToken, "", 4), "•");
     }
 
     #[test]
     fn an_assignment_shows_its_name_and_none_of_its_value() {
         // A fixed prefix rule showed `TOKEN=a…` here — one character of the
         // credential, in the tooltip this module exists to keep it out of.
-        let masked = mask(SecretKind::Assignment, "DATABASE_PASSWORD=hunter2hunter2");
+        let masked = mask(
+            SecretKind::Assignment,
+            "DATABASE_PASSWORD=hunter2hunter2",
+            0,
+        );
         assert_eq!(masked, "DATABASE_PASSWORD=•••");
         assert!(
             !masked.contains('h'),
@@ -345,7 +382,7 @@ mod tests {
         );
 
         assert_eq!(
-            mask(SecretKind::Assignment, "api_key: 9f8e7d6c"),
+            mask(SecretKind::Assignment, "api_key: 9f8e7d6c", 0),
             "api_key:•••"
         );
     }
@@ -353,31 +390,36 @@ mod tests {
     #[test]
     fn an_email_keeps_its_domain_and_loses_the_person() {
         // A fixed prefix rule showed `bob@exa…` — most of the address.
-        let masked = mask(SecretKind::PersonalData, "someone@example.com");
+        let masked = mask(SecretKind::PersonalData, "someone@example.com", 0);
         assert_eq!(masked, "•••@example.com");
         assert!(!masked.contains("someone"));
     }
 
     #[test]
     fn every_kind_is_masked_by_a_rule_that_names_it_without_showing_it() {
-        for (kind, value, must_not_contain) in [
+        for (kind, value, marker, must_not_contain) in [
             (
                 SecretKind::Assignment,
                 "SECRET_TOKEN=abcdefghijkl",
+                0,
                 "abcdefgh",
             ),
             (
                 SecretKind::PersonalData,
                 "first.last@corp.example",
+                0,
                 "first.last",
             ),
+            // Four is `AKIA`; anything past it is the credential, and a fixed
+            // seven used to show three characters of it.
             (
                 SecretKind::ServiceToken,
                 "AKIAIOSFODNN7EXAMPLE",
-                "N7EXAMPLE",
+                4,
+                "IOSFODNN",
             ),
         ] {
-            let masked = mask(kind, value);
+            let masked = mask(kind, value, marker);
             assert!(
                 !masked.contains(must_not_contain),
                 "{kind:?} leaked {must_not_contain} in {masked}",

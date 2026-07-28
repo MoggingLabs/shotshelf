@@ -13,8 +13,7 @@
 // *registered*, since an annotated function nobody registers is unreachable
 // and clippy already refuses it as dead.
 
-import { readFileSync } from "node:fs";
-import { globSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 
 const LIB = "src-tauri/src/lib.rs";
 
@@ -25,13 +24,7 @@ const LIB = "src-tauri/src/lib.rs";
  * remove it, and it shows up in review as a diff rather than as silence. An
  * empty list is the goal.
  */
-const UNWIRED = new Map([
-  [
-    "redact_capture",
-    "Needs the annotation editor to choose a region; the backend and its " +
-      "tests are complete. Remove this entry when the editor lands.",
-  ],
-]);
+const UNWIRED = new Map();
 
 function registeredCommands() {
   const source = readFileSync(LIB, "utf8");
@@ -46,10 +39,31 @@ function registeredCommands() {
     .filter((name) => name !== undefined);
 }
 
+/**
+ * The front-end's real code, with comments and tests removed.
+ *
+ * Both exclusions are load-bearing, and both were missing. A comment naming a
+ * command in quotes satisfied a plain substring scan, so the gate reported a
+ * clean repo on a tree with no invocations at all. And a command mentioned
+ * only by a unit test is still unreachable from the app, which is the property
+ * being checked.
+ */
 function frontendSource() {
   return globSync("src/**/*.ts")
-    .map((file) => readFileSync(file, "utf8"))
+    .filter((file) => !file.endsWith(".test.ts"))
+    .map((file) => stripComments(readFileSync(file, "utf8")))
     .join("\n");
+}
+
+/**
+ * Remove block and line comments.
+ *
+ * Deliberately crude. It only has to be conservative in one direction: over-
+ * stripping turns a real call site into a reported failure, which someone
+ * investigates. Under-stripping is what let the gate pass on a comment.
+ */
+function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
 const source = frontendSource();

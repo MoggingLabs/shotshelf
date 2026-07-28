@@ -90,6 +90,12 @@ export class Popover {
   adoptHidden(): void {
     window.clearTimeout(this.#launchTimer);
     this.#opened = false;
+    // A hidden window stops delivering pointer events, so a `pointerleave`
+    // that would have released the hover hold never arrives. Left armed, the
+    // column never ages again and the popover stops dismissing itself for the
+    // rest of the session. Releasing every hold here is the reconciliation
+    // that DOM enter/leave pairs cannot be relied on to provide.
+    this.#shelf.releaseColumn();
     // Whatever shape it was in, the next capture gets the column.
     this.#shelf.setMode("column");
   }

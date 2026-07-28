@@ -69,10 +69,9 @@ test("comparing sends the before first and puts the result on the shelf", async 
   const call = await page.evaluate(
     () => window.__shotshelf__.callsTo("compare_captures").at(-1)?.args,
   );
-  // Cards render newest-added first, so index 0 is `tall` and it was picked
-  // first. Order comes from the selection, not from the shelf: comparing an
-  // after against a before reads as every change reversed.
-  expect(call).toEqual({ before: FIXTURE.tall, after: FIXTURE.wide });
+  // `wide` landed at ts 1 and `tall` at ts 2, so `wide` is the before —
+  // whichever was clicked first.
+  expect(call).toEqual({ before: FIXTURE.wide, after: FIXTURE.tall });
 
   // The result joins the shelf as a capture of its own; neither input moved.
   await expect(page.locator(".tile")).toHaveCount(3);
@@ -101,4 +100,55 @@ test("a comparison that fails says so and keeps both captures", async ({ page })
 
   await expect(page.locator("#shelf-alert")).toBeVisible();
   await expect(page.locator(".tile")).toHaveCount(2);
+});
+
+test("a shift-selected pair is compared the right way round", async ({ page }) => {
+  // The blocker this encodes: `extendTo` rebuilds the selection in the order
+  // the shelf is showing, which is newest-first. Taking the before from pick
+  // order therefore made the *newer* capture the before for every range
+  // selection, and the comparison read every change backwards while looking
+  // entirely correct. Order comes from capture time now.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide, { ts: 1 });
+  await land(page, FIXTURE.tall, { ts: 2 });
+  await openBrowse(page);
+  await page.evaluate(() =>
+    window.__shotshelf__.respond("compare_captures", "/edits/x (compared).png"),
+  );
+
+  const press = async (index: number, shift: boolean): Promise<void> => {
+    const card = page.locator(".tile").nth(index);
+    await card.scrollIntoViewIfNeeded();
+    const box = await card.boundingBox();
+    if (shift) await page.keyboard.down("Shift");
+    await page.mouse.move(box!.x + 20, box!.y + 25);
+    await page.mouse.down();
+    await page.mouse.up();
+    if (shift) await page.keyboard.up("Shift");
+  };
+
+  // Index 0 is the newest (`tall`); shift-extend down to the older one.
+  await press(0, false);
+  await press(1, true);
+
+  await page.locator("#shelf-compare").click();
+
+  const call = await page.evaluate(
+    () => window.__shotshelf__.callsTo("compare_captures").at(-1)?.args,
+  );
+  expect(call).toEqual({ before: FIXTURE.wide, after: FIXTURE.tall });
+});
+
+test("a double click does not run the comparison twice", async ({ page }) => {
+  await pickTwo(page);
+  await page.evaluate(() => window.__shotshelf__.hang("compare_captures"));
+
+  await page.locator("#shelf-compare").click();
+  await page.locator("#shelf-compare").click({ force: true });
+
+  // The button stays on screen for the length of a full-resolution decode of
+  // two captures; a second click used to write a second file nobody asked for.
+  expect(
+    await page.evaluate(() => window.__shotshelf__.callsTo("compare_captures").length),
+  ).toBe(1);
 });

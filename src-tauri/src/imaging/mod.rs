@@ -10,11 +10,24 @@
 
 pub mod compare;
 pub mod export;
-pub mod redact;
 
 use std::path::Path;
 
 use image::{DynamicImage, ImageFormat, ImageReader};
+
+/// A rectangle in image pixels.
+///
+/// Here rather than in the module that first needed one: a plain shape is not
+/// owned by whichever feature happened to define it, and `compare` reaching
+/// into `redact` for "a rectangle" made `changed_regions() -> Vec<Region>`
+/// read, against the type's own documentation, as "regions to destroy".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Region {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
 
 /// Anything that can go wrong touching pixels.
 ///
@@ -26,8 +39,6 @@ pub enum ImageError {
     Read(String),
     Decode(String),
     Encode(String),
-    /// The file is a shape or format we will not process.
-    Unsupported(String),
 }
 
 impl std::fmt::Display for ImageError {
@@ -36,7 +47,6 @@ impl std::fmt::Display for ImageError {
             Self::Read(why) => write!(f, "could not read the capture: {why}"),
             Self::Decode(why) => write!(f, "could not decode the capture: {why}"),
             Self::Encode(why) => write!(f, "could not encode the result: {why}"),
-            Self::Unsupported(why) => write!(f, "{why}"),
         }
     }
 }

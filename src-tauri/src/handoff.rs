@@ -63,9 +63,26 @@ fn sized_copy<R: Runtime>(app: &AppHandle<R>, source: &Path) -> Result<Option<Pa
     let name = source.file_stem().unwrap_or_default();
     let target = dir.join(Path::new(name).with_extension("png"));
 
-    // Byte-for-byte identical work, already done.
+    // Written to a temporary name and renamed into place.
+    //
+    // Two reasons, both live since these commands became `command(async)` and
+    // stopped being serialised by the IPC thread. A drag and a copy of the
+    // same capture can now run at once, and a plain `write` lets one observe
+    // the other's half-finished file — a truncated PNG on the clipboard. And
+    // existence is not completeness: a write interrupted by a crash or a full
+    // disk would otherwise be accepted as valid for this key forever, with no
+    // way to self-repair. A rename is atomic, so the target either is not
+    // there or is the whole thing.
     if !target.is_file() {
-        std::fs::write(&target, bytes).map_err(|err| err.to_string())?;
+        let staged = dir.join(format!("{}.part", std::process::id()));
+        std::fs::write(&staged, bytes).map_err(|err| err.to_string())?;
+        // A concurrent writer may have won the race; its copy is identical.
+        if let Err(err) = std::fs::rename(&staged, &target) {
+            let _ = std::fs::remove_file(&staged);
+            if !target.is_file() {
+                return Err(err.to_string());
+            }
+        }
     }
 
     Ok(Some(target))

@@ -14,36 +14,10 @@ use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager, Runtime};
 
-use crate::imaging::{self, compare, redact, redact::Region};
+use crate::imaging::{self, compare};
 
 /// Where edits live, under the app's data directory.
 const EDITS_DIR: &str = "edits";
-
-/// Redact regions of a capture, permanently, into a new file.
-///
-/// The regions are in image pixels, not screen or card pixels — the caller
-/// scales them, because only the caller knows what it was showing.
-#[tauri::command]
-pub async fn redact_capture<R: Runtime>(
-    app: AppHandle<R>,
-    path: String,
-    regions: Vec<Region>,
-) -> Result<String, String> {
-    let source = existing(&path)?;
-
-    // Decoding, filling and re-encoding a full-resolution screenshot is real
-    // work; it does not belong on the runtime that also serves the shelf.
-    tauri::async_runtime::spawn_blocking(move || {
-        let image = imaging::load(&source)?;
-        let redacted = redact::apply(image, &regions);
-        let bytes = imaging::to_png(&redacted)?;
-        Ok::<_, imaging::ImageError>((bytes, source))
-    })
-    .await
-    .map_err(|err| err.to_string())?
-    .map_err(String::from)
-    .and_then(|(bytes, source)| write_edit(&app, &source, "redacted", &bytes))
-}
 
 /// Put two captures side by side, with what changed outlined on the second.
 #[tauri::command]
@@ -92,8 +66,29 @@ fn write_edit<R: Runtime>(
         |stem| stem.to_string_lossy().into_owned(),
     );
 
-    let target = unique(&dir, &stem, kind);
-    std::fs::write(&target, bytes).map_err(|err| err.to_string())?;
+    // Created exclusively rather than probed-then-written. `unique` checking
+    // `!exists()` and writing afterwards is a race the doc below says this
+    // function exists to prevent: two comparisons started by a double click
+    // both picked the same name and the second silently overwrote the first.
+    let mut target = unique(&dir, &stem, kind);
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+        {
+            Ok(mut file) => {
+                use std::io::Write;
+                file.write_all(bytes).map_err(|err| err.to_string())?;
+                break;
+            }
+            // Someone else took this name between the probe and the create.
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
+                target = unique(&dir, &stem, kind);
+            }
+            Err(err) => return Err(err.to_string()),
+        }
+    }
 
     // The webview renders it through the asset protocol, which only serves
     // directories it has been told about.
@@ -149,12 +144,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp dir");
 
-        let first = unique(&dir, "Screenshot", "redacted");
-        assert_eq!(first.file_name().unwrap(), "Screenshot (redacted).png");
+        let first = unique(&dir, "Screenshot", "compared");
+        assert_eq!(first.file_name().unwrap(), "Screenshot (compared).png");
         std::fs::write(&first, b"x").expect("write");
 
-        let second = unique(&dir, "Screenshot", "redacted");
-        assert_eq!(second.file_name().unwrap(), "Screenshot (redacted 2).png");
+        let second = unique(&dir, "Screenshot", "compared");
+        assert_eq!(second.file_name().unwrap(), "Screenshot (compared 2).png");
         assert_ne!(first, second);
 
         let _ = std::fs::remove_dir_all(&dir);
