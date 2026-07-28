@@ -107,20 +107,39 @@ pub fn copy_capture<R: Runtime>(
 ) -> Result<(), String> {
     let source = existing_file(&path)?;
 
-    // This write is about to wake our own clipboard watcher; without warning
-    // it, copying a capture would shelve a second copy of it.
+    // Everything slow and everything fallible happens before the marker is
+    // armed, and the marker is armed immediately before the write.
+    //
+    // The marker tells our own clipboard watcher to disregard the next write
+    // for three seconds. Arming it on entry put a full decode, a Lanczos3
+    // resize and a PNG re-encode *inside* that window, which fails in both
+    // directions: a re-encode slower than the window lets the watcher shelve a
+    // duplicate of the capture you just copied, and a read that fails leaves
+    // the marker standing with no write at all, so the next genuine
+    // Win+Shift+S is silently swallowed. A capture lost to a failed copy is a
+    // far worse outcome than the duplicate the marker exists to prevent.
+    let payload = match kind {
+        CaptureKind::Image => {
+            let handed_over = handoff::file_for(&app, &source, settings.get().downscale_exports);
+            Payload::Pixels(std::fs::read(&handed_over).map_err(|err| err.to_string())?)
+        }
+        // A recording pastes as a file, not as pixels.
+        CaptureKind::Video => Payload::File(file_uri(&source)),
+    };
+
     sink.expect_own_clipboard_write(OWN_WRITE_WINDOW);
 
     let clipboard = app.state::<Clipboard>();
-    match kind {
-        CaptureKind::Image => {
-            let handed_over = handoff::file_for(&app, &source, settings.get().downscale_exports);
-            let bytes = std::fs::read(&handed_over).map_err(|err| err.to_string())?;
-            clipboard.write_image_binary(bytes)
-        }
-        // A recording pastes as a file, not as pixels.
-        CaptureKind::Video => clipboard.write_files_uris(vec![file_uri(&source)]),
+    match payload {
+        Payload::Pixels(bytes) => clipboard.write_image_binary(bytes),
+        Payload::File(uri) => clipboard.write_files_uris(vec![uri]),
     }
+}
+
+/// What is about to go on the clipboard, prepared before anything is armed.
+enum Payload {
+    Pixels(Vec<u8>),
+    File(String),
 }
 
 /// The clipboard plugin wants a bare path on Windows and a `file://` URI

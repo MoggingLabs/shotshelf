@@ -98,9 +98,18 @@ pub fn run() {
         .on_window_event(|shelf, event| {
             // The shelf has no close button, but Alt+F4 / ⌘W still fire.
             // Hiding instead of closing keeps the app alive in the tray.
+            //
+            // Through `window::hide` rather than `shelf.hide()`: hiding is not
+            // just making the window invisible. It clears the opened flag and
+            // emits `shelf://hidden`, without which the front-end goes on
+            // believing the shelf is open — so every later capture is filed
+            // away silently instead of popping the column, and a hover hold
+            // left armed by hiding under the cursor freezes the column's
+            // expiry for the rest of the session. One keystroke, two features
+            // dead, no error anywhere.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = shelf.hide();
+                window::hide(shelf.app_handle());
             }
         })
         .run(tauri::generate_context!())

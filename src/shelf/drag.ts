@@ -77,8 +77,10 @@ export async function beginDrag(
   };
 
   try {
-    // Every picked capture, in the order they were picked — a before and an
-    // after are only useful the right way round. Each goes through
+    // Every picked capture, oldest first — a before and an after are only
+    // useful the right way round, and "the order you picked them" is not a
+    // single order: it differs between a ctrl-click and a shift-range. Each
+    // goes through
     // `prepare_drag` so each is checked for still being on disk, and so each
     // gets sized for hand-off if that is turned on.
     const sources = await Promise.all(items.map((item) => prepareDrag(item.path, item.kind)));

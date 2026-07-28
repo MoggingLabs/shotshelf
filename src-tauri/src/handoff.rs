@@ -50,12 +50,7 @@ pub fn file_for<R: Runtime>(app: &AppHandle<R>, source: &Path, downscale: bool) 
 
 /// Write a sized copy, or `Ok(None)` if the capture is already small enough.
 fn sized_copy<R: Runtime>(app: &AppHandle<R>, source: &Path) -> Result<Option<PathBuf>, String> {
-    let Some(bytes) = export::png_for_handoff(source, export::LONG_EDGE)? else {
-        return Ok(None);
-    };
-
     let dir = cache_dir(app)?.join(key(source));
-    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
 
     // The original filename, so a drop produces the file the user recognises.
     // The extension becomes .png because the bytes are PNG — handing over a
@@ -63,25 +58,44 @@ fn sized_copy<R: Runtime>(app: &AppHandle<R>, source: &Path) -> Result<Option<Pa
     let name = source.file_stem().unwrap_or_default();
     let target = dir.join(Path::new(name).with_extension("png"));
 
-    // Written to a temporary name and renamed into place.
+    // The cache is checked *before* the work it exists to avoid. It used to
+    // sit after the re-encode, which meant every drag and every copy paid a
+    // full decode, Lanczos3 resize and PNG encode of a full-resolution
+    // screenshot, and the only thing the cache saved was the `write`.
+    if target.is_file() {
+        return Ok(Some(target));
+    }
+
+    let Some(bytes) = export::png_for_handoff(source, export::LONG_EDGE)? else {
+        return Ok(None);
+    };
+
+    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+
+    // Written under a name unique to this call, then renamed into place.
     //
-    // Two reasons, both live since these commands became `command(async)` and
-    // stopped being serialised by the IPC thread. A drag and a copy of the
-    // same capture can now run at once, and a plain `write` lets one observe
-    // the other's half-finished file — a truncated PNG on the clipboard. And
-    // existence is not completeness: a write interrupted by a crash or a full
-    // disk would otherwise be accepted as valid for this key forever, with no
-    // way to self-repair. A rename is atomic, so the target either is not
-    // there or is the whole thing.
-    if !target.is_file() {
-        let staged = dir.join(format!("{}.part", std::process::id()));
-        std::fs::write(&staged, bytes).map_err(|err| err.to_string())?;
+    // The uniqueness has to be per *operation*, not per process: these
+    // commands are `command(async)`, so a drag and a copy of the same capture
+    // run concurrently inside one process, and a staged name shared between
+    // them lets the second `write` truncate the file the first had finished —
+    // whereupon the first's `rename` publishes a zero-length PNG, and the
+    // `is_file` check above then accepts it forever. A per-process id was
+    // exactly that mistake.
+    //
+    // A rename is atomic, so the target is either absent or whole. That also
+    // means a write interrupted by a crash or a full disk leaves a `.part`
+    // behind rather than a corrupt cache entry.
+    static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let ticket = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let staged = dir.join(format!("{}-{ticket}.part", std::process::id()));
+
+    std::fs::write(&staged, bytes).map_err(|err| err.to_string())?;
+    if let Err(err) = std::fs::rename(&staged, &target) {
+        // Only ever removes *this* call's staged file.
+        let _ = std::fs::remove_file(&staged);
         // A concurrent writer may have won the race; its copy is identical.
-        if let Err(err) = std::fs::rename(&staged, &target) {
-            let _ = std::fs::remove_file(&staged);
-            if !target.is_file() {
-                return Err(err.to_string());
-            }
+        if !target.is_file() {
+            return Err(err.to_string());
         }
     }
 

@@ -118,9 +118,11 @@ test("dragging a picked card carries every picked capture", async ({ page }) => 
         | string[]
         | undefined,
   );
-  // Cards render newest-added first, so index 0 is the last capture to land.
-  // Picked in that order, handed over in that order.
-  expect(handed).toEqual([FIXTURE.square, FIXTURE.tall]);
+  // Oldest first, regardless of which card was clicked first. "The order you
+  // picked them" is not one order — it differs between a ctrl-click and a
+  // shift-range — so capture time is the rule, and it is the same rule the
+  // compare path uses.
+  expect(handed).toEqual([FIXTURE.tall, FIXTURE.square]);
 
   await page.mouse.up();
 });
@@ -160,4 +162,46 @@ test("a capture that leaves the shelf leaves the selection", async ({ page }) =>
   // is no longer on the shelf.
   await expect(page.locator(".tile")).toHaveCount(2);
   await expect(page.locator(".tile--picked")).toHaveCount(1);
+});
+
+test("a shift-selected range drags out oldest first", async ({ page }) => {
+  // The same defect the compare path had, in the other consumer of a
+  // selection: `extendTo` rebuilds the set in the order the shelf is showing,
+  // which is newest-first, so a shift-selected before/after pair dragged out
+  // backwards. Only ctrl-click was ever asserted, so the range case shipped
+  // wrong while a comment above claimed order was what this file protected.
+  await threeCaptures(page);
+  await page.evaluate(() => {
+    window.__shotshelf__.respondWith("prepare_drag", (args) => ({
+      path: args["path"],
+      icon: args["path"],
+    }));
+    window.__shotshelf__.hang("plugin:drag|start_drag");
+  });
+
+  // Index 0 is the newest; extend the range down to the oldest.
+  await pressCard(page, 0);
+  await pressCard(page, 2, { shift: true });
+
+  const card = page.locator(".tile").nth(1);
+  await card.scrollIntoViewIfNeeded();
+  const box = await card.boundingBox();
+  await page.mouse.move(box!.x + 20, box!.y + 25);
+  await page.mouse.down();
+  await page.mouse.move(150, 300);
+
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("prepare_drag").length))
+    .toBe(3);
+
+  const handed = await page.evaluate(
+    () =>
+      window.__shotshelf__.callsTo("plugin:drag|start_drag").at(-1)?.args["item"] as
+        | string[]
+        | undefined,
+  );
+  // ts 1, 2, 3 — oldest first, whichever end of the range was clicked.
+  expect(handed).toEqual([FIXTURE.wide, FIXTURE.tall, FIXTURE.square]);
+
+  await page.mouse.up();
 });

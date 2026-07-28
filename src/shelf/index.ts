@@ -267,25 +267,39 @@ export class Shelf {
       : this.#store.items().map((item) => item.id);
   }
 
-  /** The captures a drag from `item` should carry. */
-  #dragSet(item: ShelfItem): ShelfItem[] {
-    if (!this.#selection.has(item.id)) return [item];
-
+  /**
+   * The picked captures, oldest first.
+   *
+   * One defined order, used by everything that acts on a selection.
+   * `Selection.ids()` cannot provide it: a ctrl-click appends, so it yields
+   * click order, while a shift-range rebuilds the set in the order the shelf
+   * is showing — which is newest-first. Anything reading that order directly
+   * therefore handed a before/after pair over backwards for one gesture and
+   * correctly for the other, which is a bug that looks like working software.
+   *
+   * Capture time is the answer under both gestures. The path breaks ties so
+   * two captures sharing a millisecond — legal, since identity is `ts:path` —
+   * cannot fall back to the ordering this exists to avoid.
+   */
+  #pickedItems(): ShelfItem[] {
     return this.#selection
       .ids()
       .map((id) => this.#store.find(id))
-      .filter((picked): picked is ShelfItem => picked !== undefined);
+      .filter((picked): picked is ShelfItem => picked !== undefined)
+      .sort((a, b) => a.ts - b.ts || a.path.localeCompare(b.path));
+  }
+
+  /** The captures a drag from `item` should carry. */
+  #dragSet(item: ShelfItem): ShelfItem[] {
+    if (!this.#selection.has(item.id)) return [item];
+    return this.#pickedItems();
   }
 
   /**
    * Put the two picked captures side by side, with what changed outlined.
    *
-   * The **older** capture is the before. Not the one clicked first: shift-
-   * selecting rebuilds the selection in the order the shelf is showing, so
-   * pick order is only meaningful for a ctrl-click and silently reversed for
-   * a range — which produced a comparison that read every change backwards
-   * while looking entirely correct. Capture time is unambiguous however the
-   * pair was chosen.
+   * The **older** capture is the before — see `#pickedItems`, which is the
+   * single ordering every consumer of a selection uses.
    *
    * The result is a new capture on the shelf rather than a file written back
    * over either input.
@@ -293,12 +307,7 @@ export class Shelf {
   async compare(): Promise<void> {
     if (this.#comparing) return;
 
-    const picked = this.#selection
-      .ids()
-      .map((id) => this.#store.find(id))
-      .filter((item): item is ShelfItem => item !== undefined)
-      .sort((a, b) => a.ts - b.ts);
-
+    const picked = this.#pickedItems();
     const [before, after] = picked;
     if (!before || !after || picked.length !== 2) return;
 

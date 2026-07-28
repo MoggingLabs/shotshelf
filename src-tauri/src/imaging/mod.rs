@@ -17,10 +17,10 @@ use image::{DynamicImage, ImageFormat, ImageReader};
 
 /// A rectangle in image pixels.
 ///
-/// Here rather than in the module that first needed one: a plain shape is not
-/// owned by whichever feature happened to define it, and `compare` reaching
-/// into `redact` for "a rectangle" made `changed_regions() -> Vec<Region>`
-/// read, against the type's own documentation, as "regions to destroy".
+/// Here rather than inside whichever feature first needed a rectangle: a plain
+/// shape is not owned by the module that happened to define it, and reaching
+/// sideways for one made `changed_regions() -> Vec<Region>` read, against that
+/// type's own documentation, as "regions to destroy".
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Region {
     pub x: u32,

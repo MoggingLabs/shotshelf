@@ -44,8 +44,8 @@ tauri-plugin-single-instance = "2"                                # one shelf, o
 notify = "8"
 notify-debouncer-full = "0.7"
 
-# Pixel work: downscaling a capture for hand-off, destroying redacted regions,
-# and diffing a before against an after. Default features off — the formats
+# Pixel work: downscaling a capture for hand-off, and diffing a before
+# against an after. Default features off — the formats
 # Shotshelf actually meets are PNG, JPEG and WebP, and pulling in the rest
 # costs compile time for decoders nothing will ever call.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }

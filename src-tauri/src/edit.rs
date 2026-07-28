@@ -1,8 +1,8 @@
 //! Making a new capture out of ones you already have.
 //!
-//! Redacting a region, or putting a before and an after side by side. Both
-//! produce a **new file** and leave the originals exactly where the OS wrote
-//! them — the shelf has never modified a capture and does not start here.
+//! Putting a before and an after side by side. It produces a **new file**
+//! and leaves the originals exactly where the OS wrote them — the shelf has
+//! never modified a capture and does not start here.
 //!
 //! Edits are written to Shotshelf's own data directory rather than back into
 //! your Pictures folder. Two reasons: the folder Shotshelf watches is the
