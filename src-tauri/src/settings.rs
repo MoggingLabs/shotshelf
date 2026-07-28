@@ -40,6 +40,16 @@ pub struct Settings {
     /// Hard ceiling on unpinned captures, whatever the retention window.
     pub max_items: usize,
     pub hotkey: String,
+    /// Hand over a smaller copy instead of the original.
+    ///
+    /// Off by default, deliberately. Every vision model resizes what it is
+    /// given to roughly 1568px before looking at it, so for feeding a chat
+    /// this is free — but a drag-out is also how captures reach design tools
+    /// and bug reports, and silently handing someone a downscaled file when
+    /// they asked for their screenshot is the kind of surprise that costs
+    /// trust. The original is what was asked for until you say otherwise.
+    #[serde(default)]
+    pub downscale_exports: bool,
     pub pinned: Vec<PinnedItem>,
 }
 
@@ -49,6 +59,7 @@ impl Default for Settings {
             retention_hours: None,
             max_items: 50,
             hotkey: DEFAULT_HOTKEY.to_owned(),
+            downscale_exports: false,
             pinned: Vec::new(),
         }
     }

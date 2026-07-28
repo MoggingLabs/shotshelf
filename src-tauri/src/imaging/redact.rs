@@ -41,7 +41,12 @@ impl Region {
             return None;
         }
 
-        Some(Self { x: self.x, y: self.y, width, height })
+        Some(Self {
+            x: self.x,
+            y: self.y,
+            width,
+            height,
+        })
     }
 }
 
@@ -77,26 +82,54 @@ mod tests {
     use super::*;
 
     fn white(width: u32, height: u32) -> DynamicImage {
-        DynamicImage::ImageRgba8(RgbaImage::from_pixel(width, height, Rgba([255, 255, 255, 255])))
+        DynamicImage::ImageRgba8(RgbaImage::from_pixel(
+            width,
+            height,
+            Rgba([255, 255, 255, 255]),
+        ))
     }
 
     #[test]
     fn a_redacted_region_no_longer_holds_its_original_pixels() {
-        let redacted = apply(white(10, 10), &[Region { x: 2, y: 2, width: 3, height: 3 }]);
+        let redacted = apply(
+            white(10, 10),
+            &[Region {
+                x: 2,
+                y: 2,
+                width: 3,
+                height: 3,
+            }],
+        );
 
         for y in 2..5 {
             for x in 2..5 {
-                assert_eq!(redacted.get_pixel(x, y), FILL, "({x},{y}) should be destroyed");
+                assert_eq!(
+                    redacted.get_pixel(x, y),
+                    FILL,
+                    "({x},{y}) should be destroyed"
+                );
             }
         }
     }
 
     #[test]
     fn everything_outside_the_region_is_untouched() {
-        let redacted = apply(white(10, 10), &[Region { x: 2, y: 2, width: 3, height: 3 }]);
+        let redacted = apply(
+            white(10, 10),
+            &[Region {
+                x: 2,
+                y: 2,
+                width: 3,
+                height: 3,
+            }],
+        );
 
         assert_eq!(redacted.get_pixel(0, 0), Rgba([255, 255, 255, 255]));
-        assert_eq!(redacted.get_pixel(5, 5), Rgba([255, 255, 255, 255]), "exclusive upper bound");
+        assert_eq!(
+            redacted.get_pixel(5, 5),
+            Rgba([255, 255, 255, 255]),
+            "exclusive upper bound"
+        );
         assert_eq!(redacted.get_pixel(9, 9), Rgba([255, 255, 255, 255]));
     }
 
@@ -104,7 +137,15 @@ mod tests {
     fn a_region_dragged_past_the_edge_redacts_what_it_covers() {
         // Dragging a box off the side of the image is the normal way to redact
         // something at the edge; it must not fail or wrap around.
-        let redacted = apply(white(10, 10), &[Region { x: 8, y: 8, width: 999, height: 999 }]);
+        let redacted = apply(
+            white(10, 10),
+            &[Region {
+                x: 8,
+                y: 8,
+                width: 999,
+                height: 999,
+            }],
+        );
 
         assert_eq!(redacted.get_pixel(9, 9), FILL);
         assert_eq!(redacted.get_pixel(7, 7), Rgba([255, 255, 255, 255]));
@@ -112,13 +153,29 @@ mod tests {
 
     #[test]
     fn a_region_entirely_outside_the_image_is_ignored() {
-        let redacted = apply(white(10, 10), &[Region { x: 50, y: 50, width: 5, height: 5 }]);
+        let redacted = apply(
+            white(10, 10),
+            &[Region {
+                x: 50,
+                y: 50,
+                width: 5,
+                height: 5,
+            }],
+        );
         assert_eq!(redacted.get_pixel(0, 0), Rgba([255, 255, 255, 255]));
     }
 
     #[test]
     fn an_empty_region_does_nothing() {
-        let redacted = apply(white(10, 10), &[Region { x: 1, y: 1, width: 0, height: 5 }]);
+        let redacted = apply(
+            white(10, 10),
+            &[Region {
+                x: 1,
+                y: 1,
+                width: 0,
+                height: 5,
+            }],
+        );
         assert_eq!(redacted.get_pixel(1, 1), Rgba([255, 255, 255, 255]));
     }
 
@@ -127,8 +184,18 @@ mod tests {
         let redacted = apply(
             white(10, 10),
             &[
-                Region { x: 0, y: 0, width: 2, height: 2 },
-                Region { x: 8, y: 8, width: 2, height: 2 },
+                Region {
+                    x: 0,
+                    y: 0,
+                    width: 2,
+                    height: 2,
+                },
+                Region {
+                    x: 8,
+                    y: 8,
+                    width: 2,
+                    height: 2,
+                },
             ],
         );
 

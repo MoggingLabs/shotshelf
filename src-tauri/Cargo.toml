@@ -50,8 +50,20 @@ notify-debouncer-full = "0.7"
 # costs compile time for decoders nothing will ever call.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 
+# Secret detection over recognised text. Hand-rolling this many patterns would
+# be a worse bet than a well-tested engine, and `regex` guarantees linear time,
+# so a pathological screenshot cannot hang the catch pipeline.
+regex = "1"
+
 # Rounded window corners, which CSS cannot deliver on its own — see
 # `window::round_corners`. Same version Tauri already depends on, so this only
 # turns on an extra feature rather than pulling a second copy of the crate.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",   # rounded window corners
+    "Media_Ocr",            # the OS text recogniser
+    "Graphics_Imaging",     # decoding a capture for it
+    "Storage_Streams",      # feeding it bytes without going through StorageFile
+    "Globalization",        # it follows the user's own language list
+] }

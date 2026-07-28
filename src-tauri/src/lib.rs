@@ -9,6 +9,9 @@
 //! registered, and none will be.
 
 mod catch;
+mod edit;
+mod enrich;
+mod handoff;
 mod hotkey;
 mod imaging;
 mod poster;
@@ -32,6 +35,10 @@ pub fn run() {
             catch::catch_watch_dirs,
             share::prepare_drag,
             share::copy_capture,
+            share::describe_capture,
+            edit::redact_capture,
+            edit::compare_captures,
+            edit::text_recognition_available,
             poster::video_details,
             poster::forget_video,
             settings::get_settings,
@@ -75,6 +82,9 @@ pub fn run() {
             catch::start(app.handle(), &catch::overrides_from_env());
             poster::allow_reading_posters(app.handle());
             poster::prune_cache(app.handle());
+            // Sized copies are a cache too, and a cache that only grows is a
+            // leak with a nicer name.
+            handoff::prune(app.handle());
 
             if let Some(shelf) = app.get_webview_window(window::SHELF) {
                 window::apply_material(&shelf);

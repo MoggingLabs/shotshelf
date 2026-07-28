@@ -43,7 +43,11 @@ impl Default for Settings {
     fn default() -> Self {
         // Tuned for screenshots of user interfaces: text that has actually
         // changed moves far more than these, and subpixel rendering moves less.
-        Self { block: 16, threshold: 48, density: 0.06 }
+        Self {
+            block: 16,
+            threshold: 48,
+            density: 0.06,
+        }
     }
 }
 
@@ -281,13 +285,25 @@ mod tests {
     fn two_identical_captures_report_nothing_changed() {
         let before = filled(64, 64, [255, 255, 255, 255]);
         let regions = changed_regions(&before, &before.clone(), Settings::default());
-        assert!(regions.is_empty(), "nothing changed is a useful answer, not a failure");
+        assert!(
+            regions.is_empty(),
+            "nothing changed is a useful answer, not a failure"
+        );
     }
 
     #[test]
     fn a_changed_area_is_found_and_covers_it() {
         let before = filled(64, 64, [255, 255, 255, 255]);
-        let after = with_patch(&before, Region { x: 16, y: 16, width: 16, height: 16 }, [0, 0, 0, 255]);
+        let after = with_patch(
+            &before,
+            Region {
+                x: 16,
+                y: 16,
+                width: 16,
+                height: 16,
+            },
+            [0, 0, 0, 255],
+        );
 
         let regions = changed_regions(&before, &after, Settings::default());
 
@@ -301,20 +317,54 @@ mod tests {
     fn adjacent_changes_merge_into_one_region() {
         let before = filled(96, 32, [255, 255, 255, 255]);
         // A run of changed blocks, as a line of edited text would produce.
-        let after = with_patch(&before, Region { x: 0, y: 0, width: 80, height: 16 }, [0, 0, 0, 255]);
+        let after = with_patch(
+            &before,
+            Region {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 16,
+            },
+            [0, 0, 0, 255],
+        );
 
         let regions = changed_regions(&before, &after, Settings::default());
 
-        assert_eq!(regions.len(), 1, "a changed paragraph is one thing, not five boxes");
+        assert_eq!(
+            regions.len(),
+            1,
+            "a changed paragraph is one thing, not five boxes"
+        );
     }
 
     #[test]
     fn separate_changes_stay_separate() {
         let before = filled(128, 32, [255, 255, 255, 255]);
-        let mut after = with_patch(&before, Region { x: 0, y: 0, width: 16, height: 16 }, [0, 0, 0, 255]);
-        after = with_patch(&after, Region { x: 96, y: 0, width: 16, height: 16 }, [0, 0, 0, 255]);
+        let mut after = with_patch(
+            &before,
+            Region {
+                x: 0,
+                y: 0,
+                width: 16,
+                height: 16,
+            },
+            [0, 0, 0, 255],
+        );
+        after = with_patch(
+            &after,
+            Region {
+                x: 96,
+                y: 0,
+                width: 16,
+                height: 16,
+            },
+            [0, 0, 0, 255],
+        );
 
-        assert_eq!(changed_regions(&before, &after, Settings::default()).len(), 2);
+        assert_eq!(
+            changed_regions(&before, &after, Settings::default()).len(),
+            2
+        );
     }
 
     #[test]
@@ -334,7 +384,10 @@ mod tests {
 
         let regions = changed_regions(&before, &after, Settings::default());
 
-        assert!(!regions.is_empty(), "a window that grew has genuinely changed");
+        assert!(
+            !regions.is_empty(),
+            "a window that grew has genuinely changed"
+        );
         assert!(regions.iter().any(|region| region.x + region.width > 32));
     }
 
@@ -354,8 +407,16 @@ mod tests {
 
         assert_eq!(sheet.width(), 40 + GUTTER + 30);
         assert_eq!(sheet.height(), 25, "as tall as the taller of the two");
-        assert_eq!(sheet.get_pixel(0, 0), Rgba([255, 0, 0, 255]), "before on the left");
-        assert_eq!(sheet.get_pixel(40 + GUTTER, 0), Rgba([0, 0, 255, 255]), "after on the right");
+        assert_eq!(
+            sheet.get_pixel(0, 0),
+            Rgba([255, 0, 0, 255]),
+            "before on the left"
+        );
+        assert_eq!(
+            sheet.get_pixel(40 + GUTTER, 0),
+            Rgba([0, 0, 255, 255]),
+            "after on the right"
+        );
         assert_eq!(sheet.get_pixel(41, 0), BACKGROUND, "gutter between them");
     }
 
@@ -363,7 +424,12 @@ mod tests {
     fn a_highlight_outlines_the_change_without_covering_it() {
         let before = filled(64, 64, [255, 255, 255, 255]);
         let after = filled(64, 64, [255, 255, 255, 255]);
-        let region = Region { x: 10, y: 10, width: 20, height: 20 };
+        let region = Region {
+            x: 10,
+            y: 10,
+            width: 20,
+            height: 20,
+        };
 
         let sheet = side_by_side(&before, &after, &[region]);
         let offset = 64 + GUTTER;

@@ -4119,6 +4119,7 @@ dependencies = [
  "image",
  "notify",
  "notify-debouncer-full",
+ "regex",
  "serde",
  "serde_json",
  "tauri",

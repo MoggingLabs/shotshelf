@@ -43,7 +43,10 @@ pub fn for_handoff(image: DynamicImage, long_edge: u32) -> Sized {
     // Never enlarge. A small capture is small on purpose — a cropped region, a
     // dialog — and upscaling it invents detail that was never there.
     if longest <= long_edge || longest == 0 {
-        return Sized { image, resized: false };
+        return Sized {
+            image,
+            resized: false,
+        };
     }
 
     let scale = f64::from(long_edge) / f64::from(longest);
@@ -69,20 +72,15 @@ fn scale_edge(edge: u32, scale: f64) -> u32 {
     (scaled as u32).max(1)
 }
 
-/// The pixels a capture would cost to send, before and after.
-///
-/// Used to tell the user what they saved, in the only unit that matters to
-/// them: not bytes on disk, but how much of the image survives.
-pub fn megapixels(width: u32, height: u32) -> f64 {
-    f64::from(width) * f64::from(height) / 1_000_000.0
-}
-
 /// Read a capture, size it for hand-off, and return PNG bytes.
 ///
 /// Returns `Ok(None)` when the capture is already within the ceiling, so the
 /// caller can hand over the original file untouched rather than writing a
 /// byte-identical copy of it.
-pub fn png_for_handoff(path: &std::path::Path, long_edge: u32) -> Result<Option<Vec<u8>>, ImageError> {
+pub fn png_for_handoff(
+    path: &std::path::Path,
+    long_edge: u32,
+) -> Result<Option<Vec<u8>>, ImageError> {
     let sized = for_handoff(super::load(path)?, long_edge);
     if !sized.resized {
         return Ok(None);
@@ -125,7 +123,10 @@ mod tests {
     #[test]
     fn a_capture_exactly_on_the_ceiling_is_not_touched() {
         let sized = for_handoff(image(LONG_EDGE, 400), LONG_EDGE);
-        assert!(!sized.resized, "resizing to the size it already is is pure loss");
+        assert!(
+            !sized.resized,
+            "resizing to the size it already is is pure loss"
+        );
     }
 
     #[test]
@@ -144,11 +145,5 @@ mod tests {
         let sized = for_handoff(image(9000, 2), 1000);
         assert_eq!(sized.image.width(), 1000);
         assert!(sized.image.height() >= 1);
-    }
-
-    #[test]
-    fn megapixels_are_reported_for_the_saving_message() {
-        assert!((megapixels(1920, 1080) - 2.0736).abs() < 0.0001);
-        assert_eq!(megapixels(0, 0), 0.0);
     }
 }
