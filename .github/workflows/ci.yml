@@ -97,7 +97,7 @@ jobs:
       # (geometry and computed style) comes with it.
       - name: Front-end behaviour
         if: '!cancelled()'
-        run: npm run test:e2e
+        run: npm run test:e2e -- --fail-on-flaky-tests
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -128,7 +128,7 @@ jobs:
       # every glyph. The specs skip themselves elsewhere.
       - name: Appearance
         if: '!cancelled()'
-        run: npm run test:visual
+        run: npm run test:visual -- --fail-on-flaky-tests
 
       # On failure this carries the diff images. It also carries the snapshot
       # directory, because a *missing* golden is a failure too and Playwright

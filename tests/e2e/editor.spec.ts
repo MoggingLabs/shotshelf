@@ -27,6 +27,25 @@ async function openEditor(page: import("@playwright/test").Page): Promise<void> 
   await expect(page.locator(".editor__canvas")).toBeVisible();
 }
 
+/**
+ * Wait for the save to actually land.
+ *
+ * Saving is asynchronous — the canvas is composited, `toBlob` encodes it, and
+ * the bytes are read — so reading the call straight after clicking races it.
+ * On a loaded runner that race is a coin flip: one of these tests passed on
+ * retry and the other failed with "the source image could not be decoded",
+ * which is what reading `undefined` bytes looks like from inside the page.
+ */
+async function savedPng(page: import("@playwright/test").Page): Promise<number[]> {
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("save_edit").length))
+    .toBeGreaterThan(0);
+
+  return page.evaluate(
+    () => window.__shotshelf__.callsTo("save_edit").at(-1)?.args["png"] as number[],
+  );
+}
+
 /** Drag on the canvas, in canvas coordinates. */
 async function drag(
   page: import("@playwright/test").Page,
@@ -79,12 +98,12 @@ test("a mark is saved as a new capture, leaving the original alone", async ({ pa
   await drag(page, [30, 25], [170, 95]);
   await page.locator("#editor-save").click();
 
+  const png = await savedPng(page);
   const call = await page.evaluate(() => window.__shotshelf__.callsTo("save_edit").at(-1)?.args);
   expect(call?.["source"]).toBe(FIXTURE.wide);
   // Real PNG bytes, composited in the page rather than re-rendered in Rust.
-  const png = call?.["png"] as number[] | undefined;
-  expect(png?.length).toBeGreaterThan(100);
-  expect(png?.slice(0, 4)).toEqual([0x89, 0x50, 0x4e, 0x47]);
+  expect(png.length).toBeGreaterThan(100);
+  expect(png.slice(0, 4)).toEqual([0x89, 0x50, 0x4e, 0x47]);
 
   // The edit joins the shelf; the capture it came from is still there.
   await expect(page.locator(".tile")).toHaveCount(2);
