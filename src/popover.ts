@@ -20,7 +20,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-import type { Shelf } from "./shelf/index.ts";
+import type { Capture, Shelf } from "./shelf/index.ts";
 
 /** How long the shelf stays up after launch, so a running app looks like one. */
 const LAUNCH_MS = 4000;
@@ -103,7 +103,7 @@ export class Popover {
   }
 
   /** A capture landed. Either it joins what you are looking at, or it pops. */
-  catch(capture: Parameters<Shelf["add"]>[0]): void {
+  catch(capture: Capture): void {
     // Open on purpose? Then don't reshape the window under you — just add it.
     if (this.#opened) {
       this.#shelf.add(capture);

@@ -2,7 +2,7 @@
  * Pure formatting helpers.
  *
  * Split out of the shelf so they can be tested without a DOM or a Tauri
- * runtime — importing `shelf.ts` pulls in the drag plugin and the asset
+ * runtime — importing the shelf pulls in the drag plugin and the asset
  * protocol, neither of which exists under `node --test`.
  */
 

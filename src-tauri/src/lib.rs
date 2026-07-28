@@ -26,6 +26,24 @@ mod window;
 
 use tauri::Manager;
 
+/// How often the derived caches are swept.
+///
+/// Both hold re-derivable copies under the app's own cache directory, and
+/// neither sweep touches anything the shelf presents as a capture.
+const PRUNE_EVERY: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// Sweep the poster and hand-off caches now, and keep doing it.
+fn prune_caches<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            poster::prune_cache(&app);
+            handoff::prune(&app);
+            tokio::time::sleep(PRUNE_EVERY).await;
+        }
+    });
+}
+
 pub fn run() {
     tauri::Builder::default()
         // Two Shotshelves would both watch the same folders, both catch every
@@ -85,10 +103,13 @@ pub fn run() {
             // Watch the OS capture folders + the clipboard. Emits `capture://new`.
             catch::start(app.handle(), &catch::overrides_from_env());
             poster::allow_reading_posters(app.handle());
-            poster::prune_cache(app.handle());
-            // Sized copies are a cache too, and a cache that only grows is a
-            // leak with a nicer name.
-            handoff::prune(app.handle());
+            // Caches are swept on a timer, not once at launch.
+            //
+            // "Prune at startup" is a reasonable cadence for an app you open
+            // and close. This one lives in the tray and is expected to run for
+            // weeks, so within a session it never pruned at all — while the
+            // usage guide said the hand-off cache "keeps the 60 most recent".
+            prune_caches(app.handle());
             // Edits are the user's own work; this only lets the webview show
             // the ones from previous sessions.
             edit::allow_reading_edits(app.handle());

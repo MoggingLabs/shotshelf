@@ -57,7 +57,7 @@ regex = "1"
 
 # Just the semaphore, to keep a burst of tiles from becoming a burst of OCR
 # engines. Tauri already runs on tokio, so this is the runtime already present.
-tokio = { version = "1", default-features = false, features = ["sync"] }
+tokio = { version = "1", default-features = false, features = ["sync", "time"] }
 
 # Rounded window corners, which CSS cannot deliver on its own — see
 # `window::round_corners`. Same version Tauri already depends on, so this only

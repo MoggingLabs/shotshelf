@@ -42,7 +42,7 @@
     "active": true,
     "targets": "all",
     "category": "Utility",
-    "copyright": "Ã‚Â© MoggingLabs",
+    "copyright": "© MoggingLabs",
     "publisher": "MoggingLabs",
     "externalBin": ["binaries/ffmpeg"],
     "shortDescription": "The shelf that catches every capture.",

@@ -113,7 +113,17 @@ pub async fn video_details<R: Runtime>(
     // ffmpeg writes the frame itself. Piping it back through the sidecar's
     // stdout corrupts the JPEG — the bytes come through mangled — so the only
     // thing that crosses that boundary is stderr, which is text by nature.
-    let staged = dir.join(format!("{key:016x}.staging.jpg"));
+    // Named per *operation*, not per recording.
+    //
+    // `video_details` is reachable once per tile and the shelf builds every
+    // tile at once, so two calls for one recording overlap routinely — and a
+    // shared staging name let the second ffmpeg truncate the file the first
+    // had finished, whereupon the first's `rename` published a partial JPEG.
+    // `handoff.rs` documents this exact race and solves it with a nonce; this
+    // module predates that pass and never received it.
+    static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let ticket = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let staged = dir.join(format!("{key:016x}.{ticket}.staging.jpg"));
     let duration_ms = extract_frame(&app, &source, &staged).await;
 
     // Named only once the length is known, so a cache hit never needs a second
@@ -200,7 +210,19 @@ async fn run_ffmpeg<R: Runtime>(
     let source_arg = source.to_string_lossy().into_owned();
     let target_arg = target.to_string_lossy().into_owned();
 
-    let output = app
+    // No more than a few at a time, and never forever.
+    //
+    // OCR next door got both of these — a semaphore of 2 and a 20-second
+    // deadline — and this did not, though it spawns an external process per
+    // tile and the shelf builds every tile at once. A malformed container that
+    // wedges ffmpeg held a task for the life of the app.
+    let _permit = frame_limit()
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|err| err.to_string())?;
+
+    let run = app
         .shell()
         .sidecar("ffmpeg")
         .map_err(|err| err.to_string())?
@@ -220,11 +242,28 @@ async fn run_ffmpeg<R: Runtime>(
             "4",
             &target_arg,
         ])
-        .output()
+        .output();
+
+    let output = tokio::time::timeout(FRAME_TIMEOUT, run)
         .await
+        .map_err(|_| "ffmpeg took too long on this recording".to_owned())?
         .map_err(|err| err.to_string())?;
 
     Ok(parse_duration(&String::from_utf8_lossy(&output.stderr)))
+}
+
+/// How long one frame grab may take before it is given up on.
+const FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// How many recordings may be decoded at once. Small for the same reason the
+/// scan limit is: this is another program's CPU time on a machine someone is
+/// using for something else.
+const FRAME_CONCURRENCY: usize = 2;
+
+fn frame_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
+    static LIMIT: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::OnceLock::new();
+    LIMIT.get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(FRAME_CONCURRENCY)))
 }
 
 fn has_frame(target: &Path) -> bool {

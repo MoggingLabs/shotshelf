@@ -410,21 +410,7 @@ body {
   transform: scale(0.97);
 }
 
-@keyframes tile-land {
-  from {
-    box-shadow: inset 0 0 0 2px var(--accent);
-  }
-  to {
-    box-shadow: inset 0 0 0 1px var(--stroke);
-  }
-}
-
-.tile--new {
-  animation: tile-land 1.4s ease-out;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .tile--new,
   .tile--dragging {
     animation: none;
     transition: none;

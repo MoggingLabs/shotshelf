@@ -44,13 +44,18 @@ pub struct DragSource {
 /// cleared temp folder), and handing the OS a missing path makes for a drag
 /// that silently does nothing.
 ///
-/// `command(async)` rather than a bare command: with export sizing on this
-/// decodes, resizes and re-encodes a full-resolution screenshot, and a plain
-/// `#[tauri::command] pub fn` runs inline on the IPC thread. A multi-select
-/// drag calls it once per capture, so the freeze would land at the exact
-/// moment the user starts dragging. The same applies to the copy below.
-#[tauri::command(async)]
-pub fn prepare_drag<R: Runtime>(
+/// The sizing runs on a blocking worker, not on the async runtime.
+///
+/// With export sizing on, this decodes, resizes with Lanczos3 and re-encodes a
+/// full-resolution screenshot. `#[tauri::command(async)]` on a synchronous
+/// function was reached for first, and it does move the work off the IPC
+/// thread — but onto the runtime that also serves `describe_capture`,
+/// `compare_captures` and `video_details`. A multi-select drag calls this once
+/// per capture concurrently, so ten captures put ten Lanczos3 resizes on the
+/// runtime at once. `spawn_blocking` is where that belongs, and the two
+/// sibling commands that already got it right use it.
+#[tauri::command]
+pub async fn prepare_drag<R: Runtime>(
     app: AppHandle<R>,
     settings: State<'_, SettingsStore>,
     path: String,
@@ -67,10 +72,21 @@ pub fn prepare_drag<R: Runtime>(
         CaptureKind::Video => video_preview(&app)?,
     };
 
+    // Read before the worker starts: `State` does not cross into it.
+    let downscale = settings.get().downscale_exports;
+
     // Only stills are sized; there is no version of this that re-encodes a
     // recording to save a model some pixels.
     let handed_over = match kind {
-        CaptureKind::Image => handoff::file_for(&app, &source, settings.get().downscale_exports),
+        CaptureKind::Image => {
+            let worker_app = app.clone();
+            let for_worker = source.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                handoff::file_for(&worker_app, &for_worker, downscale)
+            })
+            .await
+            .map_err(|err| err.to_string())?
+        }
         CaptureKind::Video => source,
     };
 
@@ -184,8 +200,11 @@ fn scan_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
 }
 
 /// Clipboard fallback, for the apps that will take a paste but not a drop.
-#[tauri::command(async)]
-pub fn copy_capture<R: Runtime>(
+///
+/// Same shape as `prepare_drag`: the decode/resize/encode runs on a blocking
+/// worker rather than on the runtime that serves the shelf's other commands.
+#[tauri::command]
+pub async fn copy_capture<R: Runtime>(
     app: AppHandle<R>,
     sink: State<'_, Arc<CaptureSink>>,
     settings: State<'_, SettingsStore>,
@@ -205,10 +224,18 @@ pub fn copy_capture<R: Runtime>(
     // the marker standing with no write at all, so the next genuine
     // Win+Shift+S is silently swallowed. A capture lost to a failed copy is a
     // far worse outcome than the duplicate the marker exists to prevent.
+    let downscale = settings.get().downscale_exports;
     let payload = match kind {
         CaptureKind::Image => {
-            let handed_over = handoff::file_for(&app, &source, settings.get().downscale_exports);
-            Payload::Pixels(read_capture(&handed_over).map_err(|err| err.to_string())?)
+            let worker_app = app.clone();
+            let for_worker = source.clone();
+            let bytes = tauri::async_runtime::spawn_blocking(move || {
+                let handed_over = handoff::file_for(&worker_app, &for_worker, downscale);
+                read_capture(&handed_over).map_err(|err| err.to_string())
+            })
+            .await
+            .map_err(|err| err.to_string())??;
+            Payload::Pixels(bytes)
         }
         // A recording pastes as a file, not as pixels.
         CaptureKind::Video => Payload::File(file_uri(&source)),

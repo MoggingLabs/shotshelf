@@ -210,14 +210,34 @@ fn merge(
     regions
 }
 
+/// The most a composite may allocate.
+///
+/// The decodes either side of this are already bounded, and that was taken to
+/// mean the command was — but the composite is *larger than both inputs put
+/// together*, and nothing capped it. Two stitched multi-monitor captures, the
+/// case `imaging::load`'s dimension cap exists to allow, produced well over a
+/// gigabyte here.
+const MAX_COMPOSITE_BYTES: u64 = 512 * 1024 * 1024;
+
 /// The two captures side by side, with changed areas outlined on the after.
+///
+/// Returns `None` when the pair would produce a composite past the ceiling.
+/// A refusal the user can act on — crop one and try again — beats an
+/// allocation that takes the app down with it.
 pub fn side_by_side(
     before: &DynamicImage,
     after: &DynamicImage,
     highlights: &[Region],
-) -> DynamicImage {
+) -> Option<DynamicImage> {
     let width = before.width() + GUTTER + after.width();
     let height = before.height().max(after.height());
+
+    // Four bytes per pixel, in `u64` so the multiply cannot wrap.
+    let bytes = u64::from(width) * u64::from(height) * 4;
+    if bytes > MAX_COMPOSITE_BYTES {
+        return None;
+    }
+
     let mut canvas = RgbaImage::from_pixel(width.max(1), height.max(1), BACKGROUND);
 
     blit(&mut canvas, before, 0);
@@ -228,7 +248,7 @@ pub fn side_by_side(
     for region in highlights {
         outline(&mut canvas, *region, offset);
     }
-    canvas
+    Some(canvas)
 }
 
 fn blit(canvas: &mut RgbaImage, image: &DynamicImage, offset_x: u32) {
@@ -402,11 +422,24 @@ mod tests {
     }
 
     #[test]
+    fn a_pair_too_large_to_composite_is_refused_rather_than_allocated() {
+        // The decodes either side are bounded and the composite was not, though
+        // it is larger than both inputs together. Stated against the ceiling so
+        // it does not depend on actually allocating a gigabyte to find out.
+        let wide = MAX_COMPOSITE_BYTES / 4 / 8 + 1;
+        let width = u32::try_from(wide).expect("fits");
+        let before = filled(width, 8, [255, 0, 0, 255]);
+        let after = filled(width, 8, [0, 0, 255, 255]);
+
+        assert!(side_by_side(&before, &after, &[]).is_none());
+    }
+
+    #[test]
     fn side_by_side_holds_both_captures_and_a_gutter() {
         let before = filled(40, 20, [255, 0, 0, 255]);
         let after = filled(30, 25, [0, 0, 255, 255]);
 
-        let sheet = side_by_side(&before, &after, &[]);
+        let sheet = side_by_side(&before, &after, &[]).expect("a small pair fits");
 
         assert_eq!(sheet.width(), 40 + GUTTER + 30);
         assert_eq!(sheet.height(), 25, "as tall as the taller of the two");
@@ -434,7 +467,7 @@ mod tests {
             height: 20,
         };
 
-        let sheet = side_by_side(&before, &after, &[region]);
+        let sheet = side_by_side(&before, &after, &[region]).expect("a small pair fits");
         let offset = 64 + GUTTER;
 
         assert_eq!(sheet.get_pixel(offset + 10, 10), HIGHLIGHT, "edge is drawn");
