@@ -31,7 +31,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # ── Adopted plugins (see prompts/RESEARCH.md) — registered in src/lib.rs ──
-tauri-plugin-fs = "2"                                             # read captures off disk
 tauri-plugin-clipboard = "2"                                      # clipboard images (phase 02)
 tauri-plugin-drag = "2"                                           # native drag-out (phase 04)
 tauri-plugin-shell = "2"                                          # runs the bundled ffmpeg sidecar

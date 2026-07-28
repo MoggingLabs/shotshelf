@@ -1,0 +1,191 @@
+/**
+ * A stand-in for the Tauri runtime, so the real front-end can be driven in a
+ * real browser.
+ *
+ * This is the seam the whole front-end gate rests on. Shotshelf's UI is not
+ * reachable by unit tests — the interesting behaviour is windows resizing,
+ * cards expiring, drags arming, pictures loading — and none of it can be
+ * exercised without something answering `invoke`. Rather than abstract Tauri
+ * behind an interface the app would otherwise not need, this reproduces the
+ * four functions `@tauri-apps/api` actually reaches for:
+ *
+ *   invoke, transformCallback, unregisterCallback, convertFileSrc
+ *
+ * plus the `metadata` that `getCurrentWindow()` reads. Anything the app calls
+ * that is not stubbed here fails loudly rather than resolving to undefined —
+ * a silent stub is how a test passes against a command that no longer exists.
+ *
+ * Injected with `page.addInitScript`, so it is in place before any app module
+ * runs. It is authored as a string-serialisable function for that reason: it
+ * is evaluated in the page, not in the test process.
+ */
+
+/** A command name and the arguments it was called with. */
+interface RecordedCall {
+  cmd: string;
+  args: Record<string, unknown>;
+}
+
+/** The controls a test gets, exposed on `window.__shotshelf__`. */
+interface TestHooks {
+  /** Every `invoke` the app has made, oldest first. */
+  calls(): RecordedCall[];
+  /** Calls for one command only. */
+  callsTo(cmd: string): RecordedCall[];
+  /** Forget the record, so a test can assert on what happens next. */
+  clearCalls(): void;
+  /** Answer a command with a value, or with a rejection. */
+  respond(cmd: string, value: unknown): void;
+  reject(cmd: string, message: string): void;
+  /**
+   * Leave a command in flight, never settling.
+   *
+   * Some of the app's states only exist while a call is outstanding — a native
+   * drag is the important one, since the shelf must not vanish out from under
+   * it — and a stub that resolves immediately skips straight past them.
+   */
+  hang(cmd: string): void;
+  /** Deliver a Tauri event to whatever the app has listening. */
+  emit(event: string, payload: unknown): void;
+  /** How many listeners are attached to an event. */
+  listenerCount(event: string): number;
+}
+
+/**
+ * The surface `@tauri-apps/api` reaches for. Declared rather than imported:
+ * the real one is installed by the Tauri runtime at page load, so as far as
+ * TypeScript is concerned it does not exist until we put it there.
+ */
+interface TauriInternals {
+  invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>;
+  transformCallback(callback: (payload: unknown) => void, once?: boolean): number;
+  unregisterCallback(id: number): void;
+  convertFileSrc(path: string, protocol?: string): string;
+  metadata: {
+    currentWindow: { label: string };
+    currentWebview: { label: string };
+  };
+}
+
+declare global {
+  interface Window {
+    __TAURI_INTERNALS__: TauriInternals;
+    __shotshelf__: TestHooks;
+    /**
+     * Command responses seeded before the app boots, for the ones it reads
+     * during start-up. Declaring them afterwards is too late — the shelf has
+     * already read its limits by the time a test could call `respond`.
+     */
+    __shotshelfStubs__?: Record<string, unknown>;
+  }
+}
+
+/**
+ * Installed into the page. Kept as one self-contained function with no imports
+ * so it can be serialised across to the browser.
+ */
+export function installTauriMock(): void {
+  const calls: { cmd: string; args: Record<string, unknown> }[] = [];
+  const callbacks = new Map<number, (payload: unknown) => void>();
+  const listeners = new Map<string, number[]>();
+  type Response =
+    | { kind: "value"; value: unknown }
+    | { kind: "error"; message: string }
+    | { kind: "pending" };
+  const responses = new Map<string, Response>();
+  let nextCallbackId = 1;
+
+  /**
+   * Defaults for the commands the shelf cannot start without. Everything else
+   * must be declared by the test, so a command the app invents without a test
+   * noticing shows up as a failure rather than as `undefined`.
+   */
+  const defaults: Record<string, unknown> = {
+    "catch_watch_dirs": [],
+    "get_settings": {
+      retentionHours: null,
+      maxItems: 50,
+      hotkey: "CommandOrControl+Shift+S",
+      pinned: [],
+    },
+    "set_pinned": null,
+    "set_capture_count": null,
+    "show_shelf": null,
+    "hide_shelf": null,
+    "forget_video": null,
+    "copy_capture": null,
+    ...(window.__shotshelfStubs__ ?? {}),
+  };
+
+  function invoke(cmd: string, args: Record<string, unknown> = {}): Promise<unknown> {
+    // Event plumbing is part of the runtime, not part of the app's contract,
+    // so it is handled here rather than recorded as an app call.
+    if (cmd === "plugin:event|listen") {
+      const event = args["event"] as string;
+      const id = args["handler"] as number;
+      listeners.set(event, [...(listeners.get(event) ?? []), id]);
+      return Promise.resolve(id);
+    }
+    if (cmd === "plugin:event|unlisten") {
+      const event = args["event"] as string;
+      const id = args["eventId"] as number;
+      listeners.set(event, (listeners.get(event) ?? []).filter((entry) => entry !== id));
+      return Promise.resolve(null);
+    }
+
+    calls.push({ cmd, args });
+
+    const declared = responses.get(cmd);
+    if (declared) {
+      if (declared.kind === "value") return Promise.resolve(declared.value);
+      if (declared.kind === "error") return Promise.reject(new Error(declared.message));
+      return new Promise(() => {});
+    }
+
+    if (cmd in defaults) return Promise.resolve(defaults[cmd]);
+
+    return Promise.reject(
+      new Error(`[harness] no stub for "${cmd}" — declare one with respond() or reject()`),
+    );
+  }
+
+  window.__TAURI_INTERNALS__ = {
+    invoke,
+    transformCallback(callback: (payload: unknown) => void) {
+      const id = nextCallbackId;
+      nextCallbackId += 1;
+      callbacks.set(id, callback);
+      return id;
+    },
+    unregisterCallback(id: number) {
+      callbacks.delete(id);
+    },
+    /**
+     * The real protocol differs per OS. The shape does not matter to a test —
+     * what matters is that it is a URL the harness can serve a real picture
+     * from, so `object-fit`, the blurred wash and load failures all behave as
+     * they do in the app.
+     */
+    convertFileSrc(path: string) {
+      return `/fixtures/${path.split(/[\\/]/).pop() ?? ""}`;
+    },
+    metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
+  };
+
+  window.__shotshelf__ = {
+    calls: () => [...calls],
+    callsTo: (cmd) => calls.filter((call) => call.cmd === cmd),
+    clearCalls: () => {
+      calls.length = 0;
+    },
+    respond: (cmd, value) => responses.set(cmd, { kind: "value", value }),
+    reject: (cmd, message) => responses.set(cmd, { kind: "error", message }),
+    hang: (cmd) => responses.set(cmd, { kind: "pending" }),
+    emit: (event, payload) => {
+      for (const id of listeners.get(event) ?? []) {
+        callbacks.get(id)?.({ event, id, payload });
+      }
+    },
+    listenerCount: (event) => (listeners.get(event) ?? []).length,
+  };
+}

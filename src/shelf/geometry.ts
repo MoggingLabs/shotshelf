@@ -18,8 +18,6 @@ export const CARD_GAP = 9;
 export const COLUMN_PADDING = 24;
 /** Beyond this the column scrolls rather than growing off the screen. */
 export const COLUMN_MAX_CARDS = 5;
-/** Floor for the window height, so an empty column is never a slit. */
-export const MIN_COLUMN_HEIGHT = 80;
 
 /**
  * Window height the column needs for a given number of cards.

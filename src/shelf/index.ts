@@ -22,7 +22,7 @@ import { ShelfStore } from "./store.ts";
 import { type Capture, captureId, type ShelfItem } from "./types.ts";
 import { ShelfView } from "./view/index.ts";
 
-export type { Capture, CaptureKind, ShelfItem } from "./types.ts";
+export type { Capture } from "./types.ts";
 
 /** Which shape the popover is currently in. */
 export type Mode = "browse" | "column";

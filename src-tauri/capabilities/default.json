@@ -9,7 +9,6 @@
     "core:window:allow-hide",
     "core:window:allow-set-focus",
     "core:window:allow-start-dragging",
-    "fs:default",
     "clipboard:read-all",
     "clipboard:monitor-all",
     "clipboard:write-all",

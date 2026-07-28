@@ -25,13 +25,17 @@ export function videoDetails(path: string): Promise<VideoDetails> {
  * Drop a recording's cached poster frame. Advisory: a frame left behind is
  * wasted disk, not a broken shelf, and the cache is pruned at startup anyway.
  */
-export function forgetVideo(path: string): Promise<void> {
-  return invoke<void>("forget_video", { path }).catch(() => undefined);
+export async function forgetVideo(path: string): Promise<void> {
+  try {
+    await invoke("forget_video", { path });
+  } catch {
+    // Advisory by design; see above.
+  }
 }
 
 /** Put a capture on the clipboard. Rejects — the button reports this one. */
-export function copyCapture(path: string, kind: CaptureKind): Promise<void> {
-  return invoke<void>("copy_capture", { path, kind });
+export async function copyCapture(path: string, kind: CaptureKind): Promise<void> {
+  await invoke("copy_capture", { path, kind });
 }
 
 /** Stage a capture for a native drag. Rejects — a failed drag must be visible. */
@@ -43,6 +47,10 @@ export function prepareDrag(path: string, kind: CaptureKind): Promise<DragSource
  * The popover is hidden most of the time, so the tray icon carries the count.
  * Advisory: a stale tooltip is not worth failing a render for.
  */
-export function setCaptureCount(count: number): Promise<void> {
-  return invoke<void>("set_capture_count", { count }).catch(() => undefined);
+export async function setCaptureCount(count: number): Promise<void> {
+  try {
+    await invoke("set_capture_count", { count });
+  } catch {
+    // Advisory by design; see above.
+  }
 }

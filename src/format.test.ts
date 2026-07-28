@@ -50,3 +50,12 @@ test("day keys sort chronologically as plain strings", () => {
   const tenth = dayKey(new Date(2026, 5, 10).getTime());
   assert.ok(ninth < tenth, `${ninth} should sort before ${tenth}`);
 });
+
+test("a day key is the calendar date it says it is", () => {
+  // Ordering assertions alone let a zero-based `getMonth()` through for weeks:
+  // every key was shifted a month early, and since the shift was uniform,
+  // every comparison still passed. Assert the value, not just the relation.
+  assert.equal(dayKey(new Date(2026, 0, 5).getTime()), "2026-01-05", "January is 01, not 00");
+  assert.equal(dayKey(new Date(2026, 10, 5).getTime()), "2026-11-05", "November is 11, not 10");
+  assert.equal(dayKey(new Date(2026, 11, 31).getTime()), "2026-12-31");
+});

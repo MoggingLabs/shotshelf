@@ -62,16 +62,53 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      # Node's own runner, on the pure helpers. Every bug these cover shipped
+      # Correctness rules, not house style: floating promises and unawaited
+      # IPC are the shape of the bugs that have actually shipped here.
+      - name: Lint
+        run: npm run lint
+
+      # "No dead code" is a requirement, so it is enforced rather than
+      # remembered. This has already caught an unused constant, an unused
+      # export, and a plugin that was registered and granted a filesystem
+      # capability while nothing called it.
+      - name: Dead code
+        run: npm run deadcode
+
+      # Node's own runner, on the pure rules. Every bug these cover shipped
       # once: a byte count rendered as "48 B", day keys that sorted December
-      # before June.
-      - name: Test frontend
-        run: npm test
+      # before June, a month index written out zero-based.
+      - name: Unit tests
+        run: npm run test:unit
 
       # Type-checks with `tsc --noEmit` and writes dist/, which the Rust build
       # embeds via `frontendDist` — so this has to run before cargo.
       - name: Build frontend
         run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install chromium --with-deps
+
+      # The real front-end in a real browser, with the Tauri runtime stubbed.
+      # Behaviour on every OS; the deterministic half of the appearance gate
+      # (geometry and computed style) comes with it.
+      - name: Front-end behaviour
+        run: npm run test:e2e
+
+      # Pixel goldens are Linux-only by design: font rasterisation differs
+      # between operating systems, and a golden compared across them fails on
+      # every glyph. The specs skip themselves elsewhere.
+      - name: Appearance
+        run: npm run test:visual
+
+      - name: Upload failed appearance diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.name }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -87,8 +124,8 @@ jobs:
       - name: clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
-      - name: Test
-        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: Build app
         run: cargo build --manifest-path src-tauri/Cargo.toml

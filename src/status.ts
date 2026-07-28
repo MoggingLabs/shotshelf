@@ -25,7 +25,7 @@ export function say(message: string): void {
  * Folders that do not exist are skipped by Rust rather than watched blindly,
  * so this is also how you find out that the folder you expected is missing.
  */
-export function describeWatch(dirs: readonly string[]): string {
+function describeWatch(dirs: readonly string[]): string {
   if (dirs.length === 0) return "Watching the clipboard only";
   return [
     `Watching ${dirs.length} folder${dirs.length === 1 ? "" : "s"} + the clipboard`,

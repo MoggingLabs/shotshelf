@@ -48,10 +48,21 @@ export function dayLabel(ts: number, now: number = Date.now()): string {
   return new Date(ts).toLocaleDateString([], { day: "numeric", month: "long" });
 }
 
-/** Groups captures onto the same day heading. */
+/**
+ * Groups captures onto the same day heading, and orders those headings.
+ *
+ * `YYYY-MM-DD`, so comparing two keys as strings compares them as dates —
+ * which is the whole point, and has been wrong twice. Without zero-padding,
+ * `2026-11-5` sorted before `2026-5-9` and put December above June. And
+ * `getMonth()` is zero-based, so writing it out unadjusted dated every capture
+ * to the month before the one it was taken in.
+ *
+ * Local time, deliberately: captures are grouped by the day *you* took them,
+ * not by the day it was in UTC.
+ */
 export function dayKey(ts: number): string {
   const date = new Date(ts);
-  return `${date.getFullYear()}-${String(date.getMonth()).padStart(2, "0")}-${String(
-    date.getDate(),
-  ).padStart(2, "0")}`;
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
 }

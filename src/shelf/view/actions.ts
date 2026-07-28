@@ -19,7 +19,7 @@ export interface TileHandlers {
   remove(id: string): void;
 }
 
-export function pinLabel(pinned: boolean): string {
+function pinLabel(pinned: boolean): string {
   return pinned
     ? "Pinned — kept until you unpin it"
     : "Pin to keep this past the retention window";
