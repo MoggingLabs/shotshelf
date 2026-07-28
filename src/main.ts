@@ -1,32 +1,27 @@
+/**
+ * Wiring, and only wiring.
+ *
+ * Every rule this app has lives in a module that can be tested on its own —
+ * what the shelf keeps, when the popover is up, what a card looks like. This
+ * file exists to introduce them to each other and to the events coming out of
+ * Rust, and it should stay boring enough that nothing has to be debugged here.
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { icon } from "./icons";
-import { initSettings, settingsOpen } from "./settings";
-import {
-  addCapture,
-  applySettings,
-  columnHeight,
-  columnIsEmpty,
-  holdColumn,
-  isDragging,
-  mountShelf,
-  noteCapture,
-  restorePinned,
-  setMode,
-  type Capture,
-} from "./shelf";
 
-/** How long the shelf stays up after launch, so a running app looks like one. */
-const LAUNCH_MS = 4000;
+import { icon } from "./icons.ts";
+import { Popover } from "./popover.ts";
+import { currentSettings, initSettings, settingsOpen } from "./settings.ts";
+import { Shelf, type Capture } from "./shelf/index.ts";
+import { say, showWatchState } from "./status.ts";
 
 function el<T extends HTMLElement>(selector: string): T {
   const node = document.querySelector<T>(selector);
   if (!node) throw new Error(`Shotshelf: missing element ${selector}`);
   return node;
 }
-
-const shelfWindow = getCurrentWindow();
 
 // Windows rounds the window through DWM at a fixed 8px, so the panel's own
 // radius has to match it there — see `window::round_corners`. The user agent is
@@ -35,8 +30,7 @@ if (navigator.userAgent.includes("Windows")) {
   document.documentElement.dataset["os"] = "windows";
 }
 
-const mark = el<HTMLElement>("#shelf-mark");
-const alert = el<HTMLElement>("#shelf-alert");
+const shelfWindow = getCurrentWindow();
 const root = el<HTMLElement>(".shelf");
 
 const settingsButton = el<HTMLButtonElement>("#shelf-settings");
@@ -44,149 +38,64 @@ const hideButton = el<HTMLButtonElement>("#shelf-hide");
 settingsButton.prepend(icon("settings", 14));
 hideButton.prepend(icon("minus", 14));
 
-mountShelf(el<HTMLElement>("#shelf-items"), el<HTMLElement>("#shelf-count"), () => {
-  // A card aged out. Either the column needs to be shorter, or it is done.
-  if (opened) return;
-  if (columnIsEmpty()) dismiss();
-  else showColumn();
+const shelf = new Shelf(el<HTMLElement>("#shelf-items"), el<HTMLElement>("#shelf-count"), {
+  onColumnChange: () => popover.onColumnChange(),
+  limits: () => currentSettings(),
 });
 
-// ── Popover lifetime ─────────────────────────────────────────────────────
-//
-// Two shapes, two rules:
-//
-// * **column** — a capture landed. A narrow strip sized to just the cards it
-//   is holding, never focused, that empties itself a card at a time and then
-//   drops back into the tray.
-// * **browse** — you asked for it. The full grid, and it stays put while you
-//   work in other windows until you actually close it.
+const popover = new Popover(root, shelf, {
+  // An OS drag steals focus and the settings panel is a deliberate act; a
+  // launch appearance must not vanish out from under either.
+  busy: () => shelf.dragging || settingsOpen(),
+});
 
-let launchTimer: number | undefined;
-/**
- * Whether the popover is open because you asked for it.
- *
- * Distinct from the render mode: the shelf starts in the browse *shape* for
- * its launch appearance, but nobody asked for it, so a capture arriving then
- * should still pop the column.
- */
-let opened = false;
+shelf.start();
+popover.scheduleLaunchDismissal();
 
-/**
- * The window is down. Front-end state only — this must not ask Rust to hide
- * anything, because `hide()` emits `shelf://hidden` and calling back would
- * re-enter it on every emit, the same loop `adoptBrowse` exists to avoid.
- */
-function adoptHidden(): void {
-  window.clearTimeout(launchTimer);
-  opened = false;
-  // Whatever shape it was in, the next capture gets the column.
-  setMode("column");
-}
-
-function dismiss(): void {
-  adoptHidden();
-  void invoke("hide_shelf");
-}
-
-/** Put the column on screen at whatever height its cards need right now. */
-function showColumn(): void {
-  root.dataset["mode"] = "column";
-  void invoke("show_shelf", { focus: false, height: columnHeight() });
-}
-
-/**
- * Rust has already sized, placed, shown and focused the window by the time
- * this runs — all that is left is to render the right shape.
- *
- * It must not call back into `show_shelf`: `open()` emits this event, so doing
- * so re-entered `open()` on every emit and re-opened the window forever, which
- * made every dismissal look broken.
- */
-function adoptBrowse(): void {
-  opened = true;
-  root.dataset["mode"] = "browse";
-  setMode("browse");
-}
+// ── Input ────────────────────────────────────────────────────────────────
 
 // Hovering or focusing the column stops its cards ageing out under the pointer.
-root.addEventListener("pointerenter", () => holdColumn(true));
-root.addEventListener("pointerleave", () => holdColumn(false));
+root.addEventListener("pointerenter", () => shelf.holdColumn(true));
+root.addEventListener("pointerleave", () => shelf.holdColumn(false));
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") dismiss();
+  if (event.key === "Escape") popover.dismiss();
 });
+
+hideButton.addEventListener("click", () => popover.dismiss());
 
 // Note what is deliberately absent: nothing dismisses on focus loss. An opened
 // popover is sticky by design, and the column is never focused in the first
 // place — it is the card timers that end it.
-void shelfWindow.onFocusChanged(({ payload: focused }) => {
-  holdColumn(focused);
-  if (focused) window.clearTimeout(launchTimer);
-});
-
-hideButton.addEventListener("click", dismiss);
+void shelfWindow.onFocusChanged(({ payload: focused }) => popover.onFocusChanged(focused));
 
 if (!import.meta.env.DEV) {
   window.addEventListener("contextmenu", (event) => event.preventDefault());
 }
 
-// ── Captures ─────────────────────────────────────────────────────────────
+// ── Events out of Rust ───────────────────────────────────────────────────
 
-void listen<Capture>("capture://new", ({ payload }) => {
-  // Open on purpose? Then don't reshape the window under you — just add it.
-  if (opened) {
-    addCapture(payload);
-    return;
-  }
+void listen<Capture>("capture://new", ({ payload }) => popover.catch(payload));
 
-  noteCapture(payload);
-  showColumn();
-});
+// Rust shows or hides the window on a tray click, a menu item or the hotkey;
+// these only reshape the front-end to match. Neither may call back into Rust.
+void listen("shelf://opened", () => popover.adoptBrowse());
+void listen("shelf://hidden", () => popover.adoptHidden());
 
-// Shown once at launch, then treated exactly like an empty column.
-launchTimer = window.setTimeout(() => {
-  if (!isDragging() && !settingsOpen()) dismiss();
-}, LAUNCH_MS);
+// ── Start-up ─────────────────────────────────────────────────────────────
 
 // Settings first: the shelf reads its limits from them, and pinned captures
 // have to be back before anything new lands on top.
-void initSettings(() => applySettings())
-  .then((settings) => restorePinned(settings))
+void initSettings(() => shelf.applySettings())
+  .then((settings) => shelf.restorePinned(settings))
   .catch((error: unknown) => {
     console.error("[shotshelf] could not load settings", error);
     say("Settings could not be loaded — running on defaults.");
   });
 
 void invoke<string[]>("catch_watch_dirs")
-  .then((dirs) => {
-    console.info("[shotshelf] watching", dirs);
-    mark.classList.add("shelf__mark--live");
-    mark.title = describeWatch(dirs);
-    if (dirs.length === 0) say("No capture folders found — watching the clipboard only.");
-  })
+  .then((dirs) => showWatchState(dirs))
   .catch((error: unknown) => {
     console.error("[shotshelf] could not read the watch folders", error);
     say("The catch engine is unavailable — no captures will be picked up.");
   });
-
-// Rust shows the window when the tray is clicked or the hotkey fires; this
-// only reshapes the front-end to match.
-void listen("shelf://opened", () => adoptBrowse());
-
-// And the other direction: closing from the tray, its menu or the hotkey hides
-// the window in Rust without the front-end ever hearing about it.
-void listen("shelf://hidden", () => adoptHidden());
-
-/** The alert strip stays out of the way until there is something to say. */
-function say(message: string): void {
-  alert.textContent = message;
-  alert.removeAttribute("hidden");
-}
-
-function describeWatch(dirs: string[]): string {
-  if (dirs.length === 0) return "Watching the clipboard only";
-  return [
-    `Watching ${dirs.length} folder${dirs.length === 1 ? "" : "s"} + the clipboard`,
-    ...dirs,
-  ].join("\n");
-}

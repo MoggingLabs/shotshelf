@@ -7,7 +7,9 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import type { CaptureKind } from "./shelf";
+// The neutral types module, not the shelf itself: the shelf imports this file
+// for `persistPinned`, and pointing back at it would be a cycle.
+import type { CaptureKind } from "./shelf/types.ts";
 
 export interface PinnedItem {
   path: string;

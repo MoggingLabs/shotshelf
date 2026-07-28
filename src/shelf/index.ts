@@ -1,0 +1,261 @@
+/**
+ * The shelf, assembled.
+ *
+ * Everything below is wiring: the store holds captures, the column queue holds
+ * what has just landed, the view turns either into DOM, and this class is the
+ * only thing that knows about all three. Nothing here decides *rules* — those
+ * live in the pure modules, where they can be tested without a browser.
+ *
+ * The one invariant worth stating out loud: `#release` is the single way a
+ * capture leaves. Both routes out — the × and falling off the end of a limit —
+ * have to forget the card and clean up a recording's cached poster frame, and
+ * when that cleanup lived in one caller instead of here, every recording that
+ * aged out leaked its frame forever.
+ */
+
+import { persistPinned, type Settings } from "../settings.ts";
+import { forgetVideo, setCaptureCount } from "./bridge.ts";
+import { ColumnQueue } from "./column.ts";
+import { armDrag, beginDrag } from "./drag.ts";
+import { columnHeight } from "./geometry.ts";
+import { ShelfStore } from "./store.ts";
+import { type Capture, captureId, type ShelfItem } from "./types.ts";
+import { ShelfView } from "./view/index.ts";
+
+export type { Capture, CaptureKind, ShelfItem } from "./types.ts";
+
+/** Which shape the popover is currently in. */
+export type Mode = "browse" | "column";
+
+/** How often expired captures are swept off the shelf. */
+const SWEEP_MS = 15_000;
+/** How often the column checks whether a card's minute is up. */
+const COLUMN_TICK_MS = 1000;
+
+export interface ShelfOptions {
+  /**
+   * Fired when the auto-popup column gains or loses a card, so the window can
+   * be resized or put away.
+   *
+   * A callback rather than a poll: the column is empty almost all the time,
+   * and a timer asking "anything to do?" every second forever is exactly what
+   * a 24/7 tray app should not have.
+   */
+  onColumnChange(): void;
+  /** Current limits. Read on demand so a settings change takes effect at once. */
+  limits(): Pick<Settings, "maxItems" | "retentionHours">;
+}
+
+export class Shelf {
+  readonly #store = new ShelfStore();
+  readonly #column = new ColumnQueue();
+  readonly #view: ShelfView;
+  readonly #options: ShelfOptions;
+
+  #mode: Mode = "browse";
+  /** An OS drag steals focus; the popover must not read that as a dismissal. */
+  #dragging = false;
+  #timers: number[] = [];
+
+  constructor(list: HTMLElement, count: HTMLElement, options: ShelfOptions) {
+    this.#options = options;
+    this.#view = new ShelfView(list, count, {
+      togglePin: (id) => this.#togglePin(id),
+      remove: (id) => this.remove(id),
+      armDrag: (node, item, event) => this.#armDrag(node, item, event),
+    });
+  }
+
+  // ── State the popover asks about ───────────────────────────────────────
+
+  get mode(): Mode {
+    return this.#mode;
+  }
+
+  get dragging(): boolean {
+    return this.#dragging;
+  }
+
+  get columnIsEmpty(): boolean {
+    return this.#column.isEmpty;
+  }
+
+  /** Window height the column needs for what it is holding. */
+  columnHeight(): number {
+    return columnHeight(this.#column.size);
+  }
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────
+
+  start(): void {
+    this.#refresh();
+    this.#timers.push(
+      window.setInterval(() => this.#sweep(), SWEEP_MS),
+      window.setInterval(() => this.#ageColumn(), COLUMN_TICK_MS),
+    );
+  }
+
+  /** Stops the timers. The app never tears the shelf down; tests do. */
+  stop(): void {
+    for (const timer of this.#timers) window.clearInterval(timer);
+    this.#timers = [];
+  }
+
+  // ── Captures arriving ──────────────────────────────────────────────────
+
+  /**
+   * A capture landed while the shelf was not open. It joins the shelf *and*
+   * the column that pops up to show it — different lifetimes on purpose.
+   */
+  note(capture: Capture): void {
+    this.add(capture, { render: false });
+    this.#column.add(captureId(capture));
+    this.#mode = "column";
+    this.#refresh();
+  }
+
+  /** Put a capture on the shelf without disturbing whatever is on screen. */
+  add(capture: Capture, options: { pinned?: boolean; render?: boolean } = {}): void {
+    const added = this.#store.add(capture, { pinned: options.pinned ?? false });
+    if (!added) return;
+
+    this.#enforceLimits();
+    if (options.render ?? true) this.#refresh();
+  }
+
+  /** Put pinned captures back after a restart, oldest first so order survives. */
+  restorePinned(settings: Settings): void {
+    for (const capture of [...settings.pinned].sort((a, b) => a.ts - b.ts)) {
+      this.add(capture, { pinned: true, render: false });
+    }
+    this.#refresh();
+  }
+
+  /** Re-apply limits when the settings change. */
+  applySettings(): void {
+    this.#enforceLimits();
+    this.#sweep();
+    this.#refresh();
+  }
+
+  // ── Captures leaving ───────────────────────────────────────────────────
+
+  /**
+   * Take a capture off the shelf. The file on disk is deliberately untouched:
+   * the shelf is a view of your captures, not their owner.
+   */
+  remove(id: string): void {
+    const removed = this.#store.remove(id);
+    if (!removed) return;
+
+    this.#release(removed);
+    // Taking a card off the shelf takes it out of the popup column too.
+    this.#column.remove(id);
+    this.#refresh();
+    void this.#savePins();
+  }
+
+  /** The single way a capture leaves. Both routes out clean up identically. */
+  #release(item: ShelfItem): void {
+    this.#view.release(item.id);
+    // The poster frame is ours; the recording is not. Only the cache is cleared.
+    if (item.kind === "video") void forgetVideo(item.path);
+  }
+
+  #enforceLimits(): void {
+    for (const evicted of this.#store.trim(this.#options.limits().maxItems)) {
+      this.#release(evicted);
+      this.#column.remove(evicted.id);
+    }
+  }
+
+  /**
+   * Retention only ever takes captures off the shelf. The files stay exactly
+   * where the OS wrote them.
+   */
+  #sweep(): void {
+    const evicted = this.#store.sweep(this.#options.limits().retentionHours);
+    if (evicted.length === 0) return;
+
+    for (const item of evicted) {
+      this.#release(item);
+      this.#column.remove(item.id);
+    }
+    this.#refresh();
+  }
+
+  // ── The auto-popup column ──────────────────────────────────────────────
+
+  setMode(next: Mode): void {
+    if (this.#mode === next) return;
+    this.#mode = next;
+    if (next === "browse") this.#column.clear();
+    this.#refresh();
+  }
+
+  /** Hovering or focusing the column stops its cards ageing out under you. */
+  holdColumn(held: boolean): void {
+    this.#column.hold(held);
+  }
+
+  #ageColumn(): void {
+    if (this.#mode !== "column" || this.#dragging) return;
+    if (!this.#column.expire()) return;
+
+    this.#refresh();
+    this.#options.onColumnChange();
+  }
+
+  // ── Pins ───────────────────────────────────────────────────────────────
+
+  #togglePin(id: string): void {
+    const pinned = this.#store.togglePin(id);
+    if (pinned === undefined) return;
+
+    this.#view.reflectPin(id, pinned);
+    // A newly pinned capture may put the shelf back under its cap.
+    this.#enforceLimits();
+    void this.#savePins();
+  }
+
+  /** Pins are the only shelf state worth surviving a restart. */
+  #savePins(): Promise<void> {
+    return persistPinned(this.#store.pinned());
+  }
+
+  // ── Dragging out ───────────────────────────────────────────────────────
+
+  #armDrag(node: HTMLElement, item: ShelfItem, event: PointerEvent): void {
+    armDrag(node, item, event, (target, capture) => {
+      this.#dragging = true;
+      void beginDrag(target, capture, () => {
+        this.#dragging = false;
+      });
+    });
+  }
+
+  // ── Rendering ──────────────────────────────────────────────────────────
+
+  /** Redraw whichever view is showing and keep the counts in step with it. */
+  #refresh(): void {
+    if (this.#mode === "column") this.#view.renderColumn(this.#columnItems());
+    else this.#view.renderBrowse(this.#store.items());
+
+    this.#view.setCount(this.#store.size);
+    void setCaptureCount(this.#store.size);
+  }
+
+  /**
+   * The captures the column is showing, in column order.
+   *
+   * An id in the queue with nothing behind it on the shelf is not an error —
+   * a capture can be removed while its card is still popped up — so those are
+   * dropped rather than rendered as holes.
+   */
+  #columnItems(): ShelfItem[] {
+    return this.#column
+      .ids()
+      .map((id) => this.#store.find(id))
+      .filter((item): item is ShelfItem => item !== undefined);
+  }
+}
