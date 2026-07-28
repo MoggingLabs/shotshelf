@@ -100,15 +100,21 @@ jobs:
       - name: Appearance
         run: npm run test:visual
 
-      - name: Upload failed appearance diffs
+      # On failure this carries the diff images. It also carries the snapshot
+      # directory, because a *missing* golden is a failure too and Playwright
+      # writes the new image there — which is how the first set of goldens
+      # gets off the Linux runner and into the repository.
+      - name: Upload appearance diffs and goldens
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-${{ matrix.name }}
+          name: appearance-${{ matrix.name }}
           path: |
             playwright-report/
             test-results/
+            tests/visual/**/*.png
           retention-days: 7
+          if-no-files-found: ignore
 
       - uses: dtolnay/rust-toolchain@stable
         with:
