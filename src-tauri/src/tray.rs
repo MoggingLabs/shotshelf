@@ -9,19 +9,6 @@ use tauri::{
 /// Identifies the tray icon so the count can be written back onto it.
 const TRAY_ID: &str = "shotshelf";
 
-/// The positioner only learns where the tray icon is from a tray event, so
-/// until one has fired `Position::TrayCenter` puts the popover in the corner of
-/// the screen instead. This records when it becomes trustworthy.
-///
-/// On Linux it stays false forever: StatusNotifierItem gives the app no click
-/// events at all, so the icon rectangle is never knowable and the popover is
-/// corner-anchored for the whole session.
-static TRAY_LOCATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-pub fn tray_located() -> bool {
-    TRAY_LOCATED.load(std::sync::atomic::Ordering::Relaxed)
-}
-
 use crate::window;
 
 pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
@@ -59,11 +46,9 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         // there even though the icon shows. Everything below is Windows/macOS
         // in practice; Linux drives the shelf from the menu above.
         .on_tray_icon_event(|tray, event| {
-            // Feeds the positioner the tray rectangle, which is the only way it
-            // can place the popover under the icon.
-            tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
-            TRAY_LOCATED.store(true, std::sync::atomic::Ordering::Relaxed);
-
+            // Nothing here needs the icon's rectangle: the shelf rests in the
+            // bottom-right corner of the screen rather than hanging off the
+            // icon, so the click is all this handler wants.
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,

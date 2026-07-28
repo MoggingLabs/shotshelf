@@ -32,7 +32,6 @@ serde_json = "1"
 
 # ── Adopted plugins (see prompts/RESEARCH.md) — registered in src/lib.rs ──
 tauri-plugin-fs = "2"                                             # read captures off disk
-tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }  # edge/tray placement
 tauri-plugin-clipboard = "2"                                      # clipboard images (phase 02)
 tauri-plugin-drag = "2"                                           # native drag-out (phase 04)
 tauri-plugin-shell = "2"                                          # runs the bundled ffmpeg sidecar
@@ -45,3 +44,9 @@ tauri-plugin-single-instance = "2"                                # one shelf, o
 # The debouncer is notify-rs' own, so we don't hand-roll event coalescing.
 notify = "8"
 notify-debouncer-full = "0.7"
+
+# Rounded window corners, which CSS cannot deliver on its own — see
+# `window::round_corners`. Same version Tauri already depends on, so this only
+# turns on an extra feature rather than pulling a second copy of the crate.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }

@@ -46,18 +46,17 @@ rather than shipping unverified. To try it, build from source: install `libwebki
 `npm ci && npm run tauri build`. The tray needs an AppIndicator host — GNOME needs the
 AppIndicator extension; KDE, Xfce and Cinnamon have one already.
 
-Two things work differently there, both imposed by the tray protocol rather than by choice:
-Linux tray icons deliver no click events to the app, so **open the shelf from the icon's menu
-or the hotkey** rather than by clicking the icon; and because the icon's position can't be
-read either, the popover anchors to the top-right of the screen instead of to the icon.
+One thing works differently there, imposed by the tray protocol rather than by choice: Linux
+tray icons deliver no click events to the app, so **open the shelf from the icon's menu or the
+hotkey** rather than by clicking the icon.
 
 ---
 
 ## First run
 
 Shotshelf lives in the tray (Windows, Linux) / menu bar (macOS). It has no taskbar or Dock entry by
-design — the shelf is a **popover that hangs off that icon**, not a window that sits on your
-screen.
+design — the shelf is a **popover that rests in the bottom-right corner of your screen**, just
+clear of the taskbar, not a window that sits open all day.
 
 - **Click the icon**, or press the hotkey, to open it. It closes when you click away or press Esc.
 - **When a capture lands** it peeks for about four seconds and closes itself. It never takes
