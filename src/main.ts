@@ -34,6 +34,7 @@ if (navigator.userAgent.includes("Windows")) {
 const shelfWindow = getCurrentWindow();
 const root = el<HTMLElement>(".shelf");
 
+const compareButton = el<HTMLButtonElement>("#shelf-compare");
 const settingsButton = el<HTMLButtonElement>("#shelf-settings");
 const hideButton = el<HTMLButtonElement>("#shelf-hide");
 settingsButton.prepend(icon("settings", 14));
@@ -41,6 +42,8 @@ hideButton.prepend(icon("minus", 14));
 
 const shelf = new Shelf(el<HTMLElement>("#shelf-items"), el<HTMLElement>("#shelf-count"), {
   onColumnChange: () => popover.onColumnChange(),
+  // A comparison of one capture, or of five, is not a thing.
+  onSelectionChange: (picked) => compareButton.toggleAttribute("hidden", picked !== 2),
   limits: () => currentSettings(),
 });
 
@@ -64,6 +67,13 @@ document.addEventListener("keydown", (event) => {
 });
 
 hideButton.addEventListener("click", () => popover.dismiss());
+
+compareButton.addEventListener("click", () => {
+  void shelf.compare().catch((error: unknown) => {
+    console.error("[shotshelf] could not compare those captures", error);
+    say("Those two captures could not be compared.");
+  });
+});
 
 // Note what is deliberately absent: nothing dismisses on focus loss. An opened
 // popover is sticky by design, and the column is never focused in the first

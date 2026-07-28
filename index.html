@@ -14,6 +14,17 @@
         <span class="shelf__mark" id="shelf-mark" data-tauri-drag-region></span>
         <span class="shelf__title" id="shelf-count" data-tauri-drag-region>Shelf</span>
         <span class="shelf__grow" data-tauri-drag-region></span>
+        <!-- Only earns its place when exactly two captures are picked: a
+             comparison of one thing, or of five, is not a thing. -->
+        <button
+          class="shelf__btn shelf__btn--compare"
+          id="shelf-compare"
+          type="button"
+          title="Compare the two picked captures"
+          hidden
+        >
+          Compare
+        </button>
         <button class="shelf__btn" id="shelf-settings" type="button" title="Settings">
           <span class="sr-only">Settings</span>
         </button>

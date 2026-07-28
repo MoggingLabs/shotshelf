@@ -14,7 +14,7 @@
  */
 
 import { persistPinned, type Settings } from "../settings.ts";
-import { forgetVideo, setCaptureCount } from "./bridge.ts";
+import { compareCaptures, forgetVideo, setCaptureCount } from "./bridge.ts";
 import { ColumnQueue, type HoldReason } from "./column.ts";
 import { armDrag, beginDrag } from "./drag.ts";
 import { columnHeight } from "./geometry.ts";
@@ -43,6 +43,13 @@ export interface ShelfOptions {
    * a 24/7 tray app should not have.
    */
   onColumnChange(): void;
+  /**
+   * How many captures are picked out.
+   *
+   * Reported rather than exposed, so the control that acts on a selection can
+   * show itself without anything outside the shelf holding selection state.
+   */
+  onSelectionChange(picked: number): void;
   /** Current limits. Read on demand so a settings change takes effect at once. */
   limits(): Pick<Settings, "maxItems" | "retentionHours">;
 }
@@ -232,10 +239,35 @@ export class Shelf {
     // start from any card in it.
     else if (!this.#selection.has(id)) this.#selection.only(id);
 
-    this.#view.reflectSelection(new Set(this.#selection.ids()));
+    this.#reflectSelection();
   }
 
-  /** What the shelf is showing, in the order it is showing it. */
+  #reflectSelection(): void {
+    this.#view.reflectSelection(new Set(this.#selection.ids()));
+    this.#options.onSelectionChange(this.#selection.size);
+  }
+
+  /**
+   * Put the two picked captures side by side, with what changed outlined.
+   *
+   * The result is a new capture on the shelf rather than a file written back
+   * over either input — a comparison is a third thing, and the originals are
+   * never touched.
+   *
+   * Order matters and comes from the selection: the first picked is the
+   * before. Comparing an after against a before reads as every change
+   * reversed.
+   */
+  async compare(): Promise<void> {
+    const [before, after] = this.#selection.ids().map((id) => this.#store.find(id));
+    if (!before || !after) return;
+
+    const path = await compareCaptures(before.path, after.path);
+    this.#selection.clear();
+    this.#reflectSelection();
+    // Dated now rather than from either input: it is a capture made now.
+    this.add({ path, kind: "image", ts: Date.now() });
+  }
   #visibleIds(): string[] {
     return this.#mode === "column"
       ? this.#columnItems().map((item) => item.id)
@@ -288,7 +320,7 @@ export class Shelf {
     else this.#view.renderBrowse(this.#store.items());
 
     this.#selection.retain(this.#store.items().map((item) => item.id));
-    this.#view.reflectSelection(new Set(this.#selection.ids()));
+    this.#reflectSelection();
     this.#view.setCount(this.#store.size);
     void setCaptureCount(this.#store.size);
   }

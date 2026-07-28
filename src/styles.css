@@ -29,6 +29,16 @@
   --radius: 8px;
 }
 
+/* `hidden` must actually hide.
+   The UA stylesheet's `[hidden] { display: none }` loses to any author rule
+   that sets `display` — and several here do, so the attribute silently stopped
+   hiding the elements that use it. `!important` is the point rather than a
+   shortcut: this has to beat every `display` in this file, including ones
+   written later. */
+[hidden] {
+  display: none !important;
+}
+
 * {
   box-sizing: border-box;
   -webkit-user-select: none;
@@ -582,4 +592,14 @@ body {
   box-shadow:
     inset 0 0 0 2px var(--accent),
     0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+/* The compare control. Text rather than an icon: it appears and disappears
+   with the selection, and a glyph that comes and goes is a puzzle. */
+.shelf__btn--compare {
+  width: auto;
+  padding: 0 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }

@@ -77,3 +77,13 @@ export function describeCapture(path: string): Promise<Findings> {
 export function textRecognitionAvailable(): Promise<boolean> {
   return invoke<boolean>("text_recognition_available");
 }
+
+/**
+ * Put two captures side by side, with what changed outlined on the second.
+ *
+ * Returns the path of a new file. The originals are untouched — comparison is
+ * a third capture, not an edit of either.
+ */
+export function compareCaptures(before: string, after: string): Promise<string> {
+  return invoke<string>("compare_captures", { before, after });
+}
