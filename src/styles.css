@@ -562,3 +562,12 @@ body {
 .tile__secret[data-kind="privateKey"] {
   background: rgba(190, 18, 60, 0.94);
 }
+
+/* A picked card. Deliberately quiet — several can be picked at once, and an
+   accent ring on four cards at once is louder than the pictures they are
+   there to show. */
+.tile--picked {
+  box-shadow:
+    inset 0 0 0 2px var(--accent),
+    0 4px 14px rgba(0, 0, 0, 0.45);
+}

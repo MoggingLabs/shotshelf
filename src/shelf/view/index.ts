@@ -110,6 +110,17 @@ export class ShelfView {
     this.#list.dataset["empty"] = String(size === 0);
   }
 
+  /**
+   * Mark the picked cards. Applied to live elements rather than by redrawing:
+   * selection changes on every click, and a redraw per click would be a redraw
+   * per click.
+   */
+  reflectSelection(picked: ReadonlySet<string>): void {
+    for (const [id, tile] of this.#tiles) {
+      tile.classList.toggle("tile--picked", picked.has(id));
+    }
+  }
+
   /** Pinning is applied to the live card rather than by rebuilding it. */
   reflectPin(id: string, pinned: boolean): void {
     const tile = this.#tiles.get(id);

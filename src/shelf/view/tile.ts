@@ -20,6 +20,8 @@ import { glyphThumb, imageThumb, replaceThumb, setWash } from "./thumb.ts";
 /** What a tile needs beyond the buttons: starting a native drag. */
 export interface TileCallbacks extends TileHandlers {
   armDrag(node: HTMLElement, item: ShelfItem, event: PointerEvent): void;
+  /** A press landed on the card, with whatever modifiers were held. */
+  pick(id: string, event: PointerEvent): void;
 }
 
 /** The filename only earns its space on hover; the picture is the identity. */
@@ -117,6 +119,7 @@ export function buildTile(item: ShelfItem, callbacks: TileCallbacks): HTMLElemen
   tile.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     if ((event.target as HTMLElement).closest(".tile__action")) return;
+    callbacks.pick(item.id, event);
     callbacks.armDrag(tile, item, event);
   });
 

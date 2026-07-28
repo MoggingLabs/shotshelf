@@ -57,9 +57,15 @@ export function armDrag(
  */
 export async function beginDrag(
   node: HTMLElement,
-  item: ShelfItem,
+  items: readonly ShelfItem[],
   onSettled: () => void,
 ): Promise<void> {
+  const [first] = items;
+  if (!first) {
+    onSettled();
+    return;
+  }
+
   node.classList.add("tile--dragging");
 
   let settled = false;
@@ -71,9 +77,17 @@ export async function beginDrag(
   };
 
   try {
-    const source = await prepareDrag(item.path, item.kind);
+    // Every picked capture, in the order they were picked — a before and an
+    // after are only useful the right way round. Each goes through
+    // `prepare_drag` so each is checked for still being on disk, and so each
+    // gets sized for hand-off if that is turned on.
+    const sources = await Promise.all(items.map((item) => prepareDrag(item.path, item.kind)));
+    const paths = sources.map((source) => source.path);
+    // The cursor carries the first one's preview; there is no OS drag image
+    // for "four files" that is more informative than one of them.
+    const icon = sources[0]?.icon ?? "";
     // Cancelling a drag just resolves with "Cancelled" — nothing to undo.
-    await startDrag({ item: [source.path], icon: source.icon, mode: "copy" }, done);
+    await startDrag({ item: paths, icon, mode: "copy" }, done);
   } catch (error) {
     console.error("[shotshelf] could not drag that capture out", error);
   } finally {

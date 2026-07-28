@@ -18,6 +18,7 @@ import { forgetVideo, setCaptureCount } from "./bridge.ts";
 import { ColumnQueue } from "./column.ts";
 import { armDrag, beginDrag } from "./drag.ts";
 import { columnHeight } from "./geometry.ts";
+import { Selection } from "./selection.ts";
 import { ShelfStore } from "./store.ts";
 import { type Capture, captureId, type ShelfItem } from "./types.ts";
 import { ShelfView } from "./view/index.ts";
@@ -49,6 +50,7 @@ export interface ShelfOptions {
 export class Shelf {
   readonly #store = new ShelfStore();
   readonly #column = new ColumnQueue();
+  readonly #selection = new Selection();
   readonly #view: ShelfView;
   readonly #options: ShelfOptions;
 
@@ -63,6 +65,7 @@ export class Shelf {
       togglePin: (id) => this.#togglePin(id),
       remove: (id) => this.remove(id),
       armDrag: (node, item, event) => this.#armDrag(node, item, event),
+      pick: (id, event) => this.#pick(id, event),
     });
   }
 
@@ -206,6 +209,43 @@ export class Shelf {
     this.#options.onColumnChange();
   }
 
+  // ── Picking captures out ───────────────────────────────────────────────
+
+  /**
+   * A press landed on a card. Modifier keys mean what they mean everywhere:
+   * plain picks one, ctrl/cmd adds or removes, shift extends a range.
+   *
+   * Picking happens on press rather than on click so that a drag starting from
+   * an already-picked card carries the whole selection — waiting for the click
+   * would mean the drag had already begun with the wrong set.
+   */
+  #pick(id: string, event: PointerEvent): void {
+    if (event.shiftKey) this.#selection.extendTo(id, this.#visibleIds());
+    else if (event.ctrlKey || event.metaKey) this.#selection.toggle(id);
+    // Pressing an already-picked card keeps the selection, so a multi-drag can
+    // start from any card in it.
+    else if (!this.#selection.has(id)) this.#selection.only(id);
+
+    this.#view.reflectSelection(new Set(this.#selection.ids()));
+  }
+
+  /** What the shelf is showing, in the order it is showing it. */
+  #visibleIds(): string[] {
+    return this.#mode === "column"
+      ? this.#columnItems().map((item) => item.id)
+      : this.#store.items().map((item) => item.id);
+  }
+
+  /** The captures a drag from `item` should carry. */
+  #dragSet(item: ShelfItem): ShelfItem[] {
+    if (!this.#selection.has(item.id)) return [item];
+
+    return this.#selection
+      .ids()
+      .map((id) => this.#store.find(id))
+      .filter((picked): picked is ShelfItem => picked !== undefined);
+  }
+
   // ── Pins ───────────────────────────────────────────────────────────────
 
   #togglePin(id: string): void {
@@ -228,7 +268,7 @@ export class Shelf {
   #armDrag(node: HTMLElement, item: ShelfItem, event: PointerEvent): void {
     armDrag(node, item, event, (target, capture) => {
       this.#dragging = true;
-      void beginDrag(target, capture, () => {
+      void beginDrag(target, this.#dragSet(capture), () => {
         this.#dragging = false;
       });
     });
@@ -241,6 +281,8 @@ export class Shelf {
     if (this.#mode === "column") this.#view.renderColumn(this.#columnItems());
     else this.#view.renderBrowse(this.#store.items());
 
+    this.#selection.retain(this.#store.items().map((item) => item.id));
+    this.#view.reflectSelection(new Set(this.#selection.ids()));
     this.#view.setCount(this.#store.size);
     void setCaptureCount(this.#store.size);
   }
