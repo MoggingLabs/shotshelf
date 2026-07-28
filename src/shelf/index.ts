@@ -23,6 +23,8 @@ import { ShelfStore } from "./store.ts";
 import { type Capture, captureId, type ShelfItem } from "./types.ts";
 import { ShelfView } from "./view/index.ts";
 import { hidePreview, previewIsOpen, showPreview } from "./view/preview.ts";
+import { closeEditor, editorIsOpen, openEditor, undoEdit } from "../editor/index.ts";
+import { previewShelf } from "./bridge.ts";
 
 export type { Capture } from "./types.ts";
 
@@ -51,6 +53,8 @@ export interface ShelfOptions {
    * show itself without anything outside the shelf holding selection state.
    */
   onSelectionChange(picked: number): void;
+  /** The editor closed, so the window goes back to the browse view. */
+  onEditorClosed(): void;
   /** Current limits. Read on demand so a settings change takes effect at once. */
   limits(): Pick<Settings, "maxItems" | "retentionHours">;
 }
@@ -331,6 +335,46 @@ export class Shelf {
   }
 
   // ── Quick look and the keyboard ────────────────────────────────────────
+
+  /**
+   * Mark up the picked capture.
+   *
+   * Opens on the same window the preview uses — annotating is looking at a
+   * capture closely and then pointing at part of it, which is one view at two
+   * intensities rather than two windows.
+   */
+  editPicked(): void {
+    this.closePreview();
+    const [item] = this.#pickedItems();
+    if (!item) return;
+
+    void openEditor(item, this.#list, {
+      size: (aspect) => previewShelf(aspect),
+      saved: (path) => {
+        // An edit is a capture in its own right, dated now.
+        this.add({ path, kind: "image", ts: Date.now() });
+      },
+      closed: () => this.#options.onEditorClosed(),
+    });
+  }
+
+  get editing(): boolean {
+    return editorIsOpen();
+  }
+
+  /** Back out of the editor. Returns false if it was not open. */
+  closeEditor(): boolean {
+    return closeEditor(this.#list, {
+      size: (aspect) => previewShelf(aspect),
+      saved: () => undefined,
+      closed: () => this.#options.onEditorClosed(),
+    });
+  }
+
+  /** Undo the last mark. Returns false if there was nothing to undo. */
+  undoEdit(): boolean {
+    return undoEdit();
+  }
 
   /** Whether a capture is being shown at readable size. */
   get previewing(): boolean {

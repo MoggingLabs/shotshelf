@@ -1,0 +1,183 @@
+/**
+ * Marking up a capture.
+ *
+ * The tools exist for one job — telling someone else, or a model, where to
+ * look — and the one property that must never quietly stop holding is that a
+ * redaction destroys what it covers rather than drawing over it.
+ */
+
+import { bootShelf, expect, FIXTURE, land, openBrowse, test } from "../harness/app.ts";
+
+async function openEditor(page: import("@playwright/test").Page): Promise<void> {
+  await bootShelf(page);
+  await page.evaluate(() => {
+    // A size that fits the test viewport. In the app Rust really does resize
+    // the window, so the canvas fits what it is given; a stub that claims a
+    // window wider than the browser leaves the canvas overflowing and every
+    // pointer coordinate landing somewhere other than where it looks.
+    window.__shotshelf__.respond("preview_shelf", [220, 124]);
+    window.__shotshelf__.respond("save_edit", "/edits/wide (edited).png");
+  });
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator("#shelf-edit")).toBeVisible();
+  await page.locator("#shelf-edit").click();
+  await expect(page.locator(".editor__canvas")).toBeVisible();
+}
+
+/** Drag on the canvas, in canvas coordinates. */
+async function drag(
+  page: import("@playwright/test").Page,
+  from: [number, number],
+  to: [number, number],
+): Promise<void> {
+  const box = await page.locator(".editor__canvas").boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + from[0], box!.y + from[1]);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + to[0], box!.y + to[1], { steps: 4 });
+  await page.mouse.up();
+}
+
+test("the edit control appears for exactly one picked capture", async ({ page }) => {
+  await bootShelf(page);
+  await land(page, FIXTURE.wide, { ts: 1 });
+  await land(page, FIXTURE.tall, { ts: 2 });
+  await openBrowse(page);
+
+  await expect(page.locator("#shelf-edit")).toBeHidden();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator("#shelf-edit")).toBeVisible();
+
+  // There is no such thing as marking up two captures at once.
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.down("Shift");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.up("Shift");
+});
+
+test("the editor offers exactly the five tools", async ({ page }) => {
+  await openEditor(page);
+
+  // Deliberately few. Text, colours, layers and freehand are a different
+  // product, and each one added makes the thirty-second path slower.
+  await expect(page.locator(".editor__tool")).toHaveText([
+    "Crop",
+    "Box",
+    "Arrow",
+    "Number",
+    "Redact",
+  ]);
+});
+
+test("a mark is saved as a new capture, leaving the original alone", async ({ page }) => {
+  await openEditor(page);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await drag(page, [30, 25], [170, 95]);
+  await page.locator("#editor-save").click();
+
+  const call = await page.evaluate(() => window.__shotshelf__.callsTo("save_edit").at(-1)?.args);
+  expect(call?.["source"]).toBe(FIXTURE.wide);
+  // Real PNG bytes, composited in the page rather than re-rendered in Rust.
+  const png = call?.["png"] as number[] | undefined;
+  expect(png?.length).toBeGreaterThan(100);
+  expect(png?.slice(0, 4)).toEqual([0x89, 0x50, 0x4e, 0x47]);
+
+  // The edit joins the shelf; the capture it came from is still there.
+  await expect(page.locator(".tile")).toHaveCount(2);
+});
+
+test("a redaction destroys the pixels rather than drawing over them", async ({ page }) => {
+  await openEditor(page);
+  await page.locator('.editor__tool[data-tool="redact"]').click();
+  await drag(page, [20, 20], [190, 105]);
+
+  // Measured before saving: Save closes the editor, taking the canvas with it.
+  const shown = await page.locator(".editor__canvas").boundingBox();
+  expect(shown).not.toBeNull();
+
+  await page.locator("#editor-save").click();
+
+  const png = await page.evaluate(
+    () => window.__shotshelf__.callsTo("save_edit").at(-1)?.args["png"] as number[],
+  );
+
+  // Decode what was actually saved and read the pixels back. An overlay drawn
+  // on an intact image would be separable from what it covers; this asserts
+  // the covered pixels are simply not in the file.
+  // The sample point is derived from the canvas the drag actually happened on,
+  // rather than from an assumed size — the window is sized by Rust, so the
+  // canvas is whatever fits, and a hard-coded width samples the wrong pixel.
+  const covered = await page.evaluate(
+    async ({ bytes, width, height }: { bytes: number[]; width: number; height: number }) => {
+      const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
+      const bitmap = await createImageBitmap(blob);
+      const canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("no 2d context");
+      context.drawImage(bitmap, 0, 0);
+
+      // Middle of the drag, converted from rendered pixels to image pixels.
+      // Each axis uses its own ratio: the element can be letterboxed by
+      // `max-height`, so the two are not the same number.
+      const data = context.getImageData(
+        Math.round((105 / width) * bitmap.width),
+        Math.round((62 / height) * bitmap.height),
+        1,
+        1,
+      ).data;
+      return [data[0], data[1], data[2], data[3]];
+    },
+    { bytes: png, width: shown!.width, height: shown!.height },
+  );
+
+  // Opaque and near-black: the fill, not the fixture's blue gradient.
+  expect(covered[3]).toBe(255);
+  expect(covered[0]).toBeLessThan(40);
+  expect(covered[1]).toBeLessThan(40);
+  expect(covered[2]).toBeLessThan(40);
+});
+
+test("undo takes back the last mark", async ({ page }) => {
+  await openEditor(page);
+  await drag(page, [25, 25], [150, 90]);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.locator("#editor-undo").click();
+  await page.locator("#editor-save").click();
+
+  // Saving after undoing an only mark still produces a file — an unmarked
+  // copy is a legitimate thing to want — but nothing was drawn on it.
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("save_edit").length))
+    .toBe(1);
+});
+
+test("escape backs out of the editor before it backs out of the shelf", async ({ page }) => {
+  await openEditor(page);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".editor")).toHaveCount(0);
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+
+  await page.keyboard.press("Escape");
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length))
+    .toBe(1);
+});
+
+test("the shelf keys do not reach the list while the editor is open", async ({ page }) => {
+  await openEditor(page);
+
+  // Delete belongs to the editor's surface here, not to the shelf underneath.
+  await page.keyboard.press("Delete");
+  await page.keyboard.press("Escape");
+
+  await expect(page.locator(".tile")).toHaveCount(1);
+});

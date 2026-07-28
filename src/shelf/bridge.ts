@@ -102,3 +102,15 @@ export function previewShelf(aspect: number): Promise<[number, number]> {
 export async function closePreview(): Promise<void> {
   await invoke("close_preview");
 }
+
+/**
+ * Save an annotated copy of a capture.
+ *
+ * The bytes are a PNG the editor composited on a canvas — which is what makes
+ * a redaction real rather than decorative: the marks are drawn *into* the
+ * pixels before encoding, so what Rust receives has no layer to peel off.
+ * Returns the new capture's path.
+ */
+export function saveEdit(source: string, png: Uint8Array): Promise<string> {
+  return invoke<string>("save_edit", { source, png: [...png] });
+}

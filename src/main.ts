@@ -35,6 +35,7 @@ const shelfWindow = getCurrentWindow();
 const root = el<HTMLElement>(".shelf");
 
 const compareButton = el<HTMLButtonElement>("#shelf-compare");
+const editButton = el<HTMLButtonElement>("#shelf-edit");
 const settingsButton = el<HTMLButtonElement>("#shelf-settings");
 const hideButton = el<HTMLButtonElement>("#shelf-hide");
 settingsButton.prepend(icon("settings", 14));
@@ -43,7 +44,12 @@ hideButton.prepend(icon("minus", 14));
 const shelf = new Shelf(el<HTMLElement>("#shelf-items"), el<HTMLElement>("#shelf-count"), {
   onColumnChange: () => popover.onColumnChange(),
   // A comparison of one capture, or of five, is not a thing.
-  onSelectionChange: (picked) => compareButton.toggleAttribute("hidden", picked !== 2),
+  onSelectionChange: (picked) => {
+    compareButton.toggleAttribute("hidden", picked !== 2);
+    editButton.toggleAttribute("hidden", picked !== 1);
+  },
+  // The editor grew the window; putting it away returns to the browse view.
+  onEditorClosed: () => popover.adoptBrowse(),
   limits: () => currentSettings(),
 });
 
@@ -74,13 +80,30 @@ document.addEventListener("keydown", (event) => {
   if (event.defaultPrevented) return;
   // Typing a hotkey into the settings panel is not a shelf command.
   if (settingsOpen() && event.key !== "Escape") return;
+  // While marking up a capture, the arrows and Delete belong to the editor's
+  // own surface, not to the list underneath it.
+  if (shelf.editing && !["Escape", "z"].includes(event.key)) return;
 
   switch (event.key) {
     case "Escape":
-      // Escape backs out one level at a time: out of a preview first, and
-      // only then out of the shelf. One key that closes two things at once is
-      // one key that loses your place.
+      // Escape backs out one level at a time: the editor, then a preview,
+      // then the shelf. One key that closes two things at once is one key
+      // that loses your place.
+      if (shelf.closeEditor()) return;
       if (!shelf.closePreview()) popover.dismiss();
+      return;
+
+    case "z":
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (!shelf.editing) return;
+      event.preventDefault();
+      shelf.undoEdit();
+      return;
+
+    case "e":
+      if (shelf.editing) return;
+      event.preventDefault();
+      shelf.editPicked();
       return;
 
     case "ArrowDown":
@@ -111,6 +134,8 @@ document.addEventListener("keydown", (event) => {
 });
 
 hideButton.addEventListener("click", () => popover.dismiss());
+
+editButton.addEventListener("click", () => shelf.editPicked());
 
 compareButton.addEventListener("click", () => {
   void shelf.compare().catch((error: unknown) => {

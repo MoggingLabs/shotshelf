@@ -14,6 +14,16 @@
         <span class="shelf__mark" id="shelf-mark" data-tauri-drag-region></span>
         <span class="shelf__title" id="shelf-count" data-tauri-drag-region>Shelf</span>
         <span class="shelf__grow" data-tauri-drag-region></span>
+        <!-- Marking up needs exactly one capture to mark up. -->
+        <button
+          class="shelf__btn shelf__btn--compare"
+          id="shelf-edit"
+          type="button"
+          title="Mark up this capture"
+          hidden
+        >
+          Edit
+        </button>
         <!-- Only earns its place when exactly two captures are picked: a
              comparison of one thing, or of five, is not a thing. -->
         <button

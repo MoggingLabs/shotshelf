@@ -37,6 +37,7 @@ pub fn run() {
             share::copy_capture,
             share::describe_capture,
             edit::compare_captures,
+            edit::save_edit,
             enrich::ocr::text_recognition_available,
             poster::video_details,
             poster::forget_video,

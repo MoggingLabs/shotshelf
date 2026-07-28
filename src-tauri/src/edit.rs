@@ -43,6 +43,32 @@ pub async fn compare_captures<R: Runtime>(
     write_edit(&app, &name_source, "compared", &bytes)
 }
 
+/// Save an annotated copy of a capture.
+///
+/// The bytes are a PNG the front-end has already composited on a canvas, which
+/// is what makes redaction real rather than decorative: the marks are drawn
+/// *into* the pixels before encoding, so what arrives here has no layer to
+/// peel off and no original underneath. Rust's job is to put it somewhere and
+/// tell the shelf where — deliberately not to re-render it, because a second
+/// renderer would drift from the one the user was looking at.
+///
+/// The source is taken only for its name, so the result is recognisable in a
+/// folder. It is never read, and never written to.
+#[tauri::command]
+pub async fn save_edit<R: Runtime>(
+    app: AppHandle<R>,
+    source: String,
+    png: Vec<u8>,
+) -> Result<String, String> {
+    let source = existing(&source)?;
+
+    if png.is_empty() {
+        return Err("the edited capture came back empty".to_owned());
+    }
+
+    write_edit(&app, &source, "edited", &png)
+}
+
 /// Write a new capture beside the shelf's own data, and hand back its path.
 ///
 /// The name keeps the original's stem so the result is recognisable in a

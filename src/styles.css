@@ -631,3 +631,82 @@ body {
   /* Fitted, never cropped: the whole point is to see what is actually there. */
   object-fit: contain;
 }
+
+/* ── The editor ────────────────────────────────────────────────────────── */
+/* The same window the preview uses, with tools. Marking up is looking at a
+   capture closely and then pointing at part of it — one view, two intensities,
+   rather than a second window with its own lifecycle to get right. */
+
+.shelf__items[data-editing="true"] {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* An overlay pinned to its container rather than a block that flows inside it.
+   Flowed, the canvas could be laid out wider than the panel and centred into
+   negative coordinates, which put both the picture and the toolbar partly
+   off-screen — and an off-screen toolbar is an editor with no way out. */
+.editor {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(8, 9, 14, 0.96);
+}
+
+.editor__bar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border-bottom: 1px solid var(--stroke);
+}
+
+.editor__tool,
+.editor__action {
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: default;
+}
+
+.editor__tool:hover,
+.editor__action:hover {
+  background: var(--raised-hover);
+}
+
+.editor__tool--on {
+  background: var(--accent);
+  color: #fff;
+}
+
+#editor-save {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* The picture area: whatever is left once the toolbar has taken its height.
+   `min-height: 0` is load-bearing — without it a flex child refuses to shrink
+   below its content and pushes the canvas out of the panel. */
+.editor__stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.editor__canvas {
+  max-width: 100%;
+  max-height: 100%;
+  /* A checkerboard would imply transparency the capture may not have. */
+  background: #05060a;
+}

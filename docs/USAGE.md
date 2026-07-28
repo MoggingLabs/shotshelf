@@ -100,6 +100,9 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
 - **Quick look** — press space to open the picked capture at readable size, and
   space or Esc to close it. A 225px card is enough to recognise a screenshot and
   not enough to read one, which is the whole reason this exists.
+- **Edit** — pick one capture and a button appears in the title strip. Five tools,
+  and only five: **crop**, **box**, **arrow**, **number** and **redact**. Saving
+  produces a new capture on the shelf; the one you marked up is untouched.
 - **Compare** — pick exactly two and a Compare button appears in the title strip. It puts them
   side by side with whatever changed outlined, as a single new capture you can drag out. The
   first one you picked is the "before".
@@ -128,6 +131,22 @@ Recordings show a frame from themselves plus a badge with their length and size.
 can't be decoded the tile keeps a film icon and still drags out fine.
 
 Captures are grouped by day, so "the one from yesterday" stays findable once the shelf fills up.
+
+### Marking a capture up
+
+The tools exist for one job: telling someone else — or a model — *where to look*.
+
+**Numbers** are the one worth calling out. A numbered marker makes the picture
+referenceable from a sentence: "why is 2 misaligned but 3 fine?" An anonymous
+box cannot be talked about that way.
+
+**Redact destroys.** The pixels under a redaction are replaced before the file is
+written, so what comes out has nothing underneath it and nothing to peel off.
+That is different from drawing a black rectangle in most annotation tools, where
+the original survives in the file. If you are removing a key or an address before
+sending a screenshot, this is the tool to use.
+
+`Ctrl+Z` undoes the last mark, including a crop. `Esc` leaves without saving.
 
 ### The credential warning
 
