@@ -85,7 +85,7 @@ export async function openEditor(
 ): Promise<void> {
   if (item.kind === "video") return;
 
-  await overlay.show(async (stale) => {
+  const mounted = await overlay.show(async (stale) => {
     const picture = new Image();
     // The asset protocol sends CORS headers, so this keeps the canvas
     // untainted — without it `toBlob` throws and nothing can be saved.
@@ -143,9 +143,11 @@ export async function openEditor(
     return built;
   });
 
-  // Mounted, or refused. Either way the canvas can only be sized once the
-  // overlay owns it.
-  if (overlay.live) {
+  // Only if *this* call mounted. Asking `overlay.live` instead meant a
+  // refused open bound pointer handlers to the editor already on screen — a
+  // second listener on the same canvas, so one drag committed two marks and
+  // one undo took back half of it.
+  if (mounted) {
     fit();
     bindPointer();
     render();

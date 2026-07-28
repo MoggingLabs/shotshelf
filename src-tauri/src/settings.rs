@@ -174,9 +174,10 @@ fn strip_bom(raw: &str) -> &str {
 /// `fs::write` truncates and then writes, so a crash or a full disk between
 /// the two leaves a truncated file — which `load` correctly degrades to
 /// defaults, silently costing the user every pin. This is the one file whose
-/// loss is visible, and it was the only one in the crate written without
-/// staging: `handoff.rs` and `poster.rs` both stage-then-rename and both
-/// explain why.
+/// loss is visible: `handoff.rs` and `poster.rs` both stage-then-rename and
+/// both explain why, and this one did not. (`clipboard.rs` and the drag
+/// preview in `share.rs` still write directly — the first is guarded by a
+/// single writer thread and a grace window, the second is an idempotent icon.)
 fn write(path: &PathBuf, settings: &Settings) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -227,6 +228,77 @@ fn sanitise(mut settings: Settings) -> Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pin(path: &str) -> PinnedItem {
+        PinnedItem {
+            path: path.to_owned(),
+            kind: CaptureKind::Image,
+            ts: 0,
+        }
+    }
+
+    /// An absolute path that is absolute on the platform running the test.
+    fn somewhere(name: &str) -> String {
+        if cfg!(windows) {
+            format!(r"C:\Users\someone\Pictures\{name}")
+        } else {
+            format!("/home/someone/Pictures/{name}")
+        }
+    }
+
+    #[test]
+    fn a_relative_pinned_path_is_never_written_to_disk() {
+        // Pinned paths arrive from the webview and are read back at the next
+        // launch, so an unchecked one outlives the session that produced it.
+        // Both write paths have to drop it — `set_pinned`, and `sanitise`,
+        // because the settings payload carries `pinned` too. The check landed
+        // in one of them first and nothing noticed.
+        let keep = somewhere("keep.png");
+        let cleaned = sanitise(Settings {
+            pinned: vec![pin("Pictures/relative.png"), pin(&keep)],
+            ..Settings::default()
+        });
+
+        assert_eq!(cleaned.pinned.len(), 1, "the relative path was dropped");
+        assert_eq!(cleaned.pinned[0].path, keep);
+    }
+
+    #[test]
+    fn the_pinned_list_cannot_grow_without_bound() {
+        let keep = somewhere("a.png");
+        let cleaned = sanitise(Settings {
+            pinned: (0..MAX_PINNED + 50).map(|_| pin(&keep)).collect(),
+            ..Settings::default()
+        });
+
+        assert_eq!(cleaned.pinned.len(), MAX_PINNED);
+    }
+
+    #[test]
+    fn settings_are_written_whole_or_not_at_all() {
+        // Staged and renamed, so the file is either the old one or the new
+        // one. `fs::write` truncates first, and `load` degrades a truncated
+        // file to defaults — silently costing the user every pin.
+        let dir = std::env::temp_dir().join("shotshelf-settings-atomic-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("settings.json");
+
+        write(&path, &Settings::default()).expect("first write");
+        let before = std::fs::read_to_string(&path).expect("readable");
+        write(&path, &Settings::default()).expect("second write");
+
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("still readable"),
+            before
+        );
+        assert!(
+            !dir.join("settings.json.part").exists(),
+            "the staging file is not left behind",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn the_defaults_are_the_ones_the_front_end_starts_on() {

@@ -90,7 +90,9 @@ declare global {
      *
      * A value of `{ __rejects__: "why" }` makes the command reject instead of
      * resolve, which is the whole reason a start-up failure is expressible at
-     * all from out here.
+     * all from out here. `{ __rejectsTimes__: n, then: value }` fails n times
+     * and then succeeds — a transient race rather than a permanent one, which
+     * is what the settings retry exists for.
      */
     __shotshelfStubs__?: Record<string, unknown>;
   }
@@ -198,6 +200,18 @@ export function installTauriMock(): void {
       // affect had already been answered from the defaults above.
       if (typeof seeded === "object" && seeded !== null && "__rejects__" in seeded) {
         return Promise.reject(new Error(String(seeded.__rejects__)));
+      }
+      // Fails the first N times and then succeeds, which is what a start-up
+      // race actually looks like: `get_settings` losing to Rust's setup hook
+      // and winning on the retry. Without this the retry could only be tested
+      // by its absence, so shortening it to a single attempt changed nothing.
+      if (typeof seeded === "object" && seeded !== null && "__rejectsTimes__" in seeded) {
+        const flaky = seeded as { __rejectsTimes__: number; then: unknown };
+        if (flaky.__rejectsTimes__ > 0) {
+          flaky.__rejectsTimes__ -= 1;
+          return Promise.reject(new Error("state not managed"));
+        }
+        return Promise.resolve(flaky.then);
       }
       return Promise.resolve(seeded);
     }

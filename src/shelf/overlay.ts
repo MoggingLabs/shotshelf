@@ -77,9 +77,15 @@ export class Overlay<T> {
    * while in flight, the browse window is handed back — unless the reason was
    * the window going away, in which case restoring it would put an
    * always-on-top window the user just dismissed back on screen.
+   *
+   * Returns whether **this call** mounted something. Callers cannot ask `live`
+   * instead: after a refusal that is the surface someone else put up, and
+   * treating it as your own is how the editor bound its pointer handlers to an
+   * existing canvas a second time — after which one drag committed two marks
+   * and one undo took back half of it.
    */
-  async show(build: (stale: () => boolean) => Promise<T | undefined>): Promise<void> {
-    if (this.isOpen) return;
+  async show(build: (stale: () => boolean) => Promise<T | undefined>): Promise<boolean> {
+    if (this.isOpen) return false;
 
     this.#opening = true;
     this.#abandoned = false;
@@ -94,9 +100,10 @@ export class Overlay<T> {
         // flipped by `discard()` from outside this frame, which narrowing does
         // not model — it concluded the branch was dead.
         if (!this.#wasAbandoned()) this.#restore();
-        return;
+        return false;
       }
       this.#live = built;
+      return built !== undefined;
     } finally {
       // Only the open that owns the ticket may clear the flag. Clearing it
       // unconditionally meant a superseded open's `finally` — which runs

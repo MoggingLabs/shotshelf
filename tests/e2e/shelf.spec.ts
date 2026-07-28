@@ -253,3 +253,44 @@ test("a pin is not saved when the stored settings could never be read", async ({
   await expect(page.locator(".tile--pinned")).toHaveCount(1);
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("set_pinned").length)).toBe(0);
 });
+
+test("pins come back when the settings read loses a start-up race and wins the retry", async ({
+  page,
+}) => {
+  // The other half of the pin-loss fix. `get_settings` can lose to Rust's
+  // setup hook, and the point of retrying is that the *transient* case
+  // recovers — pins restored, writes allowed. Only the permanent case was
+  // covered, so shortening the retry to a single attempt changed nothing.
+  await page.addInitScript(() => {
+    window.__shotshelfStubs__ = {
+      get_settings: {
+        __rejectsTimes__: 2,
+        then: {
+          retentionHours: null,
+          maxItems: 50,
+          hotkey: "CommandOrControl+Shift+S",
+          downscaleExports: false,
+          pinned: [{ path: "/captures/tall.png", kind: "image", ts: 1 }],
+        },
+      },
+    };
+  });
+  await bootShelf(page);
+  await openBrowse(page);
+
+  // The pin that was on disk is back, which it never is when the read fails.
+  await expect(page.locator(".tile")).toHaveCount(1);
+  // And no settings failure was reported — the harness's own "no capture
+  // folders" line is on this strip in every test, so the assertion has to be
+  // about the message rather than about the strip.
+  await expect(page.locator("#shelf-alert")).not.toHaveText(/Settings could not be loaded/);
+
+  // And writing is allowed again, because the settings were genuinely read.
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+  await land(page, FIXTURE.wide, { ts: 2 });
+  await openBrowse(page);
+  await page.locator(".tile").first().locator(".tile__action").first().click();
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("set_pinned").length))
+    .toBeGreaterThan(0);
+});

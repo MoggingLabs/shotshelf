@@ -672,6 +672,16 @@ test("the edit control is out of reach while the editor is open", async ({ page 
   await page.evaluate(() => document.querySelector<HTMLButtonElement>("#shelf-edit")?.click());
   await expect(page.locator(".editor")).toHaveCount(1);
   expect(await inkAt(page, 30, 25)).toEqual(marked);
+
+  // And the refused open left no trace on the editor that survived. Keying
+  // the post-mount work off "is anything live" rather than "did *this* call
+  // mount" bound a second set of pointer handlers to the same canvas, after
+  // which one drag committed two marks and one undo took back half of it.
+  const clean = await inkAt(page, 55, 55);
+  await drag(page, [55, 55], [120, 85]);
+  expect(await inkAt(page, 55, 55)).not.toEqual(clean);
+  await page.locator("#editor-undo").click();
+  expect(await inkAt(page, 55, 55)).toEqual(clean);
 });
 
 test("a save still in flight cannot tear down a later editor", async ({ page }) => {

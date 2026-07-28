@@ -163,3 +163,21 @@ test("work started after an open can tell which surface it belongs to", async ()
 
   assert.equal(overlay.stale(savingThis), true, "the save is for the old one");
 });
+
+test("a refused show reports that it mounted nothing", async () => {
+  // The caller must not key its post-mount work off `live`: after a refusal
+  // that is someone else's surface. The editor did exactly that and bound a
+  // second set of pointer handlers to the canvas already on screen, after
+  // which one drag committed two marks.
+  const { overlay } = tracked();
+
+  assert.equal(await overlay.show(() => Promise.resolve("first")), true);
+  assert.equal(await overlay.show(() => Promise.resolve("second")), false);
+  assert.equal(overlay.live, "first");
+});
+
+test("a build that declines to mount reports false", async () => {
+  const { overlay } = tracked();
+  assert.equal(await overlay.show(() => Promise.resolve(undefined)), false);
+  assert.equal(overlay.isOpen, false);
+});
