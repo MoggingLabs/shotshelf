@@ -28,10 +28,18 @@ const READ_RETRY: Duration = Duration::from_millis(80);
 
 /// Win+PrtSc saves a PNG *and* copies it to the clipboard, so one screenshot
 /// reaches both watchers. Hold every clipboard image back long enough for the
-/// folder watcher to finish (debounce + settle is roughly 750 ms), then drop
-/// this copy if the same screenshot already arrived as a file — the file has a
-/// real name and a real path, and this is only an echo of it.
-const ECHO_GRACE: Duration = Duration::from_millis(1500);
+/// folder watcher to finish, then drop this copy if the same screenshot already
+/// arrived as a file — the file has a real name and a real path, and this is
+/// only an echo of it.
+///
+/// Twice `folders::SLOWEST_IMAGE`, rather than a hand-chosen 1500 ms under a
+/// comment restating that module's timings as "roughly 750 ms". Those timings
+/// are three constants private to `folders.rs`; nothing joined them to this
+/// one, so raising any of them would have silently shelved every Win+PrtSc
+/// twice and left an unprunable duplicate PNG behind. The factor of two is the
+/// decision that belongs here — the number it multiplies belongs there.
+const ECHO_GRACE: Duration =
+    Duration::from_millis(super::folders::SLOWEST_IMAGE.as_millis() as u64 * 2);
 const ECHO_WINDOW: Duration = Duration::from_secs(4);
 
 pub fn start<R: Runtime>(app: &AppHandle<R>, sink: Arc<CaptureSink>) {

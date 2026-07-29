@@ -100,7 +100,12 @@ pub fn set_capture_count<R: Runtime>(app: AppHandle<R>, count: usize) {
     // in `init` — which on Linux left two `let icon` bindings, the first
     // shadowed and unread, and `-D warnings` refuses that. The Linux CI leg
     // could not compile, and the local gate could not see it.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    // The crate's idiom for "the GTK platform": everything that is not Windows or
+    // macOS. `catch/paths.rs`, `enrich/foreground.rs`, `enrich/ocr.rs`,
+    // `share.rs` and `window.rs` all spell it this way; enumerating macOS and
+    // Linux was the one site that did not, and it silently dropped the capture
+    // count on any other Unix `tray-icon` builds for.
+    #[cfg(not(target_os = "windows"))]
     let _ = tray.set_title(if count == 0 {
         None
     } else {

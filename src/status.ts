@@ -66,11 +66,8 @@ function describeWatch(dirs: readonly string[]): string {
  * worse option — it made an unchecked capture look identical to a checked one.
  */
 export function noteScanUnavailable(): void {
-  const mark = maybeEl<HTMLElement>("#shelf-mark");
-  if (!mark) return;
-  mark.title = `${mark.title}
-
-Captures are not checked for credentials on this platform.`;
+  scanned = false;
+  paint();
 }
 
 /**
@@ -90,7 +87,8 @@ Captures are not checked for credentials on this platform.`;
  */
 export function showWatchState(dirs: readonly string[]): void {
   console.info("[shotshelf] watching", dirs);
-  setMark(dirs.length > 0, describeWatch(dirs));
+  watch = { live: dirs.length > 0, said: describeWatch(dirs) };
+  paint();
 
   if (dirs.length === 0) {
     // Not "captures will not be picked up": the clipboard watcher is started
@@ -110,13 +108,42 @@ export function showWatchState(dirs: readonly string[]): void {
  * `showWatchState` was only ever called from `.then`.
  */
 export function noteWatchUnavailable(): void {
-  setMark(false, "Shotshelf could not reach its catch engine.");
+  watch = { live: false, said: "Shotshelf could not reach its catch engine." };
+  paint();
 }
 
-/** The one place the indicator's state is set, so the two callers agree. */
-function setMark(live: boolean, title: string): void {
+/**
+ * What the indicator knows. The tooltip is derived from this and never edited
+ * in place.
+ *
+ * Appending to `mark.title` made the element itself the store, and an element
+ * cannot be appended to twice safely: `setMark` overwrote the whole attribute,
+ * so whichever of the two wrote last won. It happened to be correct only
+ * because `main.ts` sequenced the watch report in `.then`/`.catch` and the scan
+ * note in the trailing `.finally` — an ordering contract written in neither
+ * function. Calling `showWatchState` a second time, which re-reading the watch
+ * list after a settings change would do, silently erased the credential note.
+ *
+ * `undefined` means not yet known, which is different from `false`.
+ */
+let watch: { live: boolean; said: string } | undefined;
+let scanned: boolean | undefined;
+
+/**
+ * The one place the indicator is written — genuinely, this time.
+ *
+ * Every caller sets state and asks for a repaint, so the order they run in
+ * cannot change the result.
+ */
+function paint(): void {
   const mark = maybeEl<HTMLElement>("#shelf-mark");
   if (!mark) return;
-  mark.classList.toggle("shelf__mark--live", live);
-  mark.title = title;
+
+  mark.classList.toggle("shelf__mark--live", watch?.live === true);
+  mark.title = [
+    watch?.said,
+    scanned === false ? "Captures are not checked for credentials on this platform." : undefined,
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n\n");
 }

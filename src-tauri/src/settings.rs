@@ -232,6 +232,26 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
     // hand — the next write of `settings.json` omits `pinned` anyway, because
     // `persist` blanks it.
     let mut current = current;
+
+    // An unreadable local file is not the same as an absent one, and treating
+    // them alike is what made the fallback wrong.
+    //
+    // Absent means an upgrade: there is no newer copy, so the preferences file
+    // is the only copy and reading it is correct. Unreadable means there *is* a
+    // newer copy and we cannot read it — the preferences file then holds
+    // whatever was there before the split, which is stale by definition, and
+    // presenting it as the current pins is a lie that looks like working
+    // software. Worse, the next `persist_local` writes that stale list back as
+    // if the user had chosen it.
+    //
+    // So this flag is the difference between "restore nothing and say so" and
+    // "migrate". A test asserted the no-fallback rule before this existed and
+    // could not have failed: its roaming fixture had no pins either way.
+    let unreadable = pins
+        .as_ref()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .is_some_and(|raw| read_local_state(strip_bom(&raw)).is_err());
+
     let local = pins
         .as_ref()
         .and_then(|path| std::fs::read_to_string(path).ok())
@@ -273,8 +293,15 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
             }
         });
 
-    if let Some(state) = local {
-        current.pinned = state.pinned;
+    match local {
+        Some(state) => current.pinned = state.pinned,
+        // Explicitly emptied rather than left holding the preferences file's
+        // copy: "your pins could not be read" is the honest state, and it is
+        // what the warning above has just told the log.
+        None if unreadable => current.pinned = Vec::new(),
+        // Absent: the migration path, and `current.pinned` is already whatever
+        // the preferences file carried.
+        None => {}
     }
     let last_capture = local_watermark(&pins);
 
@@ -664,9 +691,14 @@ mod tests {
 
     #[test]
     fn a_corrupt_pins_file_costs_the_pins_but_not_the_settings() {
-        // And it must not silently fall back to the roaming file, which
-        // `persist` has been blanking since the split — that would look like
-        // "you had no pins" rather than "your pins could not be read".
+        // And it must not silently fall back to the roaming file — that would
+        // show a pre-split copy, stale by definition, as if it were current,
+        // and the next write would store it as the user's choice.
+        //
+        // The roaming fixture below carries a pin *on purpose*. It used to be
+        // `Settings::default()`, whose `pinned` is empty, so the assertion held
+        // whether or not the fallback happened — it named the rule and could
+        // not test it. The fallback did happen.
         let dir = workspace("corrupt");
         let roaming = dir.join("settings.json");
         let local = dir.join("pinned.json");
@@ -675,6 +707,11 @@ mod tests {
             &roaming,
             serde_json::to_string(&Settings {
                 max_items: 77,
+                pinned: vec![PinnedItem {
+                    path: "/from/before/the/split.png".into(),
+                    kind: CaptureKind::Image,
+                    ts: 1,
+                }],
                 ..Settings::default()
             })
             .expect("serialises"),
@@ -684,7 +721,10 @@ mod tests {
 
         let store = load_from(Some(roaming), Some(local.clone()));
 
-        assert!(store.get().pinned.is_empty());
+        assert!(
+            store.get().pinned.is_empty(),
+            "an unreadable local file fell back to the stale roaming copy",
+        );
         assert_eq!(store.get().max_items, 77, "preferences are unaffected");
 
         // The unreadable file survives a session that writes.

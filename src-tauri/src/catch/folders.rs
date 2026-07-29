@@ -30,6 +30,24 @@ const DEBOUNCE: Duration = Duration::from_millis(400);
 const SETTLE_TICK: Duration = Duration::from_millis(350);
 /// Screenshots are written in one go, so one unchanged size is enough.
 const IMAGE_STABLE_TICKS: u32 = 1;
+
+/// The longest this watcher can take to report a screenshot it has seen.
+///
+/// Derived, because someone else needs it and a second hand-written copy is a
+/// number that goes stale in silence. `clipboard.rs` holds every clipboard
+/// image back for a multiple of this so a Win+PrtSc — which saves a PNG *and*
+/// copies it — is shelved once rather than twice; its constant used to be a
+/// hand-chosen 1500 ms with a comment saying "debounce + settle is roughly
+/// 750 ms", computed by hand from three constants private to this module.
+///
+/// Raising `SETTLE_TICK`, or `IMAGE_STABLE_TICKS` from one to two — the same
+/// edit `VIDEO_STABLE_TICKS` below already documents wanting — would have left
+/// this watcher finishing *after* the clipboard grace expired, and every
+/// Win+PrtSc would have shelved two copies plus an unpruned PNG. Nothing joined
+/// them and no test could see it. Now the edit moves both.
+pub(super) const SLOWEST_IMAGE: Duration = Duration::from_millis(
+    DEBOUNCE.as_millis() as u64 + SETTLE_TICK.as_millis() as u64 * IMAGE_STABLE_TICKS as u64,
+);
 /// Recordings grow while they record; require a real pause before believing it.
 ///
 /// This has to outlast an encoder *stalling*, not just writing slowly. ffmpeg
