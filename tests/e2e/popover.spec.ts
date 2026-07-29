@@ -267,3 +267,28 @@ test("a window the user restored does not put itself away", async ({ page }) => 
 
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
 });
+
+test("removing the last card of a peeked column puts the window away", async ({ page }) => {
+  // `onColumnChange` had one call site, inside the expiry tick, behind
+  // `if (!expire()) return;` — and `expire` on an empty queue returns false. So
+  // the × emptied the column and told nobody, and `dismiss` was never reached.
+  //
+  // In the peeked shape that is unrecoverable: the window is never focused so
+  // Escape cannot reach it, and the title strip with the hide button is
+  // `display: none` there. What is left is a frameless always-on-top blank
+  // panel the front end cannot take down.
+  await page.clock.install();
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.locator(".tile").hover();
+  await page.locator(".tile__action--remove").click();
+
+  await expect(page.locator(".tile")).toHaveCount(0);
+  // Immediately, not polled. The launch dismissal fires four seconds in, and a
+  // poll waits long enough to catch it — so a polled assertion passed with this
+  // fix reverted and was measuring the wrong timer entirely.
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(1);
+});

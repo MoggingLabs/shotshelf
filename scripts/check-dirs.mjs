@@ -90,14 +90,23 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
   const normalised = file.replaceAll("\\", "/");
   const source = readFileSync(file, "utf8");
 
-  if (normalised === OWNER) continue;
+  // The owner is exempt from the *root-resolution* rules only.
+  //
+  // This used to `continue` past every check, so the directory-grant rule
+  // below could not see `dirs.rs` at all — and a reviewer added an
+  // `allow_directory` to `dirs::cache` that this script, clippy, knip and the
+  // whole gate accepted, while the success line claimed no module outside the
+  // three named ones opens a directory. `dirs.rs` resolves roots by design;
+  // it has no business granting one to the webview.
+  const resolvesRootsByDesign = normalised === OWNER;
+
 
   // A method call, `.app_data_dir(`, not the bare name. Prose mentions these —
   // `dirs.rs`'s header explains why the roaming ones are what they are — and a
   // check that fires on its own documentation is a check that gets suppressed.
   // This one caught `dirs.rs` on its first run for exactly that.
   for (const owned of OWNED) {
-    if (source.includes(`.${owned}(`)) {
+    if (!resolvesRootsByDesign && source.includes(`.${owned}(`)) {
       problems.push(
         `  ${normalised}: resolves \`${owned}()\` itself. ` +
           `Go through \`dirs::preferences\`, \`dirs::local\` or \`dirs::cache\` — ` +
@@ -106,7 +115,7 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
     }
   }
 
-  if (source.includes(BASE_DIRECTORY)) {
+  if (!resolvesRootsByDesign && source.includes(BASE_DIRECTORY)) {
     problems.push(
       `  ${normalised}: uses \`${BASE_DIRECTORY}…\`, which resolves a root ` +
         `without naming it. Go through \`dirs\`.`,
@@ -148,7 +157,7 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
     );
   }
 
-  if (normalised !== ROAMING_CALLER && source.includes(ROAMING)) {
+  if (!resolvesRootsByDesign && normalised !== ROAMING_CALLER && source.includes(ROAMING)) {
     problems.push(
       `  ${normalised}: calls \`${ROAMING}\`, which is the **roaming** profile. ` +
         `Only \`${ROAMING_CALLER}\` may, and only for settings — nothing naming ` +

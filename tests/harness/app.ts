@@ -31,6 +31,21 @@ const WINDOW_EVENTS = {
   deliberate: windowEvents.deliberate,
 };
 
+/**
+ * The two events the *app* listens for, as opposed to the two the mock emits.
+ *
+ * Read here for the same reason, and it was the half the join missed: the Rust
+ * test pinned `capture://new` and `update://available` against the fixture, and
+ * nothing pinned the fixture against TypeScript. Renaming the Rust constant
+ * *and* the fixture together passed the whole gate — while in the real app Rust
+ * would emit one name and `main.ts` would listen for another, so no capture
+ * would ever reach the shelf. Silent and total.
+ *
+ * `land` and every spec that emits one now go through these.
+ */
+export const CAPTURE_EVENT = windowEvents.capture;
+export const UPDATE_EVENT = windowEvents.update;
+
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 
 /** Fixture captures, in the shapes that have broken thumbnails before. */
@@ -146,7 +161,10 @@ export async function land(
   file: string,
   options: { ts?: number; kind?: "image" | "video" } = {},
 ): Promise<void> {
-  await page.evaluate((payload) => window.__shotshelf__.emit("capture://new", payload), capture(file, options));
+  await page.evaluate(
+    ([event, payload]) => window.__shotshelf__.emit(event, payload),
+    [CAPTURE_EVENT, capture(file, options)] as const,
+  );
 }
 
 /**

@@ -16,6 +16,8 @@ import {
   land,
   openBrowse,
   test,
+  CAPTURE_EVENT,
+  UPDATE_EVENT,
 } from "../harness/app.ts";
 import engineStarting from "../fixtures/engine-starting.json" with { type: "json" };
 
@@ -282,13 +284,14 @@ async function cardHeight(page: import("@playwright/test").Page): Promise<number
 
 test("a card is labelled with what was in front when it was taken", async ({ page }) => {
   await bootShelf(page);
-  await page.evaluate(() =>
-    window.__shotshelf__.emit("capture://new", {
+  await page.evaluate((event) =>
+    window.__shotshelf__.emit(event, {
       path: "/captures/wide.png",
       kind: "image",
       ts: 1,
       context: { app: "Code", title: "auth.ts", label: "Code — auth.ts" },
     }),
+    CAPTURE_EVENT,
   );
 
   // A capture is named after the clock, which identifies it to a filesystem
@@ -528,7 +531,7 @@ test("a shelf the user dismissed is not put back by an alert", async ({ page }) 
   await page.evaluate(() => window.__shotshelf__.clearCalls());
 
   // The app's own update notice, which needs no failure to reach.
-  await page.evaluate(() => window.__shotshelf__.emit("update://available", "0.3.0"));
+  await page.evaluate((event) => window.__shotshelf__.emit(event, "0.3.0"), UPDATE_EVENT);
   await expect(page.locator("#shelf-alert")).toContainText("0.3.0");
 
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("show_shelf").length)).toBe(0);

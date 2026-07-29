@@ -13,7 +13,15 @@
 
 import { CARD_GAP, CARD_HEIGHT, COLUMN_PADDING } from "../../src/shelf/geometry.ts";
 import { SECRET_KINDS } from "../../src/shelf/types.ts";
-import { bootShelf, expect, FIXTURE, land, openBrowse, test } from "../harness/app.ts";
+import {
+  bootShelf,
+  expect,
+  FIXTURE,
+  land,
+  openBrowse,
+  test,
+  UPDATE_EVENT,
+} from "../harness/app.ts";
 
 /** The card width, which `geometry.ts` states in prose rather than as a value. */
 const CARD_WIDTH = 199;
@@ -208,7 +216,7 @@ test("a failure is readable in the peeked column, where the failures happen", as
   // Through a real `say()` path — the app's own update notice — rather than by
   // un-hiding the element by hand. Setting the attribute directly would test
   // the CSS against a state the app never produces.
-  await page.evaluate(() => window.__shotshelf__.emit("update://available", "0.3.0"));
+  await page.evaluate((event) => window.__shotshelf__.emit(event, "0.3.0"), UPDATE_EVENT);
 
   await expect(page.locator("#shelf-alert")).toBeVisible();
   await expect(page.locator("#shelf-alert")).toContainText("0.3.0");

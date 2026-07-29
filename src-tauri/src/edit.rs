@@ -372,7 +372,13 @@ mod tests {
                 .expect("a target always has a name")
                 .to_string_lossy()
                 .into_owned();
-            for forbidden in [":", "/", "\\", ".."] {
+            // Separators only. `..` is not the danger — traversal needs a
+            // separator, and a name with none cannot leave the directory it is
+            // joined to. Asserting `..` as well was wrong off Windows, where
+            // `C:\dir\..\..\evil.png` is a single file name whose dots
+            // `safe_stem` legitimately keeps; `handoff.rs`'s twin turned two CI
+            // legs red for exactly that.
+            for forbidden in [":", "/", "\\"] {
                 assert!(
                     !name.contains(forbidden),
                     "{hostile} produced the name {name:?}, which still carries {forbidden:?}",

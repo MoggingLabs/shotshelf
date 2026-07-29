@@ -21,9 +21,14 @@
 //! `cache` (re-derivable). `scripts/check-dirs.mjs` is what keeps it that way,
 //! and `clippy.toml` refuses the underlying calls anywhere else.
 
-// The one module allowed to resolve a root — that is the whole point of it, and
-// `clippy.toml` refuses these calls everywhere else.
-#![allow(clippy::disallowed_methods)]
+// No blanket `#![allow(clippy::disallowed_methods)]` here.
+//
+// This module is allowed to resolve a root — that is the whole point of it —
+// but a file-scope allowance covers *every* entry in `clippy.toml`, including
+// `Scope::allow_directory`, which this module has no business calling. A
+// reviewer put a directory grant in `dirs::cache` and the whole gate accepted
+// it: the script skipped this file outright and the allowance below covered
+// the rest. Each root resolver now carries its own, at the call.
 
 use std::path::PathBuf;
 
@@ -35,10 +40,12 @@ use tauri::{AppHandle, Manager, Runtime};
 /// can be worked out again from the captures, which is what makes
 /// `cache::prune` acceptable at all.
 pub fn cache<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<PathBuf, String> {
-    under(
-        app.path().app_cache_dir().map_err(|err| err.to_string())?,
-        name,
-    )
+    // On the statement, not the function. A function-scope allowance covers the
+    // whole body — including a `Scope::allow_directory` this module must never
+    // call, which is exactly what a reviewer planted here and clippy accepted.
+    #[allow(clippy::disallowed_methods)]
+    let root = app.path().app_cache_dir().map_err(|err| err.to_string())?;
+    under(root, name)
 }
 
 /// The **preferences** root, created if absent.
@@ -62,10 +69,9 @@ pub fn cache<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<PathBuf, Stri
 /// that the right root was chosen. `settings.rs::persist`
 /// blanks `pinned` before serialising for that reason, and a test asserts it.
 pub fn preferences<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    under(
-        app.path().app_config_dir().map_err(|err| err.to_string())?,
-        "",
-    )
+    #[allow(clippy::disallowed_methods)]
+    let root = app.path().app_config_dir().map_err(|err| err.to_string())?;
+    under(root, "")
 }
 
 /// A named directory under the app's **local data** root, created if absent.
@@ -77,12 +83,12 @@ pub fn preferences<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
 ///
 /// An empty `name` gives the root itself.
 pub fn local<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<PathBuf, String> {
-    under(
-        app.path()
-            .app_local_data_dir()
-            .map_err(|err| err.to_string())?,
-        name,
-    )
+    #[allow(clippy::disallowed_methods)]
+    let root = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|err| err.to_string())?;
+    under(root, name)
 }
 
 fn under(root: PathBuf, name: &str) -> Result<PathBuf, String> {

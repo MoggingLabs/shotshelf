@@ -226,7 +226,7 @@ export class Shelf {
 
     this.#release(removed);
     // Taking a card off the shelf takes it out of the popup column too.
-    this.#column.remove(id);
+    this.#dropFromColumn(id);
     this.#refresh();
     void this.#savePins();
   }
@@ -252,12 +252,33 @@ export class Shelf {
     if (item.kind === "video") void forgetVideo(item.path);
   }
 
+  /**
+   * Take a card out of the popup column, and say so if that emptied it.
+   *
+   * `onColumnChange` had one call site — inside `#ageColumn`, behind
+   * `if (!this.#column.expire()) return;` — and `expire` on an already-empty
+   * queue returns `false`. So the three routes that pull a card out directly
+   * (the ×, the item cap, the retention sweep) emptied the column and told
+   * nobody, and `Popover.dismiss` was never reached.
+   *
+   * In the peeked column that is unrecoverable: the window is never focused, so
+   * Escape cannot reach it, and the title strip carrying the hide button is
+   * `display: none` in that shape. Removing the last card left a frameless,
+   * always-on-top blank panel the front end could not take down — against the
+   * column's own promise that it "empties itself a card at a time and then
+   * drops back into the tray".
+   */
+  #dropFromColumn(id: string): void {
+    this.#column.remove(id);
+    if (this.#column.isEmpty) this.#options.onColumnChange();
+  }
+
   /** `true` if anything was evicted, which is the caller's cue to refresh. */
   #enforceLimits(): boolean {
     let evictedAny = false;
     for (const evicted of this.#store.trim(this.#options.limits().maxItems)) {
       this.#release(evicted);
-      this.#column.remove(evicted.id);
+      this.#dropFromColumn(evicted.id);
       evictedAny = true;
     }
     return evictedAny;
@@ -273,7 +294,7 @@ export class Shelf {
 
     for (const item of evicted) {
       this.#release(item);
-      this.#column.remove(item.id);
+      this.#dropFromColumn(item.id);
     }
     this.#refresh();
   }
@@ -671,8 +692,18 @@ export class Shelf {
    */
   #savePins(): Promise<void> {
     return persistPinned(this.#store.pinned()).catch((error: unknown) => {
-      this.#options.onProblem("That pin could not be saved. It will not survive a restart.");
-      throw error instanceof Error ? error : new Error(String(error));
+      // Reported, not rethrown. Both callers are `void this.#savePins()`, and
+      // there is no `unhandledrejection` handler anywhere, so rethrowing made
+      // every failed write an unhandled rejection on top of the message —
+      // including in the spec that drives this path. `onProblem` has already
+      // done what the caller would have done with it.
+      //
+      // "The pinned list", not "that pin": `remove` saves the list too, so a ×
+      // on an unpinned capture reached this and reported a pin nobody touched.
+      console.error("[shotshelf] could not save pinned captures", error);
+      this.#options.onProblem(
+        "The pinned list could not be saved. Pins may not survive a restart.",
+      );
     });
   }
 

@@ -240,9 +240,21 @@ mod tests {
             // platform. Containment alone is inert off Windows: `D:evil` is not
             // a drive prefix and `\server\share` is not a UNC path on macOS or
             // Linux, so `join` does not truncate and the path cannot leave the
-            // directory whatever `handoff_name` returns. Two of the three CI
-            // legs were running a fixture that could not fail.
-            for forbidden in [":", "/", "\\", ".."] {
+            // directory whatever this returns.
+            //
+            // **Separators only, not `..`.** The first version of this asserted
+            // no `..` either, and that is wrong in a way that only shows off
+            // Windows: on Unix `C:\dir\..\..\evil.png` is a single file name,
+            // so `file_stem` keeps the dots and `safe_stem` — which replaces
+            // separators, not dots — leaves them. It turned two of the three CI
+            // legs red, in the commit whose message was "two of three CI legs
+            // ran an inert fixture".
+            //
+            // And `..` on its own is not the danger. Traversal needs a
+            // separator; a name with none cannot leave the directory it is
+            // joined to, whatever dots it contains. Asserting the separators are
+            // gone *is* asserting containment, on every platform.
+            for forbidden in [":", "/", "\\"] {
                 assert!(
                     !name.contains(forbidden),
                     "{hostile} produced the name {name:?}, which still carries {forbidden:?}",

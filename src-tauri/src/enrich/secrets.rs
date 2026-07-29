@@ -220,9 +220,16 @@ const MAX_FINDINGS: usize = 50;
 pub fn scan(text: &str) -> Vec<Finding> {
     let mut findings: Vec<Finding> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    // Byte ranges already reported, so one credential is not counted twice by
-    // two patterns that both match it.
-    let mut covered: Vec<std::ops::Range<usize>> = Vec::new();
+    // Which bytes of the text a finding already covers, so one credential is
+    // not counted twice by two patterns that both match it.
+    //
+    // A byte map rather than a list of ranges. The list version scanned every
+    // recorded range per hit, which is quadratic in the number of matches — the
+    // same trap the `seen` set two lines up exists to avoid, and the
+    // wall-of-text test caught it. This is one byte per byte of recognised
+    // text, checked and marked in time proportional to the match, so the whole
+    // pass stays linear.
+    let mut covered = vec![false; text.len()];
 
     for pattern in PATTERNS.iter() {
         for hit in pattern.regex.find_iter(text) {
@@ -259,12 +266,22 @@ pub fn scan(text: &str) -> Vec<Finding> {
             // worst-first, so the more specific rule claims the range and the
             // vaguer one yields — which is also the finding worth showing.
             let range = hit.range();
-            let overlaps = covered
-                .iter()
-                .any(|taken| range.start < taken.end && taken.start < range.end);
+            if covered[range.clone()].iter().any(|taken| *taken) {
+                continue;
+            }
+            // Claimed before the `seen` check, not after it.
+            //
+            // These were one `&&` guard with the push inside, which
+            // short-circuits: a *second* printing of the same token was dropped
+            // by `seen` and so never recorded its range, leaving that stretch of
+            // text unclaimed. The Assignment pattern then matched over it,
+            // overlapped nothing, and was pushed — so a token printed twice on
+            // one screen, once bare and once as `GH_TOKEN=…`, still produced two
+            // findings and a `2` badge. The guarding test used a single
+            // occurrence, which is the one case the overlap check could see.
+            covered[range].fill(true);
 
-            if !overlaps && seen.insert(hit.as_str().to_owned()) {
-                covered.push(range);
+            if seen.insert(hit.as_str().to_owned()) {
                 findings.push(finding);
             }
         }
@@ -787,6 +804,21 @@ and again: {token}
             findings[0].kind,
             SecretKind::ServiceToken,
             "the more specific rule wins, and is the one worth showing",
+        );
+
+        // The same token printed twice, once bare and once as an assignment.
+        //
+        // This is the case the single-occurrence fixture above could not reach:
+        // the second bare hit was deduped by `seen` and so never claimed its
+        // range, leaving the Assignment pattern free to match over it.
+        let twice = scan(
+            "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8
+             export GH_TOKEN=ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+        );
+        assert_eq!(
+            twice.len(),
+            1,
+            "one credential, however many times it appears"
         );
 
         // And two genuinely different credentials on one screen still count two.
