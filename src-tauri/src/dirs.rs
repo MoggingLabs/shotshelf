@@ -16,8 +16,14 @@
 //! pins file, the log, saved edits and clipboard captures, the last of which
 //! are the only copy that exists.
 //!
-//! `app_data_dir` is used nowhere in this crate, and `scripts/check-dirs.mjs`
-//! is what keeps it that way.
+//! Three roots, and every one of them is resolved here: `preferences` (roaming
+//! — settings only), `local` (never roaming — anything naming a capture) and
+//! `cache` (re-derivable). `scripts/check-dirs.mjs` is what keeps it that way,
+//! and `clippy.toml` refuses the underlying calls anywhere else.
+
+// The one module allowed to resolve a root — that is the whole point of it, and
+// `clippy.toml` refuses these calls everywhere else.
+#![allow(clippy::disallowed_methods)]
 
 use std::path::PathBuf;
 
@@ -32,6 +38,28 @@ pub fn cache<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<PathBuf, Stri
     under(
         app.path().app_cache_dir().map_err(|err| err.to_string())?,
         name,
+    )
+}
+
+/// The **preferences** root, created if absent.
+///
+/// The one place roaming is acceptable, and the only place: a hotkey and an
+/// item cap are settings a person would want to follow them between machines.
+///
+/// On Windows `app_config_dir()` and `app_data_dir()` resolve to **the same
+/// directory** — `dirs` maps both to `known_folder_roaming_app_data` — so this
+/// is the roaming profile under a different name. That is exactly why it lives
+/// here rather than being called wherever it is needed: the rule is not "avoid
+/// one function", it is "know which root you are in and what may go in it".
+/// A gate that forbade only the `app_data_dir` spelling reported success on a
+/// tree calling `app_config_dir` for the same directory.
+///
+/// **Nothing that names a capture may be written here.** `settings.rs::persist`
+/// blanks `pinned` before serialising for that reason, and a test asserts it.
+pub fn preferences<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    under(
+        app.path().app_config_dir().map_err(|err| err.to_string())?,
+        "",
     )
 }
 

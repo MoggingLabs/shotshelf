@@ -1,10 +1,23 @@
 /**
  * The shelf, assembled.
  *
- * Everything below is wiring: the store holds captures, the column queue holds
- * what has just landed, the view turns either into DOM, and this class is the
- * only thing that knows about all three. Nothing here decides *rules* — those
- * live in the pure modules, where they can be tested without a browser.
+ * Mostly wiring: the store holds captures, the column queue holds what has just
+ * landed, the view turns either into DOM, and this class is the only thing that
+ * knows about all three.
+ *
+ * It is not *only* wiring, and the header used to claim it was. What is decided
+ * here is the handful of rules that need two of those collaborators at once and
+ * cannot be stated without both — what a modifier key means for a selection,
+ * which captures a drag from a given card carries, what "the next one down"
+ * means, and when a comparison is offered. Those are gated through the browser
+ * suite, which is the only place they are reachable.
+ *
+ * Rules that need *neither* the DOM nor the store belong in the pure modules
+ * and are tested without a browser — `selection.ts` for what a selection is and
+ * the order it hands over in, `store.ts` for what the shelf keeps, `column.ts`
+ * for what ages out, `geometry.ts` for how tall the column is. `inHandoverOrder`
+ * moved there for exactly that reason: a comparison depends on it, and here it
+ * could only be reached by driving a browser.
  *
  * The one invariant worth stating out loud: `#release` is the single way a
  * capture leaves. Both routes out — the × and falling off the end of a limit —
@@ -31,7 +44,7 @@ import {
 import { ColumnQueue, type HoldReason } from "./column.ts";
 import { armDrag, beginDrag } from "./drag.ts";
 import { columnHeight } from "./geometry.ts";
-import { Selection } from "./selection.ts";
+import { inHandoverOrder, Selection } from "./selection.ts";
 import { ShelfStore } from "./store.ts";
 import { type Capture, captureId, isEditable, type ShelfItem } from "./types.ts";
 import { ShelfView } from "./view/index.ts";
@@ -370,26 +383,16 @@ export class Shelf {
     return [...this.#view.visibleOrder()];
   }
 
-  /**
-   * The picked captures, oldest first.
-   *
-   * One defined order, used by everything that acts on a selection.
-   * `Selection.ids()` cannot provide it: a ctrl-click appends, so it yields
-   * click order, while a shift-range rebuilds the set in the order the shelf
-   * is showing — which is newest-first. Anything reading that order directly
-   * therefore handed a before/after pair over backwards for one gesture and
-   * correctly for the other, which is a bug that looks like working software.
-   *
-   * Capture time is the answer under both gestures. The path breaks ties so
-   * two captures sharing a millisecond — legal, since identity is `ts:path` —
-   * cannot fall back to the ordering this exists to avoid.
-   */
+  /** The picked captures, oldest first. */
   #pickedItems(): ShelfItem[] {
-    return this.#selection
-      .ids()
-      .map((id) => this.#store.find(id))
-      .filter((picked): picked is ShelfItem => picked !== undefined)
-      .sort((a, b) => a.ts - b.ts || a.path.localeCompare(b.path));
+    // The ordering rule itself lives in `selection.ts`, where it is pure and
+    // testable without a browser — see `inHandoverOrder`.
+    return inHandoverOrder(
+      this.#selection
+        .ids()
+        .map((id) => this.#store.find(id))
+        .filter((picked): picked is ShelfItem => picked !== undefined),
+    );
   }
 
   /** The captures a drag from `item` should carry. */

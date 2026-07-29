@@ -153,8 +153,9 @@ pub(super) fn capture_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
 /// capture. It grows until the user clears it, and the usage guide says so
 /// plainly in the uninstall section.
 fn write_capture<R: Runtime>(app: &AppHandle<R>, bytes: &[u8]) -> Result<PathBuf, String> {
+    // `dirs::local` creates it; saying so again here made the contract
+    // unreadable from the call site.
     let dir = capture_dir(app).ok_or("no app data directory")?;
-    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
 
     let path = dir.join(format!("clipboard-{}.png", now_ms()));
     std::fs::write(&path, bytes).map_err(|err| err.to_string())?;

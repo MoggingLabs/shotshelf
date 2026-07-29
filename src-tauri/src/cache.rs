@@ -1,4 +1,5 @@
-//! Keeping a derived-data cache from growing without bound.
+//! Two things every derived-data cache here needs: a way to age out, and a way
+//! to say which version of which capture an entry belongs to.
 //!
 //! Two caches need this — poster frames and sized hand-off copies — and both
 //! wrote it out themselves, in shapes different enough that a reader could not
@@ -13,7 +14,8 @@
 //! direction evicts the *newest* entries — the ones on screen — and re-derives
 //! them forever, at the cost of an ffmpeg run each. Nothing would have failed.
 //!
-//! Neither cache can cost anyone a capture: everything here is re-derivable,
+//! Neither cache can cost anyone a capture: everything *these two prune* is
+//! re-derivable,
 //! and every path involved is inside a directory the app owns. That is what
 //! makes an eviction rule acceptable at all, and it is why the *sort order* is
 //! the only thing that can really go wrong.

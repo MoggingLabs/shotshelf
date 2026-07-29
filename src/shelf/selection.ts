@@ -106,3 +106,27 @@ export class Selection {
     }
   }
 }
+
+/**
+ * The order a selection is handed over in.
+ *
+ * One defined order, used by everything that acts on a selection.
+ * {@link Selection.ids} cannot provide it: a ctrl-click appends, so it yields
+ * click order, while a shift-range rebuilds the set in the order the shelf is
+ * showing — which is newest-first. Anything reading that order directly
+ * therefore handed a before/after pair over backwards for one gesture and
+ * correctly for the other, which is a bug that looks like working software.
+ *
+ * Capture time is the answer under both gestures. The path breaks ties so two
+ * captures sharing a millisecond — legal, since identity is `ts:path` — cannot
+ * fall back to the ordering this exists to avoid.
+ *
+ * Here rather than on `Shelf`, which is a DOM-bound facade whose own header
+ * says it decides no rules. This is a rule, and it is the one a comparison
+ * depends on; in the facade it could only be reached through a browser.
+ */
+export function inHandoverOrder<T extends { ts: number; path: string }>(
+  picked: readonly T[],
+): T[] {
+  return [...picked].sort((a, b) => a.ts - b.ts || a.path.localeCompare(b.path));
+}

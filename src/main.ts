@@ -17,6 +17,7 @@ import { Popover } from "./popover.ts";
 import { currentSettings, initSettings, settingsOpen } from "./settings.ts";
 import { textRecognitionAvailable } from "./shelf/bridge.ts";
 import { Shelf, type Capture } from "./shelf/index.ts";
+import { until, type Wait } from "./retry.ts";
 import { noteScanUnavailable, noteWatchUnavailable, say, showWatchState } from "./status.ts";
 
 // Windows rounds the window through DWM at a fixed 8px, so the panel's own
@@ -199,49 +200,39 @@ subscribe(
 );
 
 /**
- * Ask Rust something the catch engine has to be up for, retrying while it is
- * not.
+ * Ask Rust something the catch engine has to be up for, waiting while it is not.
  *
  * The engine starts on a worker — resolving watch folders can take SMB round
  * trips on a redirected profile — while the webview is created *before* Rust's
  * `setup` runs and asks within milliseconds. So both catch commands answer
- * "the catch engine is still starting" for a moment, and the difference
- * between that and a real answer is the difference between "ask again" and
- * "your captures are not being watched".
+ * "the catch engine is still starting" for a while, and the difference between
+ * that and a real answer is the difference between "ask again" and "your
+ * captures are not being watched".
  *
- * `settings.ts` already retries `get_settings` for exactly this reason and
- * documents the same race; this is the same shape, with the wait long enough
- * to cover a slow share rather than a fast local disk.
+ * A minute, against `settings.ts`'s five seconds: this waits on folder
+ * resolution and watch registration over a possibly-remote path, which is a
+ * different and slower thing than the file read that one waits on.
+ *
+ * The caller passes the `invoke` rather than a command name, so the command
+ * stays a string literal at its call site — `check-commands.mjs` finds callers
+ * by looking for `invoke("…")`, and taking the name here read better and made
+ * both catch commands report as having no caller.
  */
-async function whenEngineIsUp<T>(what: string, ask: () => Promise<T>): Promise<T> {
-  // The caller passes the `invoke` rather than a command name, so the command
-  // stays a string literal at its call site. Taking the name and invoking it
-  // here read better and broke `check-commands.mjs`, which finds callers by
-  // looking for `invoke("…")` — both catch commands immediately reported as
-  // having no caller in `src/`, which is the gate working exactly as intended.
-  for (let attempt = 0; attempt < ENGINE_ATTEMPTS; attempt += 1) {
-    try {
-      return await ask();
-    } catch (error) {
-      const starting = String(error).includes("still starting");
-      if (!starting || attempt === ENGINE_ATTEMPTS - 1) throw error;
-      await new Promise((wake) => setTimeout(wake, ENGINE_RETRY_MS));
-    }
-  }
-  throw new Error(`${what} never became available`);
-}
+const ENGINE_WAIT: Wait = {
+  attempts: 120,
+  everyMs: 500,
+  // Only the one answer that means "not yet". Rust names it
+  // `catch::STARTING`; anything else is a real failure and should be reported
+  // now rather than in a minute.
+  transient: (error) => String(error).includes("still starting"),
+};
 
-/**
- * Roughly a minute, which is what a disconnected network share actually costs.
- *
- * `lib.rs` says resolving the watch folders can be "an SMB round trip with a
- * multi-second timeout" — per candidate, and there are up to four of them, each
- * doing several such calls. Six seconds was under the delay this exists for, so
- * on the machine it was written for it would have given up and reported a
- * failure that had not happened.
- */
-const ENGINE_ATTEMPTS = 120;
-const ENGINE_RETRY_MS = 500;
+function whenEngineIsUp<T>(what: string, ask: () => Promise<T>): Promise<T> {
+  return until(ask, ENGINE_WAIT).catch((error: unknown) => {
+    console.error(`[shotshelf] ${what} never became available`, error);
+    throw error instanceof Error ? error : new Error(String(error));
+  });
+}
 
 // Captures taken while Shotshelf was not running are *pulled*, not pushed.
 //

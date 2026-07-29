@@ -11,7 +11,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 
 use crate::catch::CaptureKind;
 
@@ -302,8 +302,7 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
 ///
 /// Preferences only. Pinned paths live somewhere else — see [`pins_path`].
 fn settings_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
-    let dir = app.path().app_config_dir().ok()?;
-    Some(dir.join("settings.json"))
+    Some(crate::dirs::preferences(app).ok()?.join("settings.json"))
 }
 
 /// What Shotshelf keeps locally: the pins, and how far the catch engine got.

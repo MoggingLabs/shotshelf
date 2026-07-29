@@ -1,0 +1,19 @@
+# Which directory root a path comes from is a privacy decision, not a filing
+# one — see `src/dirs.rs`. On Windows `app_config_dir` and `app_data_dir` are
+# the same directory (the roaming profile, copied to a network share at logoff
+# under Enterprise State Roaming), and a capture's path names client and
+# project work as readily as a window title does.
+#
+# `dirs.rs` is the one module allowed to resolve a root, so the rule is stated
+# once. Clippy matches on the resolved path, which is what makes this stronger
+# than the substring scan in `scripts/check-dirs.mjs`: it sees UFCS and renamed
+# imports too. The script covers what clippy cannot — `BaseDirectory::AppData`,
+# which reaches the same root through an enum.
+#
+# `dirs.rs` itself carries `#[allow(clippy::disallowed_methods)]`.
+disallowed-methods = [
+  { path = "tauri::path::PathResolver::app_data_dir", reason = "roaming; go through `dirs::preferences`" },
+  { path = "tauri::path::PathResolver::app_config_dir", reason = "roaming; go through `dirs::preferences`" },
+  { path = "tauri::path::PathResolver::app_local_data_dir", reason = "go through `dirs::local`" },
+  { path = "tauri::path::PathResolver::app_cache_dir", reason = "go through `dirs::cache`" },
+]

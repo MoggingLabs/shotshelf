@@ -8,6 +8,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+import { until, type Wait } from "./retry.ts";
+
 import { el } from "./dom.ts";
 // The neutral types module, not the shelf itself: the shelf imports this file
 // for `persistPinned`, and pointing back at it would be a cycle.
@@ -82,37 +84,34 @@ export function currentSettings(): Settings {
 let loaded = false;
 
 /**
- * How long to keep re-asking before giving up — five seconds.
+ * How long to keep re-asking for the stored settings.
  *
- * "The race is milliseconds wide" is what this used to say, at 5 × 120 ms, and
- * it is not: `get_settings` cannot answer until `app.manage(stored)`, which
- * comes after `settings::load` reads `app_config_dir` — `%APPDATA%` under a
- * roaming or redirected profile, where every read is an SMB round trip. That
- * is the same argument `main.ts` used to raise the catch engine's budget to a
- * minute, and it applies here unchanged; the correction landed in one file and
- * not the other.
+ * `get_settings` cannot answer until `app.manage(stored)`, which comes after
+ * `settings::load` reads the preferences root — `%APPDATA%` under a roaming or
+ * redirected profile, where every read is an SMB round trip.
  *
- * Giving up early is not merely a slow start. `persistPinned` refuses to write
+ * Five seconds rather than the catch engine's minute, and the difference is
+ * the point: this waits only for a file read a few statements into `setup`,
+ * while the engine resolves and opens watches on possibly-remote folders. Both
+ * budgets now sit at their call sites in front of one shared loop, so the
+ * difference is a decision someone made rather than two loops that drifted.
+ *
+ * Giving up early is not merely a slow start: `persistPinned` refuses to write
  * when settings were never loaded — that guard is what stops an empty list
- * overwriting the user's pins — so an exhausted retry leaves the shelf running
- * with no pins and no way to save one for the rest of the session.
+ * overwriting the user's pins — so an exhausted retry leaves the shelf unable
+ * to save a pin for the rest of the session.
  */
-const LOAD_ATTEMPTS = 20;
-const LOAD_RETRY_MS = 250;
+const SETTINGS_WAIT: Wait = {
+  attempts: 20,
+  everyMs: 250,
+  // Anything, deliberately. Unlike the catch engine, Rust has no distinct
+  // "not ready" answer here: an unmanaged store surfaces as Tauri's own
+  // "state not managed", which is not a contract this side should match on.
+  transient: () => true,
+};
 
 async function readStored(): Promise<Settings> {
-  let last: unknown;
-  for (let attempt = 0; attempt < LOAD_ATTEMPTS; attempt += 1) {
-    try {
-      return await invoke<Settings>("get_settings");
-    } catch (error) {
-      // Almost always "state not managed" — start-up has not reached
-      // `app.manage` yet. Worth re-asking rather than losing the user's pins.
-      last = error;
-      await new Promise((resume) => setTimeout(resume, LOAD_RETRY_MS));
-    }
-  }
-  throw last instanceof Error ? last : new Error(String(last));
+  return until(() => invoke<Settings>("get_settings"), SETTINGS_WAIT);
 }
 
 export async function initSettings(
