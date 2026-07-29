@@ -168,7 +168,7 @@ operating systems, so the appearance specs skip themselves elsewhere. Regenerate
 | | Capture folders | Clipboard-only captures |
 | :-- | :-- | :-- |
 | **Windows** | `%UserProfile%\Pictures\Screenshots`, `%UserProfile%\Videos\Captures` (Game Bar), `%UserProfile%\Videos\Screen Recordings` (Snipping Tool), `…\OneDrive\Pictures\Screenshots` | Win+Shift+S |
-| **macOS** | whatever `defaults read com.apple.screencapture location` returns, else `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
+| **macOS** | whatever `defaults read com.apple.screencapture location` returns **if that folder is there**, else `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
 | **Linux** | `~/Pictures/Screenshots` (GNOME, XDG portal), `~/Pictures` (Spectacle, Flameshot), `~/Videos/Screencasts`, `~/Videos` | same clipboard watch |
 
 A capture folder that does not exist yet is created, but only beside a parent that already does —

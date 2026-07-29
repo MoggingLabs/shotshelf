@@ -110,10 +110,10 @@ open the flyout to click it, or use the hotkey.
 | | Capture folders | Clipboard-only captures |
 | :-- | :-- | :-- |
 | **Windows** | `%UserProfile%\Pictures\Screenshots`, `%UserProfile%\Videos\Captures` (Game Bar), `%UserProfile%\Videos\Screen Recordings` (Snipping Tool), and the OneDrive copy of Screenshots | Win+Shift+S |
-| **macOS** | wherever `defaults read com.apple.screencapture location` points, otherwise `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
+| **macOS** | wherever `defaults read com.apple.screencapture location` points **if that folder exists**, otherwise `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
 | **Linux** | `~/Pictures/Screenshots` (GNOME, XDG portal) and `~/Pictures` (Spectacle, Flameshot), plus `~/Videos` and `~/Videos/Screencasts` | the clipboard watch applies here too |
 
-A capture folder that does not exist yet is created, but only where its parent already does — so `Pictures\Screenshots` appears on a machine that has never taken a screenshot, and nothing is invented inside a OneDrive folder you do not have. The dot in the title strip turns green once it is watching, and its tooltip tells you how
+A capture folder that does not exist yet is created, but only where its parent already does — so `Pictures\Screenshots` appears on a machine that has never taken a screenshot, and nothing is invented inside a OneDrive folder you do not have. Nothing is ever created directly in your home folder, which is why the Linux entries above are watched only if they are already there. The macOS row is the exception to the whole paragraph: a configured screenshot location that is missing is not created, Shotshelf falls back to `~/Desktop` instead, and the dot's tooltip will name Desktop rather than the folder you set. The dot in the title strip turns green once it is watching, and its tooltip tells you how
 many it's watching.
 
 Take a screenshot. Within about a second the shelf appears with a thumbnail of it.
@@ -372,6 +372,7 @@ it creates there is an empty capture folder that was missing, and those are left
 | Symptom | Likely cause |
 | :-- | :-- |
 | Nothing appears when you take a screenshot | The folder isn't being watched — check the status line, which now reports the folders actually being watched rather than the ones Shotshelf meant to watch. On macOS, the folder permission prompt may have been declined. `shotshelf.log` says which folder failed and why |
+| A message says a screenshot could not be saved | The capture was in the clipboard only — Win+Shift+S and ⌘⌃⇧4 write no file of their own — and Shotshelf could not write it. That copy is gone; the usual causes are a full disk or a profile it cannot write to. `shotshelf.log` records the same sentence with the underlying error. |
 | The hotkey does nothing | Another app already owns that combination; change it in settings |
 | Nothing appeared after a reboot | Shotshelf does not start itself — add it to your startup items. A launch brings back **up to 20** captures from the previous 24 hours, newest first, so the recent ones are still there |
 | A recording shows a film glyph, not a frame | ffmpeg couldn't decode that file. The tile still drags out |

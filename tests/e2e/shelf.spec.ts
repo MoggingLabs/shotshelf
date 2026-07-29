@@ -749,7 +749,18 @@ test("a capture the engine could not save is reported on screen", async ({ page 
   // The name comes from the fixture Rust asserts its constant against, so a
   // rename fails on one side or the other rather than silently detaching the
   // listener.
+  // Hidden first, which is the only state this event is ever raised in.
+  //
+  // The first version of this test emitted the problem into a freshly booted
+  // page and asserted the strip — and passed for a reason that does not exist
+  // in the app: a browser page has no hidden window. In the real thing nothing
+  // has emitted `capture://new`, so nothing called `showColumn`, so `say` wrote
+  // into a window that was not on screen and `resizeColumn` returned at its
+  // first guard. The message was unreachable in the one state it can occur in.
   await bootShelf(page);
+  await page.evaluate((event) => window.__shotshelf__.emit(event, null), HIDDEN_EVENT);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
   await page.evaluate(
     ([event, message]) => window.__shotshelf__.emit(event, message),
     [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
@@ -759,4 +770,34 @@ test("a capture the engine could not save is reported on screen", async ({ page 
   await expect(page.locator("#shelf-alert")).toContainText(/could not be saved/i);
   // Rust composes the sentence — the reason has to survive the trip.
   await expect(page.locator("#shelf-alert")).toContainText(/no space left/i);
+
+  // And the window is actually put back on screen, which is the whole point:
+  // a strip inside a hidden window is not a message.
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("show_shelf").length))
+    .toBe(1);
+});
+
+test("the window a lost-capture message put up goes away with the message", async ({ page }) => {
+  // `showProblem` can raise a column with no cards in it, so something has to
+  // put that window away when the message times out — cards ageing out reach
+  // `onColumnChange`, a message timing out reaches nothing.
+  await page.clock.install();
+  await bootShelf(page);
+  await page.evaluate((event) => window.__shotshelf__.emit(event, null), HIDDEN_EVENT);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.evaluate(
+    ([event, message]) => window.__shotshelf__.emit(event, message),
+    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+  );
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+
+  // Past the strip's own twelve seconds.
+  await page.clock.runFor(13_000);
+
+  await expect(page.locator("#shelf-alert")).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length))
+    .toBe(1);
 });

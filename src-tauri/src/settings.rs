@@ -287,62 +287,66 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
     // So this flag is the difference between "restore nothing and say so" and
     // "migrate". A test asserted the no-fallback rule before this existed and
     // could not have failed: its roaming fixture had no pins either way.
-    let unreadable = pins
-        .as_ref()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .is_some_and(|raw| read_local_state(strip_bom(&raw)).is_err());
-
-    // The raw text, read once and used twice: `read_local_state` needs it, and
-    // so does the watermark, which must be recovered before `set_aside` moves
-    // the file out from under it.
+    // One read, and one parse of it.
+    //
+    // The file was opened twice — once to decide `unreadable`, once for
+    // everything else — and parsed three times over the same bytes, under a
+    // comment further down claiming "One read now." That comment described the
+    // second half only; this is the deduplication it was talking about.
     let raw_local = pins
         .as_ref()
         .and_then(|path| std::fs::read_to_string(path).ok());
-    let watermark = raw_local
+    let parsed = raw_local
         .as_deref()
-        .map(strip_bom)
-        .and_then(|raw| read_local_state(raw).ok())
+        .map(|raw| read_local_state(strip_bom(raw)));
+
+    // "There is a file and it will not parse" — which is the difference between
+    // "restore nothing and say so" and "migrate", and is exactly
+    // `raw_local.is_some() && parse failed`.
+    let unreadable = matches!(parsed, Some(Err(_)));
+
+    let watermark = parsed
+        .as_ref()
+        .and_then(|state| state.as_ref().ok())
         .map_or(0, |state| state.last_capture_ms);
 
-    let local = raw_local
-        .clone()
-        .and_then(|raw| match read_local_state(strip_bom(&raw)) {
-            Ok(state) => Some(state),
-            // Said out loud, like the preferences file four lines up.
+    let local = parsed.and_then(|state| match state {
+        Ok(state) => Some(state),
+        // Said out loud, like the preferences file four lines up.
+        //
+        // This used to be `.ok()`. A corrupt `pinned.json` therefore lost
+        // every pin in silence, fell back to the preferences file — which
+        // `persist` has been blanking since the split — and the next pin
+        // toggle overwrote the corrupt file, destroying the only copy a
+        // user could have hand-repaired.
+        Err(err) => {
+            crate::diag::warn(&format!(
+                "pinned captures could not be read, so none were restored: {err}"
+            ));
+            // Moved aside, not merely left alone.
             //
-            // This used to be `.ok()`. A corrupt `pinned.json` therefore lost
-            // every pin in silence, fell back to the preferences file — which
-            // `persist` has been blanking since the split — and the next pin
-            // toggle overwrote the corrupt file, destroying the only copy a
-            // user could have hand-repaired.
-            Err(err) => {
-                crate::diag::warn(&format!(
-                    "pinned captures could not be read, so none were restored: {err}"
-                ));
-                // Moved aside, not merely left alone.
-                //
-                // A previous round added this warning and stopped, under a
-                // comment saying the overwrite was fixed. It was not:
-                // `note_capture` fires on the first capture of the session and
-                // `persist_local` then writes an empty list straight over the
-                // only copy the user could have repaired by hand. Leaving the
-                // file in place means the next write destroys it; a `.corrupt`
-                // neighbour is something a person can actually open.
-                if let Some(path) = pins.as_ref() {
-                    match set_aside(path) {
-                        Some(kept) => crate::diag::warn(&format!(
-                            "the unreadable file was kept as {}",
-                            kept.file_name().unwrap_or_default().to_string_lossy()
-                        )),
-                        None => crate::diag::warn(
-                            "could not set the unreadable pins file aside; it is still in place \
+            // A previous round added this warning and stopped, under a
+            // comment saying the overwrite was fixed. It was not:
+            // `note_capture` fires on the first capture of the session and
+            // `persist_local` then writes an empty list straight over the
+            // only copy the user could have repaired by hand. Leaving the
+            // file in place means the next write destroys it; a `.corrupt`
+            // neighbour is something a person can actually open.
+            if let Some(path) = pins.as_ref() {
+                match set_aside(path) {
+                    Some(kept) => crate::diag::warn(&format!(
+                        "the unreadable file was kept as {}",
+                        kept.file_name().unwrap_or_default().to_string_lossy()
+                    )),
+                    None => crate::diag::warn(
+                        "could not set the unreadable pins file aside; it is still in place \
                              and the next write will overwrite it",
-                        ),
-                    }
+                    ),
                 }
-                None
             }
-        });
+            None
+        }
+    });
 
     match local {
         Some(state) => current.pinned = state.pinned,
@@ -365,7 +369,9 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
     // is not obvious from either site.
     //
     // What *was* worth changing is that the file was opened twice, with the
-    // second open depending on the first not having moved it. One read now.
+    // second open depending on the first not having moved it — and parsed three
+    // times over the same bytes. It is read once and parsed once now; this
+    // sentence claimed as much while only half of it was true.
     let last_capture = watermark;
 
     // A corrupt preferences file is set aside before it is overwritten, exactly

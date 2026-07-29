@@ -39,7 +39,13 @@ pub struct Sized {
 /// image, so the milliseconds are irrelevant, and a nearest-neighbour or
 /// triangle downscale of small text is visibly worse — aliased strokes and
 /// dropped hairlines in exactly the region someone is asking about.
-pub fn for_handoff(image: DynamicImage, long_edge: u32) -> Sized {
+pub fn for_handoff(image: DynamicImage) -> Sized {
+    // `LONG_EDGE` directly, not a parameter. This took one, and every caller in
+    // the crate — the one production call site and all nine tests — passed
+    // `LONG_EDGE`. A parameter nobody varies reads as configuration and is not:
+    // it makes the ceiling look like the caller's decision when it is this
+    // module's, and it invites guards for values that cannot arrive.
+    let long_edge = LONG_EDGE;
     let (width, height) = (image.width(), image.height());
     let longest = width.max(height);
 
@@ -109,11 +115,8 @@ fn scale_edge(edge: u32, scale: f64) -> u32 {
 /// Returns `Ok(None)` when the capture is already within the ceiling, so the
 /// caller can hand over the original file untouched rather than writing a
 /// byte-identical copy of it.
-pub fn png_for_handoff(
-    path: &std::path::Path,
-    long_edge: u32,
-) -> Result<Option<Vec<u8>>, ImageError> {
-    let sized = for_handoff(super::load(path)?, long_edge);
+pub fn png_for_handoff(path: &std::path::Path) -> Result<Option<Vec<u8>>, ImageError> {
+    let sized = for_handoff(super::load(path)?);
     if !sized.resized {
         return Ok(None);
     }
@@ -140,10 +143,9 @@ mod tests {
         // Two ratios where the second rounding used to bite. Every existing
         // test used dimensions where it happened to cancel.
         for (width, height) in [(10_000_u32, 500_u32), (3_841, 1_000)] {
-            let sized = for_handoff(
-                DynamicImage::ImageRgba8(image::RgbaImage::new(width, height)),
-                LONG_EDGE,
-            );
+            let sized = for_handoff(DynamicImage::ImageRgba8(image::RgbaImage::new(
+                width, height,
+            )));
             assert!(sized.resized);
             assert_eq!(
                 sized.image.width().max(sized.image.height()),
@@ -157,7 +159,7 @@ mod tests {
 
     #[test]
     fn a_capture_over_the_ceiling_is_brought_down_to_it() {
-        let sized = for_handoff(image(3840, 2160), LONG_EDGE);
+        let sized = for_handoff(image(3840, 2160));
         assert!(sized.resized);
         assert_eq!(sized.image.width(), LONG_EDGE);
         assert_eq!(sized.image.height(), 882, "aspect ratio is preserved");
@@ -165,21 +167,21 @@ mod tests {
 
     #[test]
     fn a_portrait_capture_is_measured_by_its_long_edge_too() {
-        let sized = for_handoff(image(1080, 3840), LONG_EDGE);
+        let sized = for_handoff(image(1080, 3840));
         assert_eq!(sized.image.height(), LONG_EDGE);
         assert_eq!(sized.image.width(), 441);
     }
 
     #[test]
     fn a_capture_already_small_enough_is_left_exactly_alone() {
-        let sized = for_handoff(image(800, 600), LONG_EDGE);
+        let sized = for_handoff(image(800, 600));
         assert!(!sized.resized);
         assert_eq!((sized.image.width(), sized.image.height()), (800, 600));
     }
 
     #[test]
     fn a_capture_exactly_on_the_ceiling_is_not_touched() {
-        let sized = for_handoff(image(LONG_EDGE, 400), LONG_EDGE);
+        let sized = for_handoff(image(LONG_EDGE, 400));
         assert!(
             !sized.resized,
             "resizing to the size it already is is pure loss"
@@ -190,7 +192,7 @@ mod tests {
     fn nothing_is_ever_enlarged() {
         // A cropped region or a dialog is small on purpose; upscaling it would
         // invent detail that was never captured.
-        let sized = for_handoff(image(200, 100), LONG_EDGE);
+        let sized = for_handoff(image(200, 100));
         assert!(!sized.resized);
         assert_eq!(sized.image.width(), 200);
     }
@@ -214,7 +216,11 @@ mod tests {
         // And the floor is a floor, not a rounding-up rule.
         assert_eq!(scale_edge(9000, 1000.0 / 9000.0), 1000);
 
-        let sized = for_handoff(image(9000, 2), 1000);
-        assert_eq!(sized.image.width(), 1000);
+        // Through the real ceiling rather than a made-up one: this used to pass
+        // its own `1000`, which was the only place in the crate that varied the
+        // parameter — and a parameter varied only by the test that measures it
+        // is not configuration.
+        let sized = for_handoff(image(9000, 2));
+        assert_eq!(sized.image.width(), LONG_EDGE);
     }
 }

@@ -80,7 +80,7 @@ pub async fn compare_captures<R: Runtime>(
     let bytes = crate::limits::under_sizing_limit("that comparison", move || {
         let before = imaging::load(&before_path)?;
         let after = imaging::load(&after_path)?;
-        let changes = compare::changed_regions(&before, &after, compare::Sensitivity::default());
+        let changes = compare::changed_regions(&before, &after);
         let composite = compare::side_by_side(&before, &after, &changes).ok_or_else(|| {
             imaging::ImageError::Encode(
                 "those two captures are too large to put side by side".to_owned(),

@@ -27,32 +27,35 @@ const HIGHLIGHT: Rgba<u8> = Rgba([245, 158, 11, 255]);
 /// Named for what it is rather than `Settings`: the crate already has a
 /// `settings::Settings` holding the user's preferences, and two unrelated
 /// concepts sharing the most generic name in the crate is a reader's problem.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Sensitivity {
-    /// Side of the square blocks the image is divided into before comparing.
-    ///
-    /// Comparing whole blocks rather than single pixels is what makes the
-    /// result useful: a one-pixel antialiasing difference along a redrawn edge
-    /// is not a change anyone wants pointed out, and per-pixel diffing of two
-    /// screenshots of the same UI produces confetti.
-    pub block: u32,
-    /// How different two pixels must be, summed across channels, to count.
-    pub threshold: u32,
-    /// What fraction of a block's pixels must differ before the block does.
-    pub density: f32,
-}
+/// Side of the square blocks the image is divided into before comparing.
+///
+/// Comparing whole blocks rather than single pixels is what makes the result
+/// useful: a one-pixel antialiasing difference along a redrawn edge is not a
+/// change anyone wants pointed out, and per-pixel diffing of two screenshots of
+/// the same UI produces confetti.
+///
+/// A constant, not a field of a `Sensitivity` struct threaded through every
+/// caller. That struct existed, was `pub(crate)`, had three `pub` fields — and
+/// every call site in the crate, production and test alike, passed
+/// `Sensitivity::default()`. Nothing ever varied it.
+///
+/// Threading a parameter nobody varies is not free: `changed_regions` opened
+/// with `settings.block.max(1)`, a guard against a value no caller could
+/// supply, and the `vec![false; (columns * rows) as usize]` below is bounded
+/// only because this is 16. At the `block = 1` that `.max(1)` explicitly
+/// admitted, and `imaging::load`'s 32768-pixel edge cap, that allocation is
+/// over a gigabyte — a bound that read as enforced and was only incidental.
+const BLOCK: u32 = 16;
 
-impl Default for Sensitivity {
-    fn default() -> Self {
-        // Tuned for screenshots of user interfaces: text that has actually
-        // changed moves far more than these, and subpixel rendering moves less.
-        Self {
-            block: 16,
-            threshold: 48,
-            density: 0.06,
-        }
-    }
-}
+/// How different two pixels must be, summed across channels, to count.
+const THRESHOLD: u32 = 48;
+
+/// What fraction of a block's pixels must differ before the block does.
+///
+/// Tuned for screenshots of user interfaces, with [`THRESHOLD`]: text that has
+/// actually changed moves far more than these, and subpixel rendering moves
+/// less.
+const DENSITY: f32 = 0.06;
 
 /// Which areas differ between two captures.
 ///
@@ -60,14 +63,11 @@ impl Default for Sensitivity {
 /// empty result means the two are the same as far as the settings care, which
 /// is a useful answer in itself — "nothing I can see changed" is often the
 /// thing being checked.
-pub fn changed_regions(
-    before: &DynamicImage,
-    after: &DynamicImage,
-    settings: Sensitivity,
-) -> Vec<Region> {
+pub fn changed_regions(before: &DynamicImage, after: &DynamicImage) -> Vec<Region> {
     let width = before.width().max(after.width());
     let height = before.height().max(after.height());
-    let block = settings.block.max(1);
+    // No `.max(1)`: `BLOCK` is a constant and it is 16.
+    let block = BLOCK;
     if width == 0 || height == 0 {
         return Vec::new();
     }
@@ -84,7 +84,7 @@ pub fn changed_regions(
                 width: block.min(width - column * block),
                 height: block.min(height - row * block),
             };
-            if block_changed(before, after, region, settings) {
+            if block_changed(before, after, region) {
                 changed[(row * columns + column) as usize] = true;
             }
         }
@@ -97,12 +97,7 @@ pub fn changed_regions(
 ///
 /// A pixel present in one image and off the edge of the other counts as
 /// changed: a window that grew has genuinely changed in the new area.
-fn block_changed(
-    before: &DynamicImage,
-    after: &DynamicImage,
-    region: Region,
-    settings: Sensitivity,
-) -> bool {
+fn block_changed(before: &DynamicImage, after: &DynamicImage, region: Region) -> bool {
     let total = region.width * region.height;
     if total == 0 {
         return false;
@@ -111,7 +106,7 @@ fn block_changed(
     let mut differing = 0_u32;
     for y in region.y..region.y + region.height {
         for x in region.x..region.x + region.width {
-            if pixel_changed(before, after, x, y, settings.threshold) {
+            if pixel_changed(before, after, x, y, THRESHOLD) {
                 differing += 1;
             }
         }
@@ -119,7 +114,7 @@ fn block_changed(
 
     #[allow(clippy::cast_precision_loss)] // Block sizes are far below f32's exact range.
     let fraction = differing as f32 / total as f32;
-    fraction > settings.density
+    fraction > DENSITY
 }
 
 fn pixel_changed(
@@ -382,7 +377,7 @@ mod tests {
     #[test]
     fn two_identical_captures_report_nothing_changed() {
         let before = filled(64, 64, [255, 255, 255, 255]);
-        let regions = changed_regions(&before, &before.clone(), Sensitivity::default());
+        let regions = changed_regions(&before, &before.clone());
         assert!(
             regions.is_empty(),
             "nothing changed is a useful answer, not a failure"
@@ -403,7 +398,7 @@ mod tests {
             [0, 0, 0, 255],
         );
 
-        let regions = changed_regions(&before, &after, Sensitivity::default());
+        let regions = changed_regions(&before, &after);
 
         assert_eq!(regions.len(), 1);
         let found = regions[0];
@@ -426,7 +421,7 @@ mod tests {
             [0, 0, 0, 255],
         );
 
-        let regions = changed_regions(&before, &after, Sensitivity::default());
+        let regions = changed_regions(&before, &after);
 
         assert_eq!(
             regions.len(),
@@ -459,10 +454,7 @@ mod tests {
             [0, 0, 0, 255],
         );
 
-        assert_eq!(
-            changed_regions(&before, &after, Sensitivity::default()).len(),
-            2
-        );
+        assert_eq!(changed_regions(&before, &after).len(), 2);
     }
 
     #[test]
@@ -472,7 +464,7 @@ mod tests {
         let before = filled(64, 64, [200, 200, 200, 255]);
         let after = filled(64, 64, [203, 202, 201, 255]);
 
-        assert!(changed_regions(&before, &after, Sensitivity::default()).is_empty());
+        assert!(changed_regions(&before, &after).is_empty());
     }
 
     #[test]
@@ -480,7 +472,7 @@ mod tests {
         let before = filled(32, 32, [255, 255, 255, 255]);
         let after = filled(64, 32, [255, 255, 255, 255]);
 
-        let regions = changed_regions(&before, &after, Sensitivity::default());
+        let regions = changed_regions(&before, &after);
 
         assert!(
             !regions.is_empty(),
@@ -493,7 +485,7 @@ mod tests {
     fn a_change_in_transparency_alone_still_counts() {
         let before = filled(32, 32, [0, 0, 0, 0]);
         let after = filled(32, 32, [0, 0, 0, 255]);
-        assert!(!changed_regions(&before, &after, Sensitivity::default()).is_empty());
+        assert!(!changed_regions(&before, &after).is_empty());
     }
 
     #[test]
@@ -539,7 +531,7 @@ mod tests {
         let before = filled(64, 32, [255, 0, 0, 255]);
         let after = filled(32, 32, [255, 0, 0, 255]);
 
-        let regions = changed_regions(&before, &after, Sensitivity::default());
+        let regions = changed_regions(&before, &after);
         assert!(
             !regions.is_empty(),
             "the area present only in the before is a change",
@@ -634,6 +626,6 @@ mod tests {
     #[test]
     fn comparing_empty_images_does_not_panic() {
         let empty = filled(0, 0, [0, 0, 0, 0]);
-        assert!(changed_regions(&empty, &empty.clone(), Sensitivity::default()).is_empty());
+        assert!(changed_regions(&empty, &empty.clone()).is_empty());
     }
 }

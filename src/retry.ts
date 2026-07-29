@@ -24,8 +24,16 @@ export interface Wait {
    * Whether an error means "ask again".
    *
    * Required, and deliberately not defaulted to "retry anything": a loop that
-   * re-asks a *permanent* failure turns a clear error into a long wait and
-   * then the same error. `readStored` did that for twenty attempts.
+   * re-asks a *permanent* failure turns a clear error into a long wait and then
+   * the same error. Requiring it makes each caller say which errors are worth
+   * asking again about.
+   *
+   * `settings.ts` answers `true` for everything, and that is an argued
+   * exception rather than the default sneaking back in — it is written out at
+   * `SETTINGS_WAIT` with the reason: Rust has no distinct "not ready" answer
+   * for the settings store, so there is no contract to match on. This comment
+   * used to cite `readStored` as a fixed defect while that code was still
+   * there and still deliberate.
    */
   transient(error: unknown): boolean;
 }

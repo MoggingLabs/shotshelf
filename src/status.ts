@@ -31,7 +31,7 @@ export function say(message: string): void {
 
   window.clearTimeout(alertTimer);
   alertTimer = window.setTimeout(hush, ALERT_MS);
-  resized?.();
+  resized?.(true);
 }
 
 /**
@@ -58,11 +58,19 @@ export function alertHeight(): number {
  * and knows nothing about windows, and the sizing decision stays with the
  * thing that owns the window. `main.ts` is where the two meet.
  */
-export function onAlertChange(listener: () => void): void {
+export function onAlertChange(listener: (showing: boolean) => void): void {
   resized = listener;
 }
 
-let resized: (() => void) | undefined;
+/**
+ * `true` when the strip has just appeared, `false` when it has just gone.
+ *
+ * The listener used to take nothing, so the two events were indistinguishable —
+ * which was fine while the only response was "resize", and is not once a
+ * message can be the *only* reason a window is on screen. Something has to put
+ * that window away when the message goes.
+ */
+let resized: ((showing: boolean) => void) | undefined;
 
 /** Take the strip down, and stop it coming back on an old timer. */
 function hush(): void {
@@ -71,7 +79,7 @@ function hush(): void {
   if (!alert) return;
   alert.textContent = "";
   alert.setAttribute("hidden", "");
-  resized?.();
+  resized?.(false);
 }
 
 /**

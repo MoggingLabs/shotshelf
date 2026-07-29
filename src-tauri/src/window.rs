@@ -29,28 +29,6 @@ fn is_opened() -> bool {
     OPENED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Mark the shelf as up because you asked for it, and tell the front-end.
-///
-/// One function because these are one fact kept in two places, and the two
-/// must move together. They did not: `open` set the flag and emitted, while
-/// `preview` set the same flag and emitted nothing — so the webview went on
-/// rendering its column shape around a full-size editor. That shape hides the
-/// alert strip, which is where a failed save is reported, and it keeps the
-/// column's expiry timer running, which dismissed the window and took the
-/// user's unsaved marks with it.
-///
-/// `peek` deliberately does not use this: it sets the flag *false*, and the
-/// window is still on screen, so there is nothing for the front-end to adopt
-/// beyond what it already knows.
-/// `deliberate` is false for the one appearance nobody asked for: the launch.
-///
-/// The front end owns the shape, and it cannot tell the two apart on its own —
-/// `open` is the same function for the tray, the hotkey and the launch. It used
-/// `shelf://opened` and the focus that comes with it as proof that "the user
-/// asked for this", and both of those are emitted *by the launch open itself*.
-/// Each one stands the launch dismissal down, so the four-second appearance had
-/// no way to put itself away and stayed on screen — an always-on-top window,
-/// until dismissed by hand — contradicting its own contract.
 /// The events the front end listens for, and what their payloads mean.
 ///
 /// `tests/harness/tauri-mock.ts` has to emit what this module emits, and it
@@ -75,9 +53,22 @@ const HIDDEN_EVENT: &str = "shelf://hidden";
 #[cfg(test)]
 const WINDOW_EVENTS: &str = include_str!("../../tests/fixtures/window-events.json");
 
-/// `deliberate` is false for the one appearance nobody asked for: the launch.
+/// Mark the shelf as up because you asked for it, and tell the front-end.
 ///
-/// The front end owns the shape, and it cannot tell the two apart on its own —
+/// One function because these are one fact kept in two places, and the two must
+/// move together. They did not: `open` set the flag and emitted, while `preview`
+/// set the same flag and emitted nothing — so the webview went on rendering its
+/// column shape around a full-size editor. That shape hides the alert strip,
+/// which is where a failed save is reported, and it keeps the column's expiry
+/// timer running, which dismissed the window and took the user's unsaved marks
+/// with it.
+///
+/// `peek` deliberately does not use this: it sets the flag *false*, and the
+/// window is still on screen, so there is nothing for the front-end to adopt
+/// beyond what it already knows.
+///
+/// `deliberate` is false for the one appearance nobody asked for: the launch.
+/// The front end owns the shape and cannot tell the two apart on its own —
 /// `open` is the same function for the tray, the hotkey and the launch. It used
 /// `shelf://opened` and the focus that comes with it as proof that "the user
 /// asked for this", and both of those are emitted *by the launch open itself*.

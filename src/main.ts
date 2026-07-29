@@ -219,7 +219,12 @@ function subscribe(registration: Promise<unknown>, lost: string): void {
 // `resizeColumn`, never `onColumnChange`: that one also puts an empty column
 // away, so wiring the strip to it made an alert raised while the column held
 // nothing dismiss the shelf.
-onAlertChange(() => popover.resizeColumn());
+onAlertChange((showing) => {
+  popover.resizeColumn();
+  // A message can be the only thing on screen — see `Popover.showProblem` — so
+  // when it goes, the window it was holding up has to go too.
+  if (!showing) popover.dismissIfEmpty();
+});
 
 subscribe(
   shelfWindow.onFocusChanged(({ payload: focused }) => popover.onFocusChanged(focused)),
@@ -241,7 +246,12 @@ if (!import.meta.env.DEV) {
 //
 // Rust composes the sentence, because only Rust knows what failed.
 subscribe(
-  listen<string>("capture://problem", ({ payload }) => say(payload)),
+  listen<string>("capture://problem", ({ payload }) => {
+    // `say` first: `showProblem` sizes the window to its contents, and the
+    // strip is the only content there is.
+    say(payload);
+    popover.showProblem();
+  }),
   "Shotshelf will not be able to tell you when a capture goes missing.",
 );
 

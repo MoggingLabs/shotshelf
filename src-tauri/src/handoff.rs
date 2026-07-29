@@ -62,7 +62,7 @@ fn sized_copy<R: Runtime>(app: &AppHandle<R>, source: &Path) -> Result<Option<Pa
         return Ok(Some(target));
     }
 
-    let Some(bytes) = export::png_for_handoff(source, export::LONG_EDGE)? else {
+    let Some(bytes) = export::png_for_handoff(source)? else {
         return Ok(None);
     };
 

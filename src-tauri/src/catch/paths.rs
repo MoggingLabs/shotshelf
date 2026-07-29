@@ -332,7 +332,13 @@ mod tests {
         let leaf = root.join("Pictures").join("Screenshots");
         let invented = root.join("OneDrive").join("Pictures").join("Screenshots");
 
-        let watched = settle(vec![leaf.clone(), invented.clone()], None);
+        // `Some(&root)` standing in for `$HOME`, which is what production
+        // passes. Both callers here used to pass `None`, and with no home the
+        // `parent_is_home` term is `false` for every candidate — so the guard
+        // could not change any assertion in the suite, and deleting it left all
+        // 142 tests and clippy green. The one configuration it was written for
+        // was the only one never tested.
+        let watched = settle(vec![leaf.clone(), invented.clone()], Some(&root));
 
         assert!(
             leaf.is_dir(),
@@ -341,6 +347,25 @@ mod tests {
         assert!(!invented.exists(), "a speculative tree is left alone");
         assert!(!root.join("OneDrive").exists(), "and so is its root");
         assert_eq!(watched, vec![leaf]);
+
+        // And nothing is created directly under the home directory itself.
+        //
+        // This is the Linux case, not a hypothetical: `defaults()` there pushes
+        // `~/Pictures` and `~/Videos` *themselves* into the candidate list, and
+        // their parent — `$HOME` — always exists. Without the guard, a machine
+        // with neither folder gets both invented by an app whose pitch is that
+        // it does not touch your things, and `allow_reading_captures` then
+        // grants the webview read over the two directories it just made.
+        let home_level = root.join("Videos");
+        let watched_home = settle(vec![home_level.clone()], Some(&root));
+        assert!(
+            !home_level.exists(),
+            "a folder whose parent is $HOME is not created"
+        );
+        assert!(
+            watched_home.is_empty(),
+            "and nothing that is not there is watched"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

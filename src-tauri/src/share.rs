@@ -131,7 +131,7 @@ pub async fn describe_capture<R: Runtime>(
     if let Some(cached) = scan_cache()
         .lock()
         .ok()
-        .and_then(|cache| cache.get(&version).cloned())
+        .and_then(|cache| cache.get(&version).map(|entry| entry.findings.clone()))
     {
         return Ok(cached);
     }
@@ -174,17 +174,64 @@ pub async fn describe_capture<R: Runtime>(
     if let Ok(mut cache) = scan_cache().lock() {
         // Bounded: a shelf that has seen thousands of captures in one session
         // should not hold every scan for the life of the process.
-        if cache.len() >= SCAN_CACHE_LIMIT {
-            cache.clear();
+        //
+        // The oldest entries go, not all of them. This was `cache.clear()`, so
+        // one insertion past the limit threw away every remembered scan —
+        // including entries computed seconds earlier for tiles still on screen,
+        // mid-build, sending the shelf back to full-resolution OCR for the whole
+        // visible list. `poster.rs` records the same defect in its own cache and
+        // fixed it by evicting the oldest; this is that, in memory.
+        while cache.len() >= SCAN_CACHE_LIMIT {
+            let Some(oldest) = cache
+                .iter()
+                .min_by_key(|(_, entry)| entry.seen)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            cache.remove(&oldest);
         }
-        cache.insert(version, findings.clone());
+        cache.insert(
+            version,
+            Remembered {
+                seen: next_scan_sequence(),
+                findings: findings.clone(),
+            },
+        );
     }
 
     Ok(findings)
 }
 
-/// How many scans to remember before starting over.
-const SCAN_CACHE_LIMIT: usize = 500;
+/// How many scans to remember.
+///
+/// Derived, not chosen. This was a hand-written 500 while the shelf can hold
+/// `max_items` (up to 200) plus `MAX_PINNED` (500) tiles — so a full shelf
+/// overflowed the cache that exists to serve it, which is the same mistake
+/// `poster.rs` records having made with a hand-written 200 and fixed by
+/// deriving. Same two numbers, same margin, one file over.
+const SCAN_CACHE_LIMIT: usize =
+    crate::settings::MAX_ITEMS + crate::settings::MAX_PINNED + SCAN_CACHE_MARGIN;
+
+/// Room above the largest shelf that can exist, so a scan is not evicted while
+/// its tile is still on screen.
+const SCAN_CACHE_MARGIN: usize = 50;
+
+/// A remembered scan, with when it was remembered.
+///
+/// The sequence is what makes eviction "the oldest" rather than "everything":
+/// a `HashMap` has no order of its own, and the alternative was clearing the
+/// lot. Monotonic per process, so it never ties and never wraps in any session
+/// a person will have.
+struct Remembered {
+    seen: u64,
+    findings: Findings,
+}
+
+fn next_scan_sequence() -> u64 {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Identity of a capture's *contents*, through `cache::Version`.
 ///
@@ -199,9 +246,9 @@ fn scan_key(source: &Path) -> ScanKey {
 
 type ScanKey = crate::cache::Version;
 
-fn scan_cache() -> &'static std::sync::Mutex<std::collections::HashMap<ScanKey, Findings>> {
+fn scan_cache() -> &'static std::sync::Mutex<std::collections::HashMap<ScanKey, Remembered>> {
     static CACHE: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<ScanKey, Findings>>,
+        std::sync::Mutex<std::collections::HashMap<ScanKey, Remembered>>,
     > = std::sync::OnceLock::new();
     CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }

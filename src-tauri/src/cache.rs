@@ -1,7 +1,8 @@
 //! Two things every derived-data cache here needs: a way to age out, and a way
 //! to say which version of which capture an entry belongs to.
 //!
-//! Two caches need this — poster frames and sized hand-off copies — and both
+//! Three caches need this — poster frames, sized hand-off copies and credential
+//! scans — and all three
 //! wrote it out themselves, in shapes different enough that a reader could not
 //! tell they were the same rule: one sorted ascending and took from the front,
 //! the other sorted with `Reverse` and drained from the back; one deleted
@@ -111,9 +112,13 @@ pub fn prune(dir: &Path, limit: usize, kind: Entry) {
 /// until a reviewer deleted the mtime and watched everything stay green.
 ///
 /// Milliseconds, because a capture tool overwriting its output inside one
-/// second is ordinary. `Ord` so callers can compare versions rather than only
-/// test equality.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+/// second is ordinary.
+///
+/// `Hash` and `Eq` because all three caches key a map on this. No `Ord`: it was
+/// derived under a comment saying "so callers can compare versions rather than
+/// only test equality", and no caller compares — two call `key()` and one uses
+/// it as a `HashMap` key. A derive justified by a sentence nobody had checked.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Version {
     path: PathBuf,
     /// `None` when the timestamp could not be read, which only means this file

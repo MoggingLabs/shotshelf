@@ -275,3 +275,55 @@ test("backspace takes it off the shelf, the same as delete", async ({ page }) =>
 
   await expect(page.locator(".tile")).toHaveCount(2);
 });
+
+test("each settings control writes the field it is labelled for", async ({ page }) => {
+  // Three of the four controls had no gate at all.
+  //
+  // Only `#setting-max` was ever driven by a spec, so the readers behind
+  // "Keep for", "Send smaller copies" and the hotkey field could be rewritten
+  // to return anything — a reviewer replaced the retention reader with a
+  // constant `null` and every browser test, every unit test, eslint and `tsc`
+  // stayed green. The retention tests elsewhere seed the value through
+  // `bootShelf`, so they gate the sweep *reading* its limits and not the
+  // control the user actually touches.
+  //
+  // One test for all four, driven through the real panel, asserting on what
+  // reaches `set_settings` — which is the boundary a wrong reader crosses.
+  await threeOpen(page);
+  // Echo the patch back, the way Rust does. Without this the mock answers with
+  // the seeded defaults, the panel re-fills from that answer, and the control
+  // snaps back to its old value before the next assertion — which is a test
+  // measuring the stub rather than the reader.
+  await page.evaluate(() =>
+    window.__shotshelf__.respondWith("set_settings", (args) => args["settings"]),
+  );
+  await page.locator("#shelf-settings").click();
+  await expect(page.locator("#settings-panel")).toBeVisible();
+
+  const saved = async (): Promise<Record<string, unknown>> => {
+    const call = await page.evaluate(
+      () => window.__shotshelf__.callsTo("set_settings").at(-1)?.args,
+    );
+    return (call?.["settings"] ?? {}) as Record<string, unknown>;
+  };
+
+  await page.locator("#setting-retention").selectOption("8");
+  expect((await saved())["retentionHours"]).toBe(8);
+
+  // "Forever" is the empty option, and it must reach Rust as null rather than
+  // as 0 — which would expire every capture the moment it landed.
+  await page.locator("#setting-retention").selectOption("");
+  expect((await saved())["retentionHours"]).toBeNull();
+
+  await page.locator("#setting-downscale").check();
+  expect((await saved())["downscaleExports"]).toBe(true);
+
+  await page.locator("#setting-downscale").uncheck();
+  expect((await saved())["downscaleExports"]).toBe(false);
+
+  // Trimmed: a stray space makes the accelerator unparseable, and the failure
+  // lands in `hotkey::rebind` where the user cannot see it.
+  await page.locator("#setting-hotkey").fill("  CommandOrControl+Shift+K  ");
+  await page.locator("#setting-hotkey").dispatchEvent("change");
+  expect((await saved())["hotkey"]).toBe("CommandOrControl+Shift+K");
+});

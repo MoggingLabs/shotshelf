@@ -114,6 +114,51 @@ export class Popover {
     this.showColumn();
   }
 
+  /**
+   * A capture was lost on the way in. Put the window where it can be read.
+   *
+   * The one deliberate exception to "an alert never resurfaces the shelf", and
+   * the distinction is what makes both rules right. That rule was written for
+   * *unsolicited* notices — an update is available, a watch folder is missing —
+   * and a window that reappears on its own after you dismissed it is the single
+   * complaint people have about tray apps. None of that applies here: the user
+   * pressed Win+Shift+S a moment ago, the app's ordinary answer to a capture is
+   * to pop the column, and this is the same answer for a capture that did not
+   * survive. Staying silent is the anomaly.
+   *
+   * It matters because of *which* capture. `report_problem`'s only caller is a
+   * clipboard write that failed, and a clipboard capture has no file anywhere
+   * until Shotshelf writes one — so a full disk destroys the only copy that
+   * exists. Before this the shelf was hidden by construction at that moment
+   * (nothing emitted `capture://new`, so nothing called `showColumn`), `say`
+   * wrote into a hidden window, and `resizeColumn` returned at its first guard.
+   * The message was unreachable in the only state it could ever be raised in.
+   *
+   * Nothing to do when the browse view is already up: the strip is on screen
+   * there, and switching a deliberate open into the column shape would take the
+   * user's grid away to tell them something.
+   */
+  showProblem(): void {
+    if (this.#opened) return;
+    this.showColumn();
+  }
+
+  /**
+   * The strip has gone, and it may have been the only thing on screen.
+   *
+   * `showProblem` can put up a column with no cards in it, so when the message
+   * times out there is a window left holding nothing. Cards ageing out reach
+   * `onColumnChange`, which owns "the column is empty, so put it away"; a
+   * message timing out reaches nothing, so this is that path.
+   *
+   * Deliberately narrow — showing, not opened, and no cards — so it can only
+   * ever close a window that has nothing left in it.
+   */
+  dismissIfEmpty(): void {
+    if (!this.#showing || this.#opened || !this.#shelf.columnIsEmpty) return;
+    this.dismiss();
+  }
+
   /** Ask Rust to put the window away, and drop our own state with it. */
   dismiss(): void {
     this.adoptHidden();

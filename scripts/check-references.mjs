@@ -58,10 +58,13 @@ const SOURCE_GLOBS = [
   "src-tauri/*.toml",
   // The capabilities file's `description` is a page and a half of prose
   // naming other files, permissions and APIs — the justification for the
-  // app's whole confinement story — and nothing read it. `tauri.conf.json`
-  // is here for the same reason.
+  // app's whole confinement story — and nothing read it.
+  //
+  // `tauri.conf.json` used to be listed beside it "for the same reason". It
+  // holds no backticked token at all — it is configuration, not prose — so that
+  // glob could only ever contribute zero, and the tally below now says so of
+  // any glob in that state.
   "src-tauri/capabilities/*.json",
-  "src-tauri/tauri.conf.json",
   "tests/**/*.ts",
   "scripts/*.mjs",
   "*.md",
@@ -98,6 +101,15 @@ const DATA_FILE = /\.(js|json|css|html|md|png|svg|yml|yaml|toml|ico|icns)$/;
  * environment variable.
  */
 const NOT_OURS = /^(?:[A-Za-z]:|\\|\/|~|%|\$)/;
+
+/**
+ * A backticked reference, and the only definition of one.
+ *
+ * Written out twice for a while — once to check the references and once to
+ * count them — which is the shape this whole gate exists to complain about.
+ * Rebuilt per file rather than shared as a `/g` regex with carried state.
+ */
+const reference = () => /`([^`\n]+)`/g;
 
 /**
  * Rust items a `module::item` reference may name.
@@ -292,26 +304,40 @@ function report(file, reference, why) {
   problems.push(`  ${file}: \`${reference}\` — ${why}`);
 }
 
-// A glob that matches nothing is a tree nobody is checking.
+// A glob that contributes no *references* is a tree nobody is checking.
 //
-// The success line used to count *globs*, so it reported fifteen source trees
-// while two of them contributed no references at all. A pattern that has stopped
-// matching — a renamed directory, a moved config — now says so instead of
-// quietly shrinking the gate.
-const EMPTY_GLOBS = SOURCE_GLOBS.filter((glob) => globSync(glob).length === 0);
-for (const glob of EMPTY_GLOBS) {
-  problems.push(`  ${glob}: matches no files, so nothing in that tree is checked.`);
-}
-
+// Counting files was the first attempt and it was the wrong unit: it caught a
+// pattern that had stopped matching, and missed the case that actually
+// happened — two JSON globs that matched files, were read, and yielded nothing
+// checkable, for two rounds, under a comment saying they were added because
+// nothing read them.
+//
+// So the tally is of backticked references found per glob, and a glob that
+// finds none is reported.
 const SOURCES = SOURCE_GLOBS.flatMap((glob) => globSync(glob));
+
+/** How many backticked references each glob turned up. @type {Map<string, number>} */
+const REFERENCES_PER_GLOB = new Map(SOURCE_GLOBS.map((glob) => [glob, 0]));
+
+/** Which glob a file came from, so the tally can be attributed. @type {Map<string, string>} */
+const GLOB_OF = new Map();
+for (const glob of SOURCE_GLOBS) {
+  for (const file of globSync(glob)) if (!GLOB_OF.has(file)) GLOB_OF.set(file, glob);
+}
 
 for (const file of SOURCES) {
   const source = readFileSync(file, "utf8");
   const prose = commentsIn(file, source);
 
+  const from = GLOB_OF.get(file);
+  const count = [...prose.matchAll(reference())].length;
+  if (from !== undefined) {
+    REFERENCES_PER_GLOB.set(from, (REFERENCES_PER_GLOB.get(from) ?? 0) + count);
+  }
+
   // ── Rule A and B: every backticked reference ─────────────────────────────
-  for (const [, reference] of prose.matchAll(/`([^`\n]+)`/g)) {
-    const token = reference.trim();
+  for (const [, named_reference] of prose.matchAll(reference())) {
+    const token = named_reference.trim();
 
     const named = token.replace(/^\.\//, "");
     const isPath = named.includes("/");
@@ -399,6 +425,38 @@ for (const file of SOURCES) {
   }
 }
 
+/**
+ * Globs that legitimately contribute nothing, each one a decision.
+ *
+ * `src-tauri/build.rs` is three lines with no comment in it, so there is no
+ * prose here to check and never has been. It stays in `SOURCE_GLOBS` rather
+ * than being deleted from it: the moment someone writes an explanation there,
+ * it should be checked like every other one.
+ *
+ * Asserted in both directions below, so this cannot rot. A glob listed here
+ * that starts contributing references fails just as loudly as one that stops.
+ */
+const SILENT_GLOBS = new Set(["src-tauri/build.rs"]);
+
+// A glob contributing nothing is a tree nobody is checking — unless it is
+// listed above, in which case it must contribute nothing.
+for (const [glob, count] of REFERENCES_PER_GLOB) {
+  const silent = SILENT_GLOBS.has(glob);
+  if (count === 0 && !silent) {
+    problems.push(
+      `  ${glob}: matched ${globSync(glob).length} file(s) and contributed no ` +
+        `backticked references, so this gate checks nothing there. Either the ` +
+        `extractor cannot read that file type, or the glob belongs in SILENT_GLOBS.`,
+    );
+  }
+  if (count > 0 && silent) {
+    problems.push(
+      `  ${glob}: is listed in SILENT_GLOBS but contributed ${count} reference(s). ` +
+        `Take it out of that list — it is being checked now.`,
+    );
+  }
+}
+
 if (problems.length > 0) {
   console.error(
     "\nComments naming things that do not exist:\n" +
@@ -410,10 +468,13 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-// Files, not globs. The count people read should be the work actually done.
+// References, not globs and not files. The count people read should be the work
+// actually done — and the unit that would have caught two globs contributing
+// nothing for two rounds.
+const found = [...REFERENCES_PER_GLOB.values()].reduce((total, count) => total + count, 0);
 console.info(
-  `Checked comment references in ${SOURCES.length} files ` +
-    `across ${SOURCE_GLOBS.length} source trees.`,
+  `Checked ${found} comment references across ${SOURCES.length} files ` +
+    `in ${SOURCE_GLOBS.length} source trees.`,
 );
 
 /**

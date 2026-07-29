@@ -397,6 +397,24 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
   // …)` walked straight past the older spelling, and a reviewer used exactly
   // that. The paren keeps prose out — several files name the function while
   // explaining why they must not call it.
+  // The three permitted grants must stay non-recursive.
+  //
+  // `allow_directory(p, recursive)` with `true` opens every *subdirectory* of
+  // `p` as well — on Linux, where the watch list is `~/Pictures` and `~/Videos`
+  // themselves, that is the user's entire picture library handed to
+  // `describe_capture`, `copy_capture` and `prepare_drag`. Nothing could see
+  // that: this rule only asked *whether* the call was there, the granting
+  // modules are exempt from it by name, and each of them carries an `#[allow]`
+  // that silences clippy's own entry by design. One character, no gate.
+  for (const grant of codeOnly(source).matchAll(/allow_directory\s*\(([^;]*?)\)/g)) {
+    if (/,\s*false\s*\)?\s*$/.test(grant[1].trim())) continue;
+    problems.push(
+      `  ${normalised}: grants a directory recursively. ` +
+        `\`allow_directory(p, true)\` opens every subdirectory of \`p\` to the ` +
+        `webview; the watch list is not a tree.`,
+    );
+  }
+
   if (source.includes("allow_directory(") && !DIRECTORY_GRANTERS.has(normalised)) {
     problems.push(
       `  ${normalised}: calls \`allow_directory\`, which opens every file beside ` +
