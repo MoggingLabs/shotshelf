@@ -42,11 +42,18 @@ fn is_opened() -> bool {
 /// `peek` deliberately does not use this: it sets the flag *false*, and the
 /// window is still on screen, so there is nothing for the front-end to adopt
 /// beyond what it already knows.
-fn mark_opened<R: Runtime>(shelf: &WebviewWindow<R>) {
+/// `deliberate` is false for the one appearance nobody asked for: the launch.
+///
+/// The front end owns the shape, and it cannot tell the two apart on its own —
+/// `open` is the same function for the tray, the hotkey and the launch. It used
+/// `shelf://opened` and the focus that comes with it as proof that "the user
+/// asked for this", and both of those are emitted *by the launch open itself*.
+/// Each one stands the launch dismissal down, so the four-second appearance had
+/// no way to put itself away and stayed on screen — an always-on-top window,
+/// until dismissed by hand — contradicting its own contract.
+fn mark_opened<R: Runtime>(shelf: &WebviewWindow<R>, deliberate: bool) {
     set_opened(true);
-    // The front-end owns the shape: tell it this was deliberate, so it swaps
-    // out of the auto-popup column and stops running its timers.
-    let _ = shelf.emit("shelf://opened", ());
+    let _ = shelf.emit("shelf://opened", deliberate);
 }
 
 /// How far the popover sits from the corner it rests in.
@@ -130,7 +137,7 @@ const MAX_COLUMN_HEIGHT: f64 = 4000.0;
 pub const COLUMN_WIDTH: f64 = BROWSE_SIZE.0;
 
 /// Open the popover deliberately: full grid, in its corner, on top, and focused.
-pub fn open<R: Runtime>(app: &AppHandle<R>) {
+pub fn open<R: Runtime>(app: &AppHandle<R>, deliberate: bool) {
     let Some(shelf) = app.get_webview_window(SHELF) else {
         return;
     };
@@ -139,7 +146,7 @@ pub fn open<R: Runtime>(app: &AppHandle<R>) {
     place(&shelf, BROWSE_SIZE);
     let _ = shelf.show();
     let _ = shelf.set_focus();
-    mark_opened(&shelf);
+    mark_opened(&shelf, deliberate);
 }
 
 /// Show the narrow column without taking focus, sized to just the cards it
@@ -234,7 +241,8 @@ pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) {
     let _ = shelf.set_focus();
     // Safe when already browsing: `adoptBrowse` is front-end state only and
     // never calls back into Rust, so this cannot re-enter.
-    mark_opened(&shelf);
+    // A quick look is the user asking, so the launch appearance stands down.
+    mark_opened(&shelf, true);
 }
 
 pub fn hide<R: Runtime>(app: &AppHandle<R>) {
@@ -266,7 +274,7 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) {
     // is popped up should hand you the shelf, not take the column away.
     match shelf.is_visible() {
         Ok(true) if is_opened() => hide(app),
-        Ok(_) => open(app),
+        Ok(_) => open(app, true),
         Err(err) => crate::diag::warn(&format!("could not read shelf visibility: {err}")),
     }
 }
@@ -349,7 +357,7 @@ fn round_corners<R: Runtime>(shelf: &WebviewWindow<R>) {
 #[tauri::command]
 pub fn show_shelf<R: Runtime>(app: AppHandle<R>, focus: bool, height: Option<f64>) {
     if focus {
-        open(&app);
+        open(&app, true);
     } else {
         // No default. Every `focus: false` caller supplies a height —
         // `popover.ts` is the only one — and the `focus: true` branch above

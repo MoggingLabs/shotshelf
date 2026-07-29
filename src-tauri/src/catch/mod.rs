@@ -503,6 +503,39 @@ fn as_ms(at: SystemTime) -> u64 {
 /// replace the list outright. Deriving it from the resolved watch list keeps
 /// one source of truth — the shelf can read exactly what the engine watches,
 /// non-recursively, and nothing else.
+/// Let the webview read the captures a restart is about to put back.
+///
+/// Called synchronously from `setup`, before the engine starts on its worker,
+/// and that timing is the whole point. The webview is created *before* `setup`
+/// runs; `settings::load` and `app.manage` complete a few statements in, so
+/// `get_settings` can be answered and `restorePinned` builds tiles immediately.
+/// The grant those tiles need, however, is inside `catch::start` — which is on
+/// `spawn_blocking` precisely because resolving watch folders can take
+/// multi-second SMB round trips on a redirected profile.
+///
+/// Lose that race and the failure is permanent, not transient: `tile.ts` binds
+/// its `error` handler `{ once: true }` and swaps in the "file has gone"
+/// warning, and `ShelfView` reuses that node on every later render. The user
+/// sees ⚠ against files that are present, which `docs/USAGE.md` defines as
+/// "moved or deleted since it was caught". `describe_capture` fails the same
+/// scope check, so the card also reads as never scanned for credentials.
+///
+/// Only the parent directories of pinned captures, because those are the only
+/// paths the front end can ask for before the engine is up — nothing else is on
+/// the shelf yet. The engine's own wider grant follows and supersedes it.
+pub fn allow_reading_pinned<R: Runtime>(app: &AppHandle<R>, pinned: &[PathBuf]) {
+    let scope = app.asset_protocol_scope();
+
+    for parent in pinned.iter().filter_map(|path| path.parent()) {
+        if let Err(err) = scope.allow_directory(parent, false) {
+            crate::diag::warn(&format!(
+                "a pinned capture in {} may not show until the catch engine is up: {err}",
+                parent.display()
+            ));
+        }
+    }
+}
+
 fn allow_reading_captures<R: Runtime>(app: &AppHandle<R>, dirs: &[PathBuf]) {
     let scope = app.asset_protocol_scope();
 
@@ -916,6 +949,25 @@ mod tests {
         sink.expect_own_clipboard_write(Duration::from_secs(3));
         assert!(sink.take_own_clipboard_write(), "the copy we just made");
         assert!(!sink.take_own_clipboard_write(), "and only that one");
+    }
+
+    #[test]
+    fn a_write_that_failed_does_not_swallow_the_next_real_capture() {
+        // The second half of the macOS clipboard blocker, and the half with no
+        // test: the marker was armed before the write and left standing when the
+        // write failed, so the *next* genuine screenshot inside the window was
+        // taken for our own echo and dropped. On macOS, where every recording
+        // copy failed outright, that was every time.
+        let sink = CaptureSink::default();
+
+        sink.expect_own_clipboard_write(Duration::from_secs(3));
+        // …the write fails, so `share::copy_capture` stands the marker down.
+        sink.cancel_own_clipboard_write();
+
+        assert!(
+            !sink.take_own_clipboard_write(),
+            "a screenshot taken now is the user's, not our echo",
+        );
     }
 
     #[test]

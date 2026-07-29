@@ -62,7 +62,8 @@ pub fn run() {
         // capture, and both write the settings file. A second launch just
         // brings the shelf that is already running to the front.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            window::open(app);
+            // A second launch is someone asking for the shelf.
+            window::open(app, true);
         }))
         .invoke_handler(tauri::generate_handler![
             catch::catch_watch_dirs,
@@ -106,6 +107,22 @@ pub fn run() {
             let stored = settings::load(app.handle());
             let current = stored.get();
             app.manage(stored);
+
+            // Before anything slow, and before the webview can ask.
+            //
+            // `restorePinned` runs as soon as `get_settings` answers, which is
+            // now; the engine's own grant is on a worker that may take seconds.
+            // Without this the tiles a restart puts back can render as "the file
+            // has gone" for files that are present, and permanently — the image
+            // `error` handler is `{ once: true }`.
+            catch::allow_reading_pinned(
+                app.handle(),
+                &current
+                    .pinned
+                    .iter()
+                    .map(|item| std::path::PathBuf::from(&item.path))
+                    .collect::<Vec<_>>(),
+            );
 
             // A shortcut another app already owns is worth saying out loud —
             // the shelf still works, it just can't be summoned that way.
@@ -156,7 +173,11 @@ pub fn run() {
 
             // A menu-bar app that starts by showing nothing at all looks
             // broken. Open it once so it can be found, then let it behave.
-            window::open(app.handle());
+            // The one appearance nobody asked for, which is why it puts itself
+            // away again. `false` is what lets the front end tell it apart from
+            // a tray or hotkey open — both of which come through this same
+            // function and emit the same event.
+            window::open(app.handle(), false);
 
             Ok(())
         })

@@ -44,6 +44,17 @@ export class Popover {
 
   #launchTimer: number | undefined;
   /**
+   * Whether the shelf is on screen because it just started, rather than because
+   * anyone asked.
+   *
+   * The launch appearance focuses itself and emits `shelf://opened`, and both of
+   * those used to be read as "the user asked for this" — so it cancelled its own
+   * four-second dismissal and stayed up indefinitely, an always-on-top window
+   * nobody had summoned. Cleared by any deliberate open, so a tray click during
+   * those four seconds still keeps the shelf where the user put it.
+   */
+  #launched = false;
+  /**
    * Whether the popover is up because you asked for it.
    *
    * Distinct from the render mode: the shelf starts in the browse *shape* for
@@ -114,7 +125,7 @@ export class Popover {
    * this runs — all that is left is to render the right shape. It must not
    * call back into `show_shelf`.
    */
-  adoptBrowse(): void {
+  adoptBrowse(deliberate: boolean): void {
     // The launch timer stands down here too, and this was the one route that
     // did not clear it.
     //
@@ -130,7 +141,13 @@ export class Popover {
     // install no clock, so before this they simply had to finish within four
     // seconds of wall clock; the suite failed two runs in four on a reviewer's
     // machine, and CI's single retry is exactly what would have hidden it.
-    this.#standDown();
+    // Only a *deliberate* open stands the launch dismissal down.
+    //
+    // `window::open` is the same function for the tray, the hotkey and the
+    // launch, and it emits this event and takes focus in every case — so
+    // treating either as "the user asked for this" meant the launch appearance
+    // cancelled its own timer and stayed up. Rust now says which it was.
+    if (deliberate) this.#standDown();
     this.#opened = true;
     this.#showing = true;
     this.#root.dataset["mode"] = "browse";
@@ -147,6 +164,7 @@ export class Popover {
   #standDown(): void {
     window.clearTimeout(this.#launchTimer);
     this.#launchTimer = undefined;
+    this.#launched = false;
   }
 
   /**
@@ -198,14 +216,23 @@ export class Popover {
 
   /** Shown once at launch, then treated exactly like an empty column. */
   scheduleLaunchDismissal(): void {
+    this.#launched = true;
     this.#launchTimer = window.setTimeout(() => {
+      this.#launched = false;
       if (!this.#options.busy()) this.dismiss();
     }, LAUNCH_MS);
   }
 
-  /** Focus arriving means you are using it; the launch timer stands down. */
+  /**
+   * Focus arriving means you are using it — unless it arrived on its own.
+   *
+   * `window::open` calls `set_focus()`, so the launch appearance focuses itself
+   * and this fired for it. Standing the timer down there meant the four-second
+   * appearance never went away. `#launched` is cleared by any deliberate open,
+   * so a tray click two seconds after launch still cancels it properly.
+   */
   onFocusChanged(focused: boolean): void {
     this.#shelf.holdColumn("focus", focused);
-    if (focused) this.#standDown();
+    if (focused && !this.#launched) this.#standDown();
   }
 }

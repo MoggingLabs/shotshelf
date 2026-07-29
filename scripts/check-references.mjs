@@ -308,7 +308,13 @@ for (const file of SOURCE_GLOBS.flatMap((glob) => globSync(glob))) {
     }
 
     // `module::item`, Rust's own way of naming a thing somewhere else.
-    const rust = /^([a-z_][a-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)$/.exec(token);
+    // Any depth, not just two segments. The old pattern matched exactly
+    // `module::item`, so a made-up
+    // "crate::limits::x" or "enrich::ocr::y" sailed straight through — and the tree has
+    // live three-segment references. Only the last segment is the item; the
+    // ones before it are the path to the module that owns it, and the file
+    // lookup below already searches by module name.
+    const rust = /^(?:[a-z_][a-z0-9_]*::)*([a-z_][a-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)$/.exec(token);
     if (rust) {
       const [, module, item] = rust;
       const source_file = modules.get(module);

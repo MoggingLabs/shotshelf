@@ -307,7 +307,7 @@ subscribe(
 // and two separate failures would put the same sentence in the strip twice.
 subscribe(
   Promise.all([
-    listen("shelf://opened", () => popover.adoptBrowse()),
+    listen<boolean>("shelf://opened", ({ payload: deliberate }) => popover.adoptBrowse(deliberate)),
     listen("shelf://hidden", () => popover.adoptHidden()),
   ]),
   "The shelf may not reshape correctly. Restarting should fix it.",

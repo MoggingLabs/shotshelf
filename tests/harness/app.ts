@@ -135,9 +135,15 @@ export async function land(
   await page.evaluate((payload) => window.__shotshelf__.emit("capture://new", payload), capture(file, options));
 }
 
-/** Open the browse view the way the tray does — by emitting, not by clicking. */
+/**
+ * Open the browse view the way the tray does — by emitting, not by clicking.
+ *
+ * `true` is the payload Rust sends for a *deliberate* open. The launch
+ * appearance sends `false`, which is what lets it keep its own dismissal timer
+ * instead of cancelling it with its own event.
+ */
 export async function openBrowse(page: Page): Promise<void> {
-  await page.evaluate(() => window.__shotshelf__.emit("shelf://opened", null));
+  await page.evaluate(() => window.__shotshelf__.emit("shelf://opened", true));
 }
 
 export const test = base;

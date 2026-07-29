@@ -173,3 +173,38 @@ test("the launch appearance stays put while a drag is in flight", async ({ page 
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
   await page.mouse.up();
 });
+
+test("the launch appearance is not cancelled by its own open", async ({ page }) => {
+  // `window::open` emits `shelf://opened` *and* takes focus, and it is the same
+  // function for the tray, the hotkey and the launch. The front end read either
+  // of those as "the user asked for this", so the four-second launch appearance
+  // stood its own timer down and remained on screen — an always-on-top window
+  // nobody had summoned, until dismissed by hand.
+  // The clock has to be installed *before* boot, or the launch timer runs on
+  // wall time and has already fired by the time this test acts.
+  await page.clock.install();
+  await bootShelf(page);
+
+  // Exactly what Rust does at launch: the open event with `deliberate: false`,
+  // followed by the focus it takes on its way up.
+  await page.evaluate(() => window.__shotshelf__.emit("shelf://opened", false));
+  await page.evaluate(() => window.__shotshelf__.emit("tauri://focus", null));
+
+  await page.clock.runFor(5_000);
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(1);
+});
+
+test("a deliberate open during those four seconds keeps the shelf up", async ({ page }) => {
+  // The other half: a tray click two seconds after launch must not be dismissed
+  // by a timer armed before it.
+  await page.clock.install();
+  await bootShelf(page);
+  await page.evaluate(() => window.__shotshelf__.emit("shelf://opened", false));
+  await page.clock.runFor(2_000);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.evaluate(() => window.__shotshelf__.emit("shelf://opened", true));
+  await page.clock.runFor(5_000);
+
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+});
