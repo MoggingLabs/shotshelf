@@ -67,10 +67,21 @@ fn settle(candidates: Vec<PathBuf>, home: Option<&Path>) -> Vec<PathBuf> {
             // your things created two top-level folders and then granted the
             // webview read over them. That is not the leaf anyone was about to
             // make.
+            // Compared through `dedupe_key`, not by spelling.
+            //
+            // `home` comes from `app.path().home_dir()`, and a candidate's
+            // parent comes from `picture_dir()`/`video_dir()` — XDG on Linux,
+            // which reads `user-dirs.dirs` — or from `home.join(..)`. Any
+            // difference in how the same directory is written makes `==` false
+            // and the guard inert: a symlinked home (`/home/me` against
+            // `/var/home/me` on an rpm-ostree distro), a trailing separator out
+            // of `user-dirs.dirs`, a case difference on a case-insensitive
+            // mount. `dedupe_key` two functions down already canonicalises for
+            // exactly this reason, and this comparison was the one that did not.
             let parent = dir.parent();
             let parent_is_there = parent.is_some_and(Path::is_dir);
             let parent_is_home = match (parent, home) {
-                (Some(parent), Some(home)) => parent == home,
+                (Some(parent), Some(home)) => dedupe_key(parent) == dedupe_key(home),
                 _ => false,
             };
             if parent_is_there && !parent_is_home && !dir.exists() {
@@ -366,6 +377,29 @@ mod tests {
             watched_home.is_empty(),
             "and nothing that is not there is watched"
         );
+
+        // The same thing with the home directory written differently, because
+        // this comparison used to be `==` on the spelling and so went inert the
+        // moment the two sides disagreed about how to write one path — a
+        // symlinked home (`/home/me` against `/var/home/me` on an rpm-ostree
+        // distro), a trailing separator out of `user-dirs.dirs`, a case
+        // difference on a case-insensitive mount. None of those is portably
+        // constructible in a test.
+        //
+        // `Pictures/..` is, and it is the same directory. It has to be `..`
+        // rather than `.` or a trailing separator: `Path`'s own `==` compares
+        // `components()`, which normalises both of those away, so they are not
+        // different spellings as far as the code under test is concerned —
+        // a fixture that looks like it varies the input and does not. `..` is a
+        // `ParentDir` component that survives, and `canonicalize` resolves it.
+        let spelled_differently = root.join("Pictures").join("..");
+        let beside_it = root.join("Videos2");
+        let watched_other = settle(vec![beside_it.clone()], Some(&spelled_differently));
+        assert!(
+            !beside_it.exists(),
+            "the guard holds however the home directory is spelled"
+        );
+        assert!(watched_other.is_empty());
 
         let _ = std::fs::remove_dir_all(&root);
     }

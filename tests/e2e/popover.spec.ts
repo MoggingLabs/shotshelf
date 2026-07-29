@@ -384,3 +384,32 @@ test("the front end adopts hidden from the event Rust really emits", async ({ pa
   await land(page, FIXTURE.wide);
   await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
 });
+
+test("a capture landing inside the launch appearance keeps its full minute", async ({ page }) => {
+  // `Popover.catch` never stood the launch timer down, and a peeked column is
+  // created without focus on purpose — so `onFocusChanged` could not stand it
+  // down either. A capture landing at t = 3.9 s popped the column and the
+  // four-second launch dismissal put it away a tenth of a second later, against
+  // the minute README.md and docs/USAGE.md both promise.
+  await page.clock.install();
+  await bootShelf(page);
+  await launchAppearance(page);
+
+  // Just inside the launch window.
+  await page.clock.runFor(3_900);
+  await land(page, FIXTURE.wide);
+  await expect(page.locator(".tile")).toHaveCount(1);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  // Past what would have been the launch dismissal.
+  await page.clock.runFor(2_000);
+
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+
+  // And it still ages out on its own minute rather than living for ever.
+  await page.clock.runFor(60_000);
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length))
+    .toBeGreaterThan(0);
+});

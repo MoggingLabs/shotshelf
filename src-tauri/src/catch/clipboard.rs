@@ -38,6 +38,8 @@ const READ_RETRY: Duration = Duration::from_millis(80);
 /// one, so raising any of them would have silently shelved every Win+PrtSc
 /// twice and left an unprunable duplicate PNG behind. The factor of two is the
 /// decision that belongs here — the number it multiplies belongs there.
+// Same const arithmetic as `SLOWEST_IMAGE`, which this is derived from.
+#[allow(clippy::cast_possible_truncation)]
 const ECHO_GRACE: Duration =
     Duration::from_millis(super::folders::SLOWEST_IMAGE.as_millis() as u64 * 2);
 const ECHO_WINDOW: Duration = Duration::from_secs(4);

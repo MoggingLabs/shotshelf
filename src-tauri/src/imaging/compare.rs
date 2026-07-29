@@ -22,11 +22,6 @@ const BACKGROUND: Rgba<u8> = Rgba([17, 18, 26, 255]);
 /// Amber: reads as "look here" against both light and dark captures.
 const HIGHLIGHT: Rgba<u8> = Rgba([245, 158, 11, 255]);
 
-/// How much has to change before it counts.
-///
-/// Named for what it is rather than `Settings`: the crate already has a
-/// `settings::Settings` holding the user's preferences, and two unrelated
-/// concepts sharing the most generic name in the crate is a reader's problem.
 /// Side of the square blocks the image is divided into before comparing.
 ///
 /// Comparing whole blocks rather than single pixels is what makes the result
@@ -66,23 +61,22 @@ const DENSITY: f32 = 0.06;
 pub fn changed_regions(before: &DynamicImage, after: &DynamicImage) -> Vec<Region> {
     let width = before.width().max(after.width());
     let height = before.height().max(after.height());
-    // No `.max(1)`: `BLOCK` is a constant and it is 16.
-    let block = BLOCK;
+
     if width == 0 || height == 0 {
         return Vec::new();
     }
 
-    let columns = width.div_ceil(block);
-    let rows = height.div_ceil(block);
+    let columns = width.div_ceil(BLOCK);
+    let rows = height.div_ceil(BLOCK);
     let mut changed = vec![false; (columns * rows) as usize];
 
     for row in 0..rows {
         for column in 0..columns {
             let region = Region {
-                x: column * block,
-                y: row * block,
-                width: block.min(width - column * block),
-                height: block.min(height - row * block),
+                x: column * BLOCK,
+                y: row * BLOCK,
+                width: BLOCK.min(width - column * BLOCK),
+                height: BLOCK.min(height - row * BLOCK),
             };
             if block_changed(before, after, region) {
                 changed[(row * columns + column) as usize] = true;
@@ -90,7 +84,7 @@ pub fn changed_regions(before: &DynamicImage, after: &DynamicImage) -> Vec<Regio
         }
     }
 
-    merge(&changed, columns, rows, block, width, height)
+    merge(&changed, columns, rows, width, height)
 }
 
 /// Whether enough of one block's pixels differ.
@@ -106,7 +100,7 @@ fn block_changed(before: &DynamicImage, after: &DynamicImage, region: Region) ->
     let mut differing = 0_u32;
     for y in region.y..region.y + region.height {
         for x in region.x..region.x + region.width {
-            if pixel_changed(before, after, x, y, THRESHOLD) {
+            if pixel_changed(before, after, x, y) {
                 differing += 1;
             }
         }
@@ -117,13 +111,7 @@ fn block_changed(before: &DynamicImage, after: &DynamicImage, region: Region) ->
     fraction > DENSITY
 }
 
-fn pixel_changed(
-    before: &DynamicImage,
-    after: &DynamicImage,
-    x: u32,
-    y: u32,
-    threshold: u32,
-) -> bool {
+fn pixel_changed(before: &DynamicImage, after: &DynamicImage, x: u32, y: u32) -> bool {
     match (in_bounds(before, x, y), in_bounds(after, x, y)) {
         (Some(a), Some(b)) => {
             let distance: u32 = (0..3)
@@ -131,7 +119,7 @@ fn pixel_changed(
                 .sum();
             // Transparency changes are changes: a dialog that appeared over a
             // transparent region differs only in alpha.
-            distance + u32::from(a.0[3].abs_diff(b.0[3])) > threshold
+            distance + u32::from(a.0[3].abs_diff(b.0[3])) > THRESHOLD
         }
         // Past the edge of both: the captures are different sizes and this
         // point is outside each of them, so there is nothing to compare.
@@ -151,14 +139,7 @@ fn in_bounds(image: &DynamicImage, x: u32, y: u32) -> Option<Rgba<u8>> {
 /// Flood fill over the block grid rather than one box per block: a paragraph
 /// of changed text is one thing that changed, and outlining every sixteen-pixel
 /// square of it is unreadable.
-fn merge(
-    changed: &[bool],
-    columns: u32,
-    rows: u32,
-    block: u32,
-    width: u32,
-    height: u32,
-) -> Vec<Region> {
+fn merge(changed: &[bool], columns: u32, rows: u32, width: u32, height: u32) -> Vec<Region> {
     let mut seen = vec![false; changed.len()];
     let mut regions = Vec::new();
 
@@ -184,23 +165,27 @@ fn merge(
                     if nc < 0 || nr < 0 || nc >= i64::from(columns) || nr >= i64::from(rows) {
                         continue;
                     }
-                    #[allow(clippy::cast_sign_loss)] // Guarded non-negative above.
+                    // Both are `i64::from` of a `u32` plus or minus one, and
+                    // the bounds check above rejects anything outside
+                    // `0..columns`/`0..rows` — so neither can be negative and
+                    // neither can exceed `u32::MAX`.
+                    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
                     let index = (nr as u32 * columns + nc as u32) as usize;
                     if changed[index] && !seen[index] {
                         seen[index] = true;
-                        #[allow(clippy::cast_sign_loss)]
+                        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
                         stack.push((nc as u32, nr as u32));
                     }
                 }
             }
 
-            let x = min_c * block;
-            let y = min_r * block;
+            let x = min_c * BLOCK;
+            let y = min_r * BLOCK;
             regions.push(Region {
                 x,
                 y,
-                width: ((max_c + 1) * block).min(width) - x,
-                height: ((max_r + 1) * block).min(height) - y,
+                width: ((max_c + 1) * BLOCK).min(width) - x,
+                height: ((max_r + 1) * BLOCK).min(height) - y,
             });
         }
     }

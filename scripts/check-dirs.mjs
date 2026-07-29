@@ -142,14 +142,38 @@ const ALLOWANCES = new Map([
   // decision no tool would ever have raised. The lints are switched on now, the
   // attributes are load-bearing, and the guard each one names is real:
   // a `clamp`, a `max(0.0)`, or a comparison immediately above.
-  ["src-tauri/src/imaging/export.rs", ["clippy::cast_sign_loss"]],
-  ["src-tauri/src/poster.rs", ["clippy::cast_sign_loss", "clippy::disallowed_methods"]],
+  // A clamp before the narrowing, in both cases.
+  ["src-tauri/src/imaging/export.rs", [
+    "clippy::cast_possible_truncation",
+    "clippy::cast_sign_loss",
+  ]],
+  // `max(0.0)` on a duration ffmpeg reported in seconds.
+  ["src-tauri/src/poster.rs", [
+    "clippy::cast_possible_truncation",
+    "clippy::cast_sign_loss",
+    "clippy::disallowed_methods",
+  ]],
+  // A window title length the OS has already reported positive.
   ["src-tauri/src/enrich/foreground.rs", ["clippy::cast_sign_loss"]],
+  // Grid coordinates the bounds check above each one has already rejected, and
+  // one block-fraction division whose operands are far below f32's exact range.
   ["src-tauri/src/imaging/compare.rs", [
+    "clippy::cast_possible_truncation",
+    "clippy::cast_possible_truncation",
     "clippy::cast_precision_loss",
     "clippy::cast_sign_loss",
     "clippy::cast_sign_loss",
   ]],
+  // A `f64` clamped into `i32` range, and a compile-time `size_of_val` of a u32.
+  ["src-tauri/src/window.rs", [
+    "clippy::cast_possible_truncation",
+    "clippy::cast_possible_truncation",
+  ]],
+  // `Duration::as_millis` is a `u128`, and `u64::try_from` is not usable in a
+  // const initialiser. Both of these are const arithmetic over sub-second
+  // constants declared a few lines above them.
+  ["src-tauri/src/catch/clipboard.rs", ["clippy::cast_possible_truncation"]],
+  ["src-tauri/src/catch/folders.rs", ["clippy::cast_possible_truncation"]],
 ]);
 
 /**
@@ -249,6 +273,73 @@ function codeOnly(source) {
   }
 
   return out;
+}
+
+/**
+ * The last argument of every `allow_directory` call, whitespace stripped.
+ *
+ * That argument is the `recursive` flag, in both spellings — `scope
+ * .allow_directory(dir, false)` and `Scope::allow_directory(&scope, dir, false)`
+ * — so the caller only has to compare it to `"false"`.
+ *
+ * Parsed, not matched. The first version of this rule was
+ * `/allow_directory\s*\(([^;]*?)\)/` with a trailing `,\s*false\s*\)?$`, and it
+ * failed in both directions within one commit of being written: `[^;]*?` needs
+ * a `)` before any `;`, so a call whose argument list contains a statement —
+ * `allow_directory(dir, { use std::convert::identity; identity(true) })` —
+ * produced no match at all and the check never ran, handing the webview every
+ * subdirectory of every watch folder with all four gates green. And requiring
+ * `false` to be *last in the text* flagged the multi-line trailing-comma form
+ * `rustfmt` produces when a call does not fit on one line.
+ *
+ * Both failures are the same one: a rule about a resolved value, written as a
+ * rule about where characters sit. This balances brackets over [`codeOnly`]
+ * output — comments and strings already blanked — splits the arguments at
+ * depth zero, and drops the empty tail a trailing comma leaves.
+ *
+ * @param {string} source
+ * @returns {string[]}
+ */
+function grantsIn(source) {
+  const code = codeOnly(source);
+  const found = [];
+
+  for (const call of code.matchAll(/\ballow_directory\s*\(/g)) {
+    const open = call.index + call[0].length - 1;
+    let depth = 0;
+    let end = -1;
+
+    for (let i = open; i < code.length; i += 1) {
+      if (code[i] === "(" || code[i] === "[" || code[i] === "{") depth += 1;
+      else if (code[i] === ")" || code[i] === "]" || code[i] === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end === -1) continue;
+
+    // Split at depth zero only, so a nested call or block stays one argument.
+    const args = [];
+    let start = open + 1;
+    let inner = 0;
+    for (let i = open + 1; i < end; i += 1) {
+      if (code[i] === "(" || code[i] === "[" || code[i] === "{") inner += 1;
+      else if (code[i] === ")" || code[i] === "]" || code[i] === "}") inner -= 1;
+      else if (code[i] === "," && inner === 0) {
+        args.push(code.slice(start, i));
+        start = i + 1;
+      }
+    }
+    args.push(code.slice(start, end));
+
+    const given = args.map((argument) => argument.replace(/\s+/g, "")).filter(Boolean);
+    found.push(given.at(-1) ?? "");
+  }
+
+  return found;
 }
 
 /**
@@ -406,8 +497,8 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
   // that: this rule only asked *whether* the call was there, the granting
   // modules are exempt from it by name, and each of them carries an `#[allow]`
   // that silences clippy's own entry by design. One character, no gate.
-  for (const grant of codeOnly(source).matchAll(/allow_directory\s*\(([^;]*?)\)/g)) {
-    if (/,\s*false\s*\)?\s*$/.test(grant[1].trim())) continue;
+  for (const grant of grantsIn(source)) {
+    if (grant === "false") continue;
     problems.push(
       `  ${normalised}: grants a directory recursively. ` +
         `\`allow_directory(p, true)\` opens every subdirectory of \`p\` to the ` +

@@ -140,6 +140,22 @@ export class Popover {
    */
   showProblem(): void {
     if (this.#opened) return;
+    // Nor while anything is mid-flight. `showColumn` sets the column shape, and
+    // the stylesheet hides the settings panel and the title strip in it — so a
+    // failed clipboard write arriving while someone was typing a new hotkey
+    // took the panel off screen and left `settingsOpen()` true, which swallows
+    // every shelf key until Escape. Each of these states already has the window
+    // up with the strip readable, so there is nothing to raise.
+    if (this.#options.busy()) return;
+    // The shelf is told, not just the window. `showColumn` sets the column
+    // shape and resizes to it; every other route in — `catch` through `note`,
+    // and `adoptHidden` — also calls `setMode`, and this one did not. During
+    // the launch appearance the shape is browse, so a problem raised in those
+    // four seconds resized the window to a strip while `Shelf` went on
+    // rendering the full browse list into it: the "full-size content in a
+    // column-sized window" failure that `window::preview` and `Shelf.editPicked`
+    // both exist to prevent, on a new path.
+    this.#shelf.setMode("column");
     this.showColumn();
   }
 
@@ -156,6 +172,21 @@ export class Popover {
    */
   dismissIfEmpty(): void {
     if (!this.#showing || this.#opened || !this.#shelf.columnIsEmpty) return;
+    // The same two conditions the rest of this file applies, and both were
+    // missing when this method was written.
+    //
+    // The mode, for the reason `onColumnChange` gives ten lines down: `#opened`
+    // is false for the whole launch appearance while the shape is *browse* and
+    // the column is legitimately empty. So without this, any message at all —
+    // the update notice, "no capture folders are being watched", a failed pin —
+    // dismissed the shelf twelve seconds later, on the *falling* edge of a
+    // strip that had nothing to do with the column.
+    //
+    // And `busy()`, because that dismissal took an open editor's unsaved marks
+    // with it through `adoptHidden`. That is verbatim the failure `resizeColumn`
+    // was extracted to prevent, reintroduced on the other edge of one signal.
+    if (this.#root.dataset["mode"] !== "column") return;
+    if (this.#options.busy()) return;
     this.dismiss();
   }
 
@@ -255,6 +286,15 @@ export class Popover {
       return;
     }
 
+    // A capture is a reason for the window to be up in its own right, so the
+    // launch timer no longer owns it.
+    //
+    // Without this a capture landing at t = 3.9 s popped the column and the
+    // launch dismissal put it away at t = 4.0 s — a tenth of a second, against
+    // the minute both README.md and docs/USAGE.md promise. `#standDown` is
+    // reached by a deliberate open and by focus arriving; neither can happen
+    // here, because a peeked column is created without focus on purpose.
+    this.#standDown();
     this.#shelf.note(capture);
     this.showColumn();
   }

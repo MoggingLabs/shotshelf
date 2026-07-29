@@ -45,6 +45,10 @@ const IMAGE_STABLE_TICKS: u32 = 1;
 /// this watcher finishing *after* the clipboard grace expired, and every
 /// Win+PrtSc would have shelved two copies plus an unpruned PNG. Nothing joined
 /// them and no test could see it. Now the edit moves both.
+// `as_millis` is a `u128` and this is const arithmetic over three constants
+// declared a few lines up, none of them a second long. `u64::try_from` is not
+// usable in a const initialiser, so the conversion is stated here instead.
+#[allow(clippy::cast_possible_truncation)]
 pub(super) const SLOWEST_IMAGE: Duration = Duration::from_millis(
     DEBOUNCE.as_millis() as u64 + SETTLE_TICK.as_millis() as u64 * IMAGE_STABLE_TICKS as u64,
 );

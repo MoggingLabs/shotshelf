@@ -336,7 +336,9 @@ fn parse_duration(stderr: &str) -> Option<u64> {
     let whole = hours * 3600 + minutes * 60;
     let fraction = seconds.max(0.0);
     // `max(0.0)` is the guard, and clippy cannot see through it either.
-    #[allow(clippy::cast_sign_loss)]
+    // ffmpeg reports a duration in seconds; `max(0.0)` is the lower guard and
+    // no recording is 2^64 seconds long.
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     let extra = fraction as u64;
     // Whole seconds, as before: the badge reads "1:23", so the sub-second part
     // has never been shown and the test below pins the truncation. What changed

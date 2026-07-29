@@ -130,28 +130,25 @@ impl CaptureSink {
         let capture = Capture {
             path: path.display().to_string(),
             kind,
-            // The file's own mtime, not the moment we noticed it.
+            // When Shotshelf caught it, not the file's own mtime.
             //
-            // Two reasons, and the second is the one that was a defect. It is
-            // more truthful: the settle loop holds a recording for ~2.8 s of
-            // quiet before emitting, so "when it was caught" ran that far
-            // behind when it was taken, and day grouping and retention both
-            // read this field.
+            // Stamping the mtime was tried, to make this path and the backfill
+            // agree on `captureId` and stop one capture becoming two cards. It
+            // is the wrong trade. `is_write` admits a rename, so a file *moved*
+            // into a watch folder — a sync client landing yesterday's
+            // screenshot, a restore from backup, a drag into the folder — keeps
+            // its old mtime, and retention reads this field: with "Keep for" at
+            // an hour, that capture popped the column and then vanished from
+            // the shelf fifteen seconds later, silently. Day grouping reads it
+            // too, so with retention off it filed under a day the user was not
+            // looking at.
             //
-            // And it is what makes the two ways in agree. `to_backfill` filters
-            // on mtime while this stamped wall-clock emit time, so the same
-            // capture arriving down both paths — a screenshot taken while
-            // Shotshelf was starting up, which the watcher sees and backfill
-            // also offers — got two different `ts` values, therefore two
-            // different `captureId`s, therefore two identical cards that the
-            // shelf's own de-duplication could not see. It also put the
-            // watermark in different units from the filter it gates, so a
-            // recording still settling when the app quit could be left behind a
-            // watermark a later screenshot had already pushed past.
-            //
-            // Falling back to now when the file cannot be stat'd: a capture
-            // with an approximate timestamp is worth more than no capture.
-            ts: mtime_ms(path).unwrap_or_else(now_ms),
+            // The duplicate is real but it is narrow — the watchers go live one
+            // directory at a time and `watching_since` is stamped after the
+            // last of them — and it is fixed where it belongs, in the front
+            // end's backfill merge, which is the one place that can see both
+            // answers at once.
+            ts: now_ms(),
             context: crate::enrich::foreground::current(),
         };
 
@@ -659,14 +656,6 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// different saturation — a wrapping `as` cast where `as_ms` clamps — eighty
 /// lines from the original, in the module that stamps both live captures and
 /// backfilled ones. This is the deduplication that message described.
-/// When the file was last written, as Unix milliseconds.
-///
-/// `None` when it cannot be read — a file deleted between the watcher seeing it
-/// and this call, or a filesystem with no mtime.
-fn mtime_ms(path: &Path) -> Option<u64> {
-    std::fs::metadata(path).ok()?.modified().ok().map(as_ms)
-}
-
 pub(crate) fn now_ms() -> u64 {
     as_ms(SystemTime::now())
 }
@@ -899,39 +888,6 @@ mod tests {
             !names(&capped).contains(&"shot99.png"),
             "the oldest did not"
         );
-    }
-
-    #[test]
-    fn both_ways_in_stamp_a_capture_with_the_same_clock() {
-        // The live path and the backfill path have to agree on `ts`, because
-        // `captureId` is `ts:path` and the shelf de-duplicates on it. While the
-        // live path stamped wall-clock emit time and `scan` read the file's
-        // mtime, one capture arriving down both — a screenshot taken during
-        // start-up — produced two ids and two identical cards.
-        //
-        // Asserted against the same expression `scan` uses, so the two cannot
-        // drift apart without this failing.
-        let dir = std::env::temp_dir().join("shotshelf-mtime-test");
-        std::fs::create_dir_all(&dir).expect("a temp dir");
-        let file = dir.join("shot.png");
-        std::fs::write(&file, b"x").expect("a file");
-
-        let from_scan = as_ms(
-            std::fs::metadata(&file)
-                .expect("metadata")
-                .modified()
-                .expect("mtime"),
-        );
-        assert_eq!(
-            mtime_ms(&file),
-            Some(from_scan),
-            "the live path and the backfill path read different clocks"
-        );
-
-        // And a file that is not there falls back rather than failing.
-        assert_eq!(mtime_ms(&dir.join("gone.png")), None);
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

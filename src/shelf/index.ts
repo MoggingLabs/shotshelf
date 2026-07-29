@@ -213,6 +213,33 @@ export class Shelf {
     if (options.render ?? true) this.#refresh();
   }
 
+  /**
+   * Offer a capture the launch backfill found, unless the shelf already has it.
+   *
+   * `ShelfStore.add` de-duplicates on `ts:path`, and the two ways a capture
+   * arrives disagree about `ts`: the live watcher stamps when it caught the
+   * file, backfill stamps the file's own mtime. So a screenshot taken while
+   * Shotshelf was starting up — caught by a watcher that had already registered
+   * for its folder, *and* offered by a backfill whose boundary is stamped after
+   * the last folder registers — produced two ids and two identical cards.
+   *
+   * Here rather than in the store, and by path rather than by id, because this
+   * is the one place where "already on the shelf" means "the same capture". A
+   * *live* re-catch of the same path is a genuine second capture — a tool that
+   * overwrites its output — and `store.test.ts` states that rule deliberately.
+   * A backfill is a one-shot at launch offering what was there before it, so a
+   * path it names that is already showing can only be the capture already
+   * showing.
+   *
+   * The timing cannot be fixed instead: the watchers go live one directory at a
+   * time, so a boundary stamped before the first leaves a gap and one stamped
+   * after the last allows this overlap. Identity is the half that can be right.
+   */
+  addFromBackfill(capture: Capture): void {
+    if (this.#store.items().some((item) => item.path === capture.path)) return;
+    this.add(capture);
+  }
+
   /** Put pinned captures back after a restart, oldest first so order survives. */
   restorePinned(settings: Settings): void {
     for (const capture of [...settings.pinned].sort((a, b) => a.ts - b.ts)) {

@@ -133,10 +133,32 @@ fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
 
     let scale = monitor.scale_factor();
     let area = monitor.work_area();
-    let to_physical = |value: f64| (value * scale).round() as i32;
+    // Saturating, not wrapping, and the difference is where the window lands.
+    //
+    // These are the casts `Cargo.toml`'s lint block names as its motivating
+    // case, and they were the ones it did not cover. `as` on a float that is
+    // NaN gives 0 and on one past `i32::MAX` gives `i32::MAX` — but the u32
+    // width and height came from the OS and `as i32` on those *wraps* above
+    // 2^31, which is a window placed at a negative coordinate rather than a
+    // clamped one. Nothing here is near that today; the point is that the next
+    // person to change `work_area()` should not have to know it.
+    let to_physical = |value: f64| {
+        let scaled = (value * scale).round();
+        if scaled.is_nan() {
+            0
+        } else {
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                scaled.clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32
+            }
+        }
+    };
+    let edge = |position: i32, extent: u32| {
+        position.saturating_add(i32::try_from(extent).unwrap_or(i32::MAX))
+    };
 
-    let x = area.position.x + area.size.width as i32 - to_physical(size.0 + SCREEN_MARGIN);
-    let y = area.position.y + area.size.height as i32 - to_physical(size.1 + SCREEN_MARGIN);
+    let x = edge(area.position.x, area.size.width) - to_physical(size.0 + SCREEN_MARGIN);
+    let y = edge(area.position.y, area.size.height) - to_physical(size.1 + SCREEN_MARGIN);
 
     // On Linux this cannot fail and may not happen. `tao`'s GTK
     // `set_outer_position` returns `()` and only posts a request, which
@@ -453,7 +475,11 @@ fn round_corners<R: Runtime>(shelf: &WebviewWindow<R>) {
             hwnd,
             DWMWA_WINDOW_CORNER_PREFERENCE,
             std::ptr::from_ref(&preference).cast(),
-            std::mem::size_of_val(&preference) as u32,
+            // A `u32` DWORD, and `preference` is a `u32`: this is 4.
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                std::mem::size_of_val(&preference) as u32
+            },
         );
     }
 }

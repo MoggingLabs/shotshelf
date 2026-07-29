@@ -171,8 +171,10 @@ operating systems, so the appearance specs skip themselves elsewhere. Regenerate
 | **macOS** | whatever `defaults read com.apple.screencapture location` returns **if that folder is there**, else `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
 | **Linux** | `~/Pictures/Screenshots` (GNOME, XDG portal), `~/Pictures` (Spectacle, Flameshot), `~/Videos/Screencasts`, `~/Videos` | same clipboard watch |
 
-A capture folder that does not exist yet is created, but only beside a parent that already does —
-so `Pictures\Screenshots` appears on a machine that has never taken a screenshot, and nothing is
+A capture folder that does not exist yet is created, but only beside a parent that already does, and
+never directly inside your home folder — so `Pictures\Screenshots` appears on a machine that has
+never taken a screenshot, `~/Pictures` and `~/Videos` on Linux are watched only if they are already
+there, and nothing is
 invented inside a OneDrive folder you do not have. The resolved list is logged at startup. macOS reads
 the screenshot location once per launch, so `defaults write com.apple.screencapture location …`
 takes effect on the next start. Set `SHOTSHELF_WATCH_DIRS` (`;`-separated on Windows, `:`

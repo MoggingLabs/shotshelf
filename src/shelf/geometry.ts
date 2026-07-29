@@ -38,6 +38,17 @@ export const COLUMN_MAX_CARDS = 5;
  * for a message that is usually about that capture.
  */
 export function columnHeight(cards: number, alsoShowing = 0): number {
+  // Zero cards is a real answer now, not a race.
+  //
+  // The floor used to be one, justified by "the column is only ever on screen
+  // because something landed in it". `Popover.showProblem` made that false: a
+  // capture that was *lost* raises a column with a message and no card, and the
+  // floor put that message at the bottom of 136px of nothing.
+  //
+  // Still floored at one when there is nothing else to show, because a window
+  // of pure padding is not a window anyone wants either.
+  if (cards <= 0 && alsoShowing > 0) return COLUMN_PADDING + alsoShowing;
+
   const shown = Math.min(Math.max(cards, 1), COLUMN_MAX_CARDS);
   return shown * CARD_HEIGHT + (shown - 1) * CARD_GAP + COLUMN_PADDING + alsoShowing;
 }

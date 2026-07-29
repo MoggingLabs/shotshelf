@@ -124,20 +124,29 @@ windows = { version = "0.61", features = [
 
 # Casts are checked, so the allowances that name them mean something.
 #
-# `cast_sign_loss`, `cast_precision_loss` and `cast_possible_truncation` are
-# clippy `pedantic` lints — allow-by-default. Four `#[allow(clippy::cast_*)]`
-# attributes sat in this crate silencing lints nothing had ever enabled: dead
-# attributes, whose inline comments ("Guarded non-negative above.") read as
-# though a tool had demanded the guard, and whose entries in `check-dirs.mjs`'s
-# allowance table documented a decision no tool would ever have raised. Deleting
-# all four left `cargo clippy -- -D warnings` at exit 0.
+# These four are clippy `pedantic` lints — allow-by-default. Before this block
+# existed the crate carried `#[allow(clippy::cast_*)]` attributes silencing
+# lints nothing had ever enabled: dead attributes, whose inline comments
+# ("Guarded non-negative above.") read as though a tool had demanded the guard,
+# and whose entries in `check-dirs.mjs`'s allowance table documented a decision
+# no tool would ever have raised. Deleting them all left
+# `cargo clippy -- -D warnings` at exit 0.
 #
 # Turning them on is the half that was missing. This crate converts between
-# `u32`, `i32`, `f64` and `usize` constantly — screen coordinates, scale
-# factors, image dimensions, byte counts — and a wrong one is a window placed
-# off-screen or an allocation computed from a negative number. Now the four
-# allowances are load-bearing, the table is honest, and the *next* unguarded
-# cast has to be argued for rather than merely written.
+# `u32`, `i32`, `f64`, `u64` and `usize` constantly — screen coordinates, scale
+# factors, image dimensions, byte counts, ffmpeg durations — and a wrong one is
+# a window placed off-screen or an allocation sized from a negative number.
+# `window::place` was exactly that computation and exactly what the first
+# version of this comment cited as the motivation while leaving it unlinted:
+# `area.size.width as i32` *wraps* above 2^31 rather than saturating, so it
+# placed the window at a negative coordinate. It saturates now.
+#
+# No count of the allowances is given here. `check-dirs.mjs` holds them by name
+# and states the rule this sentence would otherwise break — "No count is quoted,
+# here or anywhere: the table is the count" — and the first version of this
+# comment quoted a number that was already wrong when it was written.
 [lints.clippy]
 cast_sign_loss = "warn"
 cast_precision_loss = "warn"
+cast_possible_truncation = "warn"
+cast_possible_wrap = "warn"

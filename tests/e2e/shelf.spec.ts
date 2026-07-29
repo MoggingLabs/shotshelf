@@ -14,6 +14,7 @@ import {
   expect,
   FIXTURE,
   land,
+  launchAppearance,
   openBrowse,
   test,
   CAPTURE_EVENT,
@@ -800,4 +801,62 @@ test("the window a lost-capture message put up goes away with the message", asyn
   await expect
     .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length))
     .toBe(1);
+});
+
+test("an ordinary notice does not dismiss the shelf when its message times out", async ({
+  page,
+}) => {
+  // `dismissIfEmpty` was written for one job — putting away the strip-only
+  // window `showProblem` raises — and shipped without the two guards the rest
+  // of the file applies. `#opened` is false for the whole launch appearance
+  // while the shape is *browse* and the column is legitimately empty, so any
+  // message at all reached it on the falling edge twelve seconds later.
+  //
+  // An update notice is the ordinary case: the app raises it about itself,
+  // nobody asked, and the shelf should be exactly where it was afterwards.
+  await page.clock.install();
+  await bootShelf(page);
+  await launchAppearance(page);
+
+  // Settings open inside the four seconds, so `busy()` blocks the launch
+  // dismissal. That is the state the window gets stuck in — showing, not
+  // opened, browse shape, no cards — and it persists for the session.
+  await page.locator("#shelf-settings").click();
+  await expect(page.locator("#settings-panel")).toBeVisible();
+  await page.clock.runFor(5_000);
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+
+  await page.evaluate(
+    ([event, version]) => window.__shotshelf__.emit(event, version),
+    [UPDATE_EVENT, "0.2.0"] as const,
+  );
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+
+  // Past the strip's twelve seconds. Nothing here is about the column.
+  await page.clock.runFor(13_000);
+
+  await expect(page.locator("#shelf-alert")).toBeHidden();
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+  await expect(page.locator("#settings-panel")).toBeVisible();
+});
+
+test("a lost-capture message does not take the settings panel off screen", async ({ page }) => {
+  // `showProblem` switches the window to the column shape, and the stylesheet
+  // hides `.settings` and the title strip in that shape — so a failed clipboard
+  // write arriving while someone was typing a new hotkey took the panel away
+  // and left `settingsOpen()` true, which swallows every shelf key until
+  // Escape. The panel is one of the states `busy()` already names.
+  await bootShelf(page);
+  await launchAppearance(page);
+  await page.locator("#shelf-settings").click();
+  await expect(page.locator("#settings-panel")).toBeVisible();
+
+  await page.evaluate(
+    ([event, message]) => window.__shotshelf__.emit(event, message),
+    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+  );
+
+  // The message still lands — the window is already on screen, strip and all.
+  await expect(page.locator("#shelf-alert")).toContainText(/could not be saved/i);
+  await expect(page.locator("#settings-panel")).toBeVisible();
 });

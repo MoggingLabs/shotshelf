@@ -40,28 +40,28 @@ pub struct Sized {
 /// triangle downscale of small text is visibly worse — aliased strokes and
 /// dropped hairlines in exactly the region someone is asking about.
 pub fn for_handoff(image: DynamicImage) -> Sized {
-    // `LONG_EDGE` directly, not a parameter. This took one, and every caller in
-    // the crate — the one production call site and all nine tests — passed
-    // `LONG_EDGE`. A parameter nobody varies reads as configuration and is not:
-    // it makes the ceiling look like the caller's decision when it is this
-    // module's, and it invites guards for values that cannot arrive.
-    let long_edge = LONG_EDGE;
+    // `LONG_EDGE` is used directly below, not bound to a local first. This took
+    // a parameter, and every caller in the crate — the one production call site
+    // and all nine tests — passed `LONG_EDGE`. A parameter nobody varies reads
+    // as configuration and is not: it makes the ceiling look like the caller's
+    // decision when it is this module's, and it invites guards for values that
+    // cannot arrive.
     let (width, height) = (image.width(), image.height());
     let longest = width.max(height);
 
     // Never enlarge. A small capture is small on purpose — a cropped region, a
     // dialog — and upscaling it invents detail that was never there.
     // `longest == 0` was a second clause here and could never be reached:
-    // `0 <= long_edge` holds for every `u32`, so the first one had already
+    // `0 <= LONG_EDGE` holds for every `u32`, so the first one had already
     // returned.
-    if longest <= long_edge {
+    if longest <= LONG_EDGE {
         return Sized {
             image,
             resized: false,
         };
     }
 
-    let scale = f64::from(long_edge) / f64::from(longest);
+    let scale = f64::from(LONG_EDGE) / f64::from(longest);
     let target_width = scale_edge(width, scale);
     let target_height = scale_edge(height, scale);
 
@@ -105,7 +105,7 @@ fn scale_edge(edge: u32, scale: f64) -> u32 {
     // The clamp above is the guard; clippy cannot see through it. Accountable
     // in `check-dirs.mjs`'s table, and load-bearing — `cast_sign_loss` is
     // switched on in `Cargo.toml`, so removing this attribute fails the build.
-    #[allow(clippy::cast_sign_loss)]
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     let edge = clamped as u32;
     edge
 }

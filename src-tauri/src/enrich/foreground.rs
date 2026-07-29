@@ -236,7 +236,10 @@ mod platform {
         let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
 
         let mut buffer = vec![0_u16; MAX_PATH as usize];
-        let mut length = buffer.len() as u32;
+        // `try_from`, not `as`: the buffer is `MAX_PATH` long, so this cannot
+        // truncate — but saying so through the conversion costs nothing and
+        // needs no allowance.
+        let mut length = u32::try_from(buffer.len()).unwrap_or(MAX_PATH);
         let read = unsafe {
             QueryFullProcessImageNameW(
                 process,
