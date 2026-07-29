@@ -235,6 +235,10 @@ pub fn load<R: Runtime>(app: &AppHandle<R>) -> SettingsStore {
 /// what happens when either is unreadable — and it had no test, because
 /// everything it did was behind an `AppHandle`.
 fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
+    // Whether the file exists but will not parse — distinct from "absent", which
+    // is an ordinary first run. Only the first deserves a `.corrupt` copy.
+    let mut settings_unreadable = false;
+
     let current = path
         .as_ref()
         .and_then(|path| std::fs::read_to_string(path).ok())
@@ -247,6 +251,7 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
                 Ok(settings) => Some(settings),
                 Err(err) => {
                     crate::diag::warn(&format!("settings file unreadable, using defaults: {err}"));
+                    settings_unreadable = true;
                     None
                 }
             },
@@ -282,9 +287,20 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
         .and_then(|path| std::fs::read_to_string(path).ok())
         .is_some_and(|raw| read_local_state(strip_bom(&raw)).is_err());
 
-    let local = pins
+    // The raw text, read once and used twice: `read_local_state` needs it, and
+    // so does the watermark, which must be recovered before `set_aside` moves
+    // the file out from under it.
+    let raw_local = pins
         .as_ref()
-        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|path| std::fs::read_to_string(path).ok());
+    let watermark = raw_local
+        .as_deref()
+        .map(strip_bom)
+        .and_then(|raw| read_local_state(raw).ok())
+        .map_or(0, |state| state.last_capture_ms);
+
+    let local = raw_local
+        .clone()
         .and_then(|raw| match read_local_state(strip_bom(&raw)) {
             Ok(state) => Some(state),
             // Said out loud, like the preferences file four lines up.
@@ -333,7 +349,43 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
         // the preferences file carried.
         None => {}
     }
-    let last_capture = local_watermark(&pins);
+    // From the same parse as the pins, rather than a second read of the file.
+    //
+    // A review raised this as a bug — that `local_watermark` ran after
+    // `set_aside` had renamed the file, so a corrupt `pinned.json` cost the
+    // watermark too and backfill re-offered removed captures. It does not hold:
+    // that helper used `read_local_state`, the same parse as the pins, so a file
+    // that will not parse yields 0 whichever order it is read in, and a file
+    // that parses never reaches `set_aside`. Written down because the reasoning
+    // is not obvious from either site.
+    //
+    // What *was* worth changing is that the file was opened twice, with the
+    // second open depending on the first not having moved it. One read now.
+    let last_capture = watermark;
+
+    // A corrupt preferences file is set aside before it is overwritten, exactly
+    // as an unreadable pins file is.
+    //
+    // `persist` writes *both* files, so a `settings.json` that failed to parse
+    // was replaced with defaults whenever `pinned.json` happened to be absent —
+    // which is what a user following the "delete that too for a clean start"
+    // advice produces, and what the launch after a corrupt-pins rescue produces.
+    // The pins file has had a `.corrupt` neighbour since round nineteen; the
+    // hand-editable file next to it had none.
+    if settings_unreadable {
+        if let Some(path) = path.as_ref().filter(|path| path.exists()) {
+            match set_aside(path) {
+                Some(kept) => crate::diag::warn(&format!(
+                    "the unreadable settings file was kept as {}",
+                    kept.file_name().unwrap_or_default().to_string_lossy()
+                )),
+                None => crate::diag::warn(
+                    "could not set the unreadable settings file aside; it is still in place \
+                     and the next write will overwrite it",
+                ),
+            }
+        }
+    }
 
     let store = SettingsStore {
         path: path.unwrap_or_default(),
@@ -487,13 +539,6 @@ fn read_local_state(raw: &str) -> Result<LocalState, serde_json::Error> {
             Err(_) => Err(object_error),
         },
     }
-}
-
-fn local_watermark(pins: &Option<PathBuf>) -> u64 {
-    pins.as_ref()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|raw| read_local_state(strip_bom(&raw)).ok())
-        .map_or(0, |state| state.last_capture_ms)
 }
 
 fn strip_bom(raw: &str) -> &str {
@@ -679,6 +724,34 @@ mod tests {
         assert_eq!(store.get().pinned.len(), 1);
         assert!(store.get().pinned[0].path.contains("current"));
         assert_eq!(store.last_capture_ms(), 42, "the watermark came back too");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_corrupt_settings_file_is_kept_rather_than_overwritten() {
+        // `persist` writes *both* files, so an unreadable `settings.json` was
+        // replaced with defaults whenever `pinned.json` was absent — which is
+        // what "delete that too for a clean start" produces, and what the launch
+        // after a corrupt-pins rescue produces. The pins file has had a
+        // `.corrupt` neighbour since round nineteen; the hand-editable file
+        // beside it had none.
+        let dir = workspace("corrupt-settings");
+        let roaming = dir.join("settings.json");
+        let local = dir.join("pinned.json");
+
+        std::fs::write(&roaming, "{ this will not parse").expect("a corrupt settings file");
+        // Absent on purpose: that is what makes `persist` run.
+        assert!(!local.exists());
+
+        let _ = load_from(Some(roaming.clone()), Some(local));
+
+        let kept = dir.join("settings.json.corrupt");
+        assert!(kept.exists(), "the unreadable settings file was destroyed");
+        assert_eq!(
+            std::fs::read_to_string(&kept).expect("readable"),
+            "{ this will not parse",
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

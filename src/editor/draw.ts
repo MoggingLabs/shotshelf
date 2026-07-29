@@ -18,7 +18,16 @@ import type { EditSession, Mark } from "./session.ts";
 /** Amber, the same "look here" colour the comparison uses. */
 const INK = "#f59e0b";
 /** Opaque and near-black, so a redaction reads as one rather than as shadow. */
-const REDACTION = "#111114";
+/**
+ * The colour a redaction destroys pixels with.
+ *
+ * Exported because the live preview needs it too: it drew every tool as the
+ * same hollow amber rectangle, so the app's one irreversible operation looked
+ * exactly like Box while you were placing it, and only became opaque on
+ * release. `draw.ts`'s own header says what you see should be a faithful
+ * preview of the exported file.
+ */
+export const REDACTION = "#111114";
 const OUTLINE_WIDTH = 3;
 const ARROW_HEAD = 14;
 const CALLOUT_RADIUS = 13;

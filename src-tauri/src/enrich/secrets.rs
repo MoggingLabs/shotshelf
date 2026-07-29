@@ -207,6 +207,9 @@ const MAX_FINDINGS: usize = 50;
 pub fn scan(text: &str) -> Vec<Finding> {
     let mut findings: Vec<Finding> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Byte ranges already reported, so one credential is not counted twice by
+    // two patterns that both match it.
+    let mut covered: Vec<std::ops::Range<usize>> = Vec::new();
 
     for pattern in PATTERNS.iter() {
         for hit in pattern.regex.find_iter(text) {
@@ -228,7 +231,27 @@ pub fn scan(text: &str) -> Vec<Finding> {
             // A set rather than a scan of the vec, because the case the
             // ceiling exists for — a screenshot of a contact list — was also
             // the case that made the scan quadratic.
-            if seen.insert(hit.as_str().to_owned()) {
+            // …and the same secret found by two *different* patterns is also one
+            // problem.
+            //
+            // `seen` keys on the matched text, so it cannot see this: the
+            // ServiceToken pattern matches `ghp_A1b2…` while the Assignment
+            // pattern matches `GH_TOKEN=ghp_A1b2…`, which are different strings
+            // covering the same credential. This module's own fixture is that
+            // shape — an ordinary terminal screenshot — and the card read "a
+            // GitHub token and 1 other" with a `2` badge for one token.
+            //
+            // Overlap rather than containment: two patterns can each take a
+            // different slice of the same secret. `PATTERNS` is ordered
+            // worst-first, so the more specific rule claims the range and the
+            // vaguer one yields — which is also the finding worth showing.
+            let range = hit.range();
+            let overlaps = covered
+                .iter()
+                .any(|taken| range.start < taken.end && taken.start < range.end);
+
+            if !overlaps && seen.insert(hit.as_str().to_owned()) {
+                covered.push(range);
                 findings.push(finding);
             }
         }
@@ -724,6 +747,30 @@ and again: {token}
                 found.preview,
             );
         }
+    }
+
+    #[test]
+    fn one_credential_matched_by_two_patterns_is_one_finding() {
+        // The module's own fixture shape, and an ordinary terminal screenshot:
+        // the ServiceToken rule matches `ghp_…` and the Assignment rule matches
+        // `GH_TOKEN=ghp_…`. Two different strings, one credential — `seen` keys
+        // on the matched text and so could not tell, and the card read "a GitHub
+        // token and 1 other" with a `2` badge for a single token.
+        let findings = scan("export GH_TOKEN=ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8");
+
+        assert_eq!(findings.len(), 1, "one credential, one finding");
+        assert_eq!(
+            findings[0].kind,
+            SecretKind::ServiceToken,
+            "the more specific rule wins, and is the one worth showing",
+        );
+
+        // And two genuinely different credentials on one screen still count two.
+        let two = scan(
+            "export GH_TOKEN=ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8\n\
+             AKIAIOSFODNN7EXAMPLE",
+        );
+        assert_eq!(two.len(), 2);
     }
 
     #[test]

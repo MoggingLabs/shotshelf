@@ -969,3 +969,32 @@ test("the column's timer does not tear down an editor that is still opening", as
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
   await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
 });
+
+test("a redaction previews as what it will do, not as a box around it", async ({ page }) => {
+  // Every tool drew the same hollow amber rectangle while dragging, so the one
+  // irreversible operation in the app looked exactly like Box until release —
+  // against `draw.ts`'s own promise that what you see is a faithful preview of
+  // the exported file. The gating spec used Box, the one tool where the preview
+  // and the result agree.
+  await openEditor(page);
+  await page.locator('.editor__tool[data-tool="redact"]').click();
+
+  const box = await page.locator(".editor__canvas").boundingBox();
+  expect(box).not.toBeNull();
+  const middle: [number, number] = [box!.width * 0.5, box!.height * 0.5];
+
+  // Held open mid-drag, which is the whole point: this is about what is on
+  // screen while the pointer is still down.
+  await page.mouse.move(box!.x + box!.width * 0.25, box!.y + box!.height * 0.25);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width * 0.75, box!.y + box!.height * 0.75, { steps: 6 });
+
+  const midDrag = await inkAt(page, ...middle);
+  await page.mouse.up();
+
+  // Opaque and near-black — the redaction fill, not a stroke over the capture.
+  expect(midDrag[3]).toBe(255);
+  expect(midDrag[0]).toBeLessThan(40);
+  expect(midDrag[1]).toBeLessThan(40);
+  expect(midDrag[2]).toBeLessThan(40);
+});

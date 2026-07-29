@@ -16,7 +16,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 
 import { browseShelf, previewShelf, saveEdit } from "../shelf/bridge.ts";
 import { isEditable, type ShelfItem } from "../shelf/types.ts";
-import { inImageSpace, inkStyle, paint, paintCropGuide } from "./draw.ts";
+import { inImageSpace, inkStyle, paint, paintCropGuide, REDACTION } from "./draw.ts";
 import { Overlay, readable } from "../shelf/overlay.ts";
 import { EditSession, type Rect, type Tool } from "./session.ts";
 
@@ -465,8 +465,21 @@ function preview(rect: Rect): void {
   // `lineJoin` nor `lineCap`, so the rectangle under the pointer had square
   // corners and the one that landed had round ones.
   inImageSpace(context, live.session, live.scale);
-  inkStyle(context);
-  context.strokeRect(rect.x, rect.y, rect.width, rect.height);
+
+  // Redaction previews as what it will do, not as a box around it.
+  //
+  // Every tool drew the same hollow amber rectangle, so the one irreversible
+  // operation in the app was indistinguishable from Box while being placed and
+  // only turned opaque on release — against this module's own promise that what
+  // you see is a faithful preview of the exported file. The colour comes from
+  // `draw.ts` rather than a second copy.
+  if (live.session.tool === "redact") {
+    context.fillStyle = REDACTION;
+    context.fillRect(rect.x, rect.y, rect.width, rect.height);
+  } else {
+    inkStyle(context);
+    context.strokeRect(rect.x, rect.y, rect.width, rect.height);
+  }
   context.restore();
 }
 
