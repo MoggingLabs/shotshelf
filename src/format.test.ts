@@ -101,3 +101,15 @@ test("Yesterday rolls into the previous month and year", () => {
   const newYear = new Date(2026, 0, 1, 12, 0, 0).getTime();
   assert.equal(dayLabel(new Date(2025, 11, 31, 23, 0, 0).getTime(), newYear), "Yesterday");
 });
+
+test("a size never renders in the unit below the one it belongs to", () => {
+  // The unit was picked from the unrounded value, so 1,048,064 bytes left it at
+  // 1023.5 kB and `toFixed(0)` printed "1024 kB" on a badge that should read
+  // "1.0 MB". A band of sizes below every power of 1024 was affected.
+  assert.equal(formatBytes(1_048_064), "1.0 MB");
+  assert.equal(formatBytes(1_048_575), "1.0 MB");
+  assert.equal(formatBytes(1_073_741_312), "1.0 GB");
+  // And the ordinary cases are untouched.
+  assert.equal(formatBytes(1023), "1023 B");
+  assert.equal(formatBytes(1024), "1.0 kB");
+});

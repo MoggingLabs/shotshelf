@@ -142,9 +142,10 @@ macos-latest and ubuntu-latest**:
 `npm run gate` runs the lot locally, with one stated difference: it runs `cargo test --lib`
 where CI runs `cargo test --all-targets`. Every test this crate has is a `#[cfg(test)] mod` in
 the library, so the coverage is identical today — CI uses the wider form so that an integration
-test under `src-tauri/tests/`, which is the gate
-[`webview_path.rs`](./src-tauri/src/webview_path.rs) argues the repo most needs, would actually
-be run rather than silently skipped. The narrower local form exists because Windows Smart App
+test under `src-tauri/tests/` would actually be run rather than silently skipped, the day one
+exists. (An earlier version of this paragraph called such a test "the gate `webview_path.rs`
+argues the repo most needs"; that file retracted the claim, and `SECURITY.md` records that the
+docs went on repeating it. The variable was never the target kind.) The narrower local form exists because Windows Smart App
 Control refuses the freshly linked bin test harness on the development machine; see
 [SECURITY.md](./SECURITY.md#what-has-not-been-verified).
 

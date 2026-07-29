@@ -94,6 +94,18 @@ export class ColumnQueue {
   releaseAll(now: number = Date.now()): void {
     if (this.#holds.size === 0) return;
     this.#holds.clear();
+    this.#refreshAll(now);
+  }
+
+  /**
+   * Give every card a full fresh window.
+   *
+   * One owner for the rule "releasing the last hold restarts the clock". It was
+   * written out twice, nine lines apart, in `releaseAll` and `hold` — the two
+   * places that can be the last release — so a change to how long a released
+   * card gets had two sites to find and no way to notice the second.
+   */
+  #refreshAll(now: number): void {
     for (const entry of this.#entries) entry.expires = now + COLUMN_MS;
   }
 
@@ -120,7 +132,7 @@ export class ColumnQueue {
     // the deadline reset; anything else would let a repeatedly-toggled reason
     // keep a card alive indefinitely.
     if (holdersBefore > 0 && this.#holds.size === 0) {
-      for (const entry of this.#entries) entry.expires = now + COLUMN_MS;
+      this.#refreshAll(now);
     }
   }
 

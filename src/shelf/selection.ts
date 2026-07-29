@@ -29,6 +29,20 @@ export class Selection {
   /** Where a range selection counts from. */
   #anchor: string | undefined;
 
+  /**
+   * The card the keyboard should move from — the one last *acted on*, not the
+   * last in on-screen order.
+   *
+   * `extendTo` clears and rebuilds `#picked` top-to-bottom, so after a range
+   * selected *upwards* the last entry of `ids()` is the bottom of the range,
+   * which is the opposite end from the card the user shift-clicked.
+   * `moveSelection` read `ids().at(-1)` and so stepped downwards from the wrong
+   * card on the next ArrowUp.
+   */
+  focus(): string | undefined {
+    return this.#anchor ?? [...this.#picked].pop();
+  }
+
   has(id: string): boolean {
     return this.#picked.has(id);
   }

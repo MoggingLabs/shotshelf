@@ -404,6 +404,11 @@ body {
   transition: opacity 90ms ease-out;
 }
 
+/* Keyboard focus counts as reaching for it, exactly as hover does.
+   Without this, tabbing to Copy or Remove on a pinned tile put the focus ring
+   on a fully transparent button: the ring was drawn, the control was not, and
+   Enter took a capture off the shelf with nothing visible to aim at. */
+.tile--pinned .tile__action:focus-visible,
 .tile--pinned:hover .tile__action {
   opacity: 1;
 }

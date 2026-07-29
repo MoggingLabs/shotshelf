@@ -29,6 +29,18 @@ export function formatBytes(bytes: number): string {
     unit += 1;
   }
 
+  // Rounded first, then re-checked against the unit.
+  //
+  // The unit was chosen from the unrounded value, so 1,048,064 bytes left
+  // `value` at 1023.5 and `toFixed(0)` printed **"1024 kB"** on a recording
+  // badge that should read "1.0 MB". A whole band of sizes below every power of
+  // 1024 rendered in the unit below the one they belong to.
+  const digits = value < 10 ? 1 : 0;
+  if (Number(value.toFixed(digits)) >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+
   return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit] ?? "GB"}`;
 }
 

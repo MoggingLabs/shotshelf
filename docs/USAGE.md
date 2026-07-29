@@ -65,6 +65,14 @@ percent-encode them, and every Linux screenshot name contains spaces. Whether th
 depends on the application you drop onto — most tolerate it, some may not — and nobody has yet
 run Shotshelf on a Linux desktop to find out. Copy still works either way.
 
+The third is scope. Linux has no single conventional screenshot folder — GNOME, KDE and
+Flameshot each choose differently and several write straight into `~/Pictures` — so Shotshelf
+watches `~/Pictures` and `~/Videos` themselves, not just a `Screenshots` subfolder. Two
+consequences worth knowing: anything you drop into either folder is shelved as a capture, and
+the shelf's own webview is granted read access to the images and videos sitting directly in
+them. Windows watches three specific subfolders and macOS one, so this is broader than either.
+Set `SHOTSHELF_WATCH_DIRS` to narrow it.
+
 The second is imposed by the tray protocol rather than by choice: Linux
 tray icons deliver no click events to the app, so **open the shelf from the icon's menu or the
 hotkey** rather than by clicking the icon.

@@ -145,3 +145,24 @@ test("handing over does not disturb the caller's list", () => {
   inHandoverOrder(items);
   assert.equal(items[0]?.path, "/b.png", "the input was sorted in place");
 });
+
+test("the keyboard moves from the card last acted on, not the bottom of a range", () => {
+  // `extendTo` rebuilds the picked set in on-screen order, so after a range
+  // selected *upwards* `ids().at(-1)` is the bottom of the range — the opposite
+  // end from the card the user shift-clicked. `moveSelection` read that, so the
+  // next ArrowUp stepped down from the wrong card.
+  const selection = new Selection();
+  selection.only("d");
+  selection.extendTo("b", ORDER);
+
+  assert.deepEqual(selection.ids(), ["b", "c", "d"]);
+  assert.equal(selection.focus(), "d", "the anchor is where the range started");
+});
+
+test("focus falls back to the last picked when there is no anchor", () => {
+  const selection = new Selection();
+  selection.toggle("a");
+  selection.toggle("c");
+
+  assert.equal(selection.focus(), "c");
+});

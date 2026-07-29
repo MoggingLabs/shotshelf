@@ -118,7 +118,7 @@ jobs:
       # `--all-targets`: lib, bins and — crucially — anything under
       # `src-tauri/tests/`. It is not `--lib`, which was here briefly and would
       # have silently not run an integration test the moment one was added,
-      # which is exactly the gate `webview_path.rs` says the repo most needs.
+      # which is the wider form of the same gate the local `npm run gate` runs.
       #
       # It is also not plain `cargo test`, which additionally invokes rustdoc.
       # This crate has no doctests, and rustdoc is one of the binaries Windows

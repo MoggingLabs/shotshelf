@@ -173,11 +173,39 @@ fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
     let path = app.path();
     let mut dirs = Vec::new();
 
-    if let Ok(pictures) = path.picture_dir() {
+    // `picture_dir()` reads XDG user-dirs and nothing else — no `$HOME/Pictures`
+    // fallback, no `$XDG_PICTURES_DIR` — so on an install without
+    // `xdg-user-dirs` it returns `Err` and this returned an empty list. The user
+    // then got "no capture folders found — clipboard watch only" on a machine
+    // that has `~/Pictures`, which Windows and macOS both avoid by falling back
+    // (`home_dir()` and `~/Desktop` respectively). Linux was the one OS with no
+    // fallback at all.
+    let home = path.home_dir().ok();
+    let pictures = path
+        .picture_dir()
+        .ok()
+        .or_else(|| home.as_ref().map(|home| home.join("Pictures")));
+    let videos = path
+        .video_dir()
+        .ok()
+        .or_else(|| home.as_ref().map(|home| home.join("Videos")));
+
+    // The specific folder first, then its parent.
+    //
+    // The parent is deliberate and it is broad: `catch::allow_reading_captures`
+    // grants the webview asset-protocol read over exactly this list, so on Linux
+    // that is every image and video sitting directly in `~/Pictures` and
+    // `~/Videos`. Windows grants three leaf folders and macOS one. It is here
+    // because Linux has no single conventional screenshot directory — GNOME,
+    // KDE and Flameshot each choose differently, and several write straight into
+    // `~/Pictures` — so watching only the leaf would catch nothing on most
+    // desktops. `docs/USAGE.md` states the breadth rather than leaving it to be
+    // discovered.
+    if let Some(pictures) = pictures {
         dirs.push(pictures.join("Screenshots"));
         dirs.push(pictures);
     }
-    if let Ok(videos) = path.video_dir() {
+    if let Some(videos) = videos {
         dirs.push(videos.join("Screencasts"));
         dirs.push(videos);
     }

@@ -574,7 +574,9 @@ export class Shelf {
     const visible = this.#visibleIds();
     if (visible.length === 0) return;
 
-    const current = this.#selection.ids().at(-1);
+    // `focus()`, not `ids().at(-1)`: after a range selected upwards those are
+    // opposite ends, and the second is not the card the user last touched.
+    const current = this.#selection.focus();
     const index = current === undefined ? -1 : visible.indexOf(current);
     // From nothing, the first press lands on the newest — the top of the list
     // — whichever direction it was.
