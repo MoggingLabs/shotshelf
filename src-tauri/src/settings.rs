@@ -580,7 +580,7 @@ fn write<T: Serialize>(path: &PathBuf, value: &T) -> std::io::Result<()> {
 /// webview and is written to disk and re-read — and every entry costs a tile
 /// and a credential scan at the next launch. Comfortably more than anyone
 /// pins on purpose.
-const MAX_PINNED: usize = 500;
+pub(crate) const MAX_PINNED: usize = 500;
 
 /// What the item cap may be set to.
 ///
@@ -592,7 +592,7 @@ const MAX_PINNED: usize = 500;
 /// clamped with no explanation. The repo already solved this class twice, for
 /// the default settings and the secret kinds, and did not extend it here.
 const MIN_ITEMS: usize = 1;
-const MAX_ITEMS: usize = 200;
+pub(crate) const MAX_ITEMS: usize = 200;
 
 /// The pinned list as it is allowed to reach the disk.
 ///

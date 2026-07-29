@@ -314,7 +314,17 @@ for (const file of SOURCE_GLOBS.flatMap((glob) => globSync(glob))) {
     // live three-segment references. Only the last segment is the item; the
     // ones before it are the path to the module that owns it, and the file
     // lookup below already searches by module name.
-    const rust = /^(?:[a-z_][a-z0-9_]*::)*([a-z_][a-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)$/.exec(token);
+    // A trailing "()" is the natural way to name a function, and the pattern
+    // anchored on the item name — so a made-up "module::item()" matched nothing
+    // at all and sailed through, while the same reference without the parens was
+    // caught. The gate header promises that form is checked; it now checks both.
+    //
+    // Unbackticked here on purpose: this rule reads its own file, and it caught
+    // both spellings of the example on the run that introduced them.
+    const rust =
+      /^(?:[a-z_][a-z0-9_]*::)*([a-z_][a-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)(?:\(\))?$/.exec(
+        token,
+      );
     if (rust) {
       const [, module, item] = rust;
       const source_file = modules.get(module);

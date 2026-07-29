@@ -223,6 +223,7 @@ exactly why the other one exists:
 | :-- | :-- | :-- |
 | **Windows** | `%APPDATA%\com.mogginglabs.shotshelf\settings.json` | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\pinned.json` |
 | **macOS** | `~/Library/Application Support/com.mogginglabs.shotshelf/settings.json` | `~/Library/Application Support/com.mogginglabs.shotshelf/pinned.json` |
+| **Linux** | `~/.config/com.mogginglabs.shotshelf/settings.json` | `~/.local/share/com.mogginglabs.shotshelf/pinned.json` |
 
 The split is a privacy one, **on Windows and Linux**. On Windows `%APPDATA%` is the **roaming**
 profile, which a domain roaming profile or Enterprise State Roaming copies to a network share at

@@ -38,7 +38,17 @@ pub struct VideoDetails {
 /// 200 items cannot legitimately need more" — which was simply wrong about
 /// pins, and meant a shelf with many pinned recordings evicted frames that
 /// were still on screen and re-derived them with ffmpeg every half hour.
-const POSTER_CACHE_LIMIT: usize = 750;
+///
+/// Derived rather than copied. Both numbers were written out here by hand
+/// while living private in `settings.rs`, so raising the item cap would have
+/// made 750 too small and this paragraph false — and re-introduced the exact
+/// failure it records. The margin stays a decision made here.
+const POSTER_CACHE_LIMIT: usize =
+    crate::settings::MAX_ITEMS + crate::settings::MAX_PINNED + POSTER_CACHE_MARGIN;
+
+/// Room above the largest shelf that can exist, so a frame is not evicted
+/// while its tile is still on screen.
+const POSTER_CACHE_MARGIN: usize = 50;
 
 /// Drop the oldest cached frames. Called on a timer from `lib.rs`.
 ///
