@@ -388,30 +388,37 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
             crate::diag::warn(&format!(
                 "pinned captures could not be read, so none were restored: {err}"
             ));
-            // Moved aside, not merely left alone.
-            //
-            // A previous round added this warning and stopped, under a
-            // comment saying the overwrite was fixed. It was not:
-            // `note_capture` fires on the first capture of the session and
-            // `persist_local` then writes an empty list straight over the
-            // only copy the user could have repaired by hand. Leaving the
-            // file in place means the next write destroys it; a `.corrupt`
-            // neighbour is something a person can actually open.
-            if let Some(path) = pins.as_ref() {
-                match set_aside(path) {
-                    Some(kept) => crate::diag::warn(&format!(
-                        "the unreadable file was kept as {}",
-                        kept.file_name().unwrap_or_default().to_string_lossy()
-                    )),
-                    None => crate::diag::warn(
-                        "could not set the unreadable pins file aside; it is still in place \
-                             and the next write will overwrite it",
-                    ),
-                }
-            }
             None
         }
     });
+
+    // Moved aside, not merely left alone — for *either* way it was unusable.
+    //
+    // This sat inside the parse-error arm above, so it ran only when the bytes
+    // were read and would not parse. A file that could not be *read* — saved as
+    // UTF-16 by Notepad, locked by a sync agent, on an offline redirected
+    // profile — took the `None` path instead, got no `.corrupt` neighbour, and
+    // was then overwritten by the first capture of the session: `note_capture`
+    // fires and `persist_local` writes the emptied list straight over it. Every
+    // pin gone, permanently, with nothing on screen.
+    //
+    // `unreadable` already covered both states and was spent only on emptying
+    // the list. Out here, keyed on it, both reach the copy — which is what
+    // `docs/USAGE.md` promises for "either settings file", and what the
+    // preferences file has done all along.
+    if unreadable {
+        if let Some(path) = pins.as_ref() {
+            match set_aside(path) {
+                Some(kept) => crate::diag::warn(&format!(
+                    "the unreadable pins file was kept as {}",
+                    kept.file_name().unwrap_or_default().to_string_lossy()
+                )),
+                None => crate::diag::warn(
+                    "could not set the unreadable pins file aside; it is still in place                      and the next write will overwrite it",
+                ),
+            }
+        }
+    }
 
     match local {
         Some(state) => current.pinned = state.pinned,
@@ -790,6 +797,41 @@ mod tests {
         assert!(
             !roamed.contains("still-pinned"),
             "a capture path reached the roaming file: {roamed}",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_pins_file_that_cannot_be_read_is_kept_before_anything_overwrites_it() {
+        // A real, writable file whose *bytes* cannot be read as text.
+        //
+        // The sibling test below uses a directory named `pinned.json`, which
+        // `rename` cannot replace — so it could prove the stale roaming list was
+        // not presented, and could not see either half of the loss that follows:
+        // no `.corrupt` copy, and the first capture of the session overwriting
+        // the file. UTF-16 is what Notepad's "Unicode" save and PowerShell's
+        // `Set-Content -Encoding Unicode` produce, on a file `docs/USAGE.md`
+        // invites people to hand-edit.
+        let dir = workspace("unreadable-pins-bytes");
+        let roaming = dir.join("settings.json");
+        let local = dir.join("pinned.json");
+
+        // A lone UTF-16 surrogate half: valid to write, not valid UTF-8.
+        std::fs::write(&local, [0xff_u8, 0xfe, 0x00, 0xd8]).expect("a pins file");
+
+        let store = load_from(Some(roaming), Some(local.clone()));
+
+        assert!(
+            store.get().pinned.is_empty(),
+            "unreadable bytes were presented as pins"
+        );
+
+        // The copy a person can open and repair.
+        let kept = local.with_extension("json.corrupt");
+        assert!(
+            kept.is_file(),
+            "the unreadable pins file was overwritten without a .corrupt copy"
         );
 
         let _ = std::fs::remove_dir_all(&dir);

@@ -19,7 +19,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { codeOnly, grantsIn, silencedIn } from "./rust-source.mjs";
+import { codeOnly, grantsIn, silencedIn, tomlWithoutComments } from "./rust-source.mjs";
 
 /** Wrap a fragment in enough Rust that it reads like a real file. */
 const file = (fragment) => `use crate::dirs;\n\n${fragment}\n\nfn other() {}\n`;
@@ -199,4 +199,67 @@ void test("a char literal holding a quote does not open a string", () => {
   // any attribute.
   const source = file("fn c() -> char { '\"' }\n#[allow(clippy::disallowed_methods)]\nfn d() {}");
   assert.deepEqual(silencedIn(source), ["clippy::disallowed_methods"]);
+});
+
+void test("an allowance whose lint name cannot be read fails closed", () => {
+  // Bypass nine: a macro composes the lint name from tokens the parser never
+  // sees, so the harvest came back empty and the allowance table read the file
+  // as silencing nothing. Reported as an unreadable name instead, which no
+  // table entry matches until someone writes one and says why.
+  const composed = [
+    "macro_rules! quiet { ($l:ident, $($i:tt)*) => { #[allow(clippy::$l)] $($i)* }; }",
+    "fn x() {}",
+    "",
+  ].join("\n");
+  assert.deepEqual(silencedIn(composed), ["clippy::<unreadable>"]);
+
+  // A rustc lint names nothing of ours and must stay silent — the first version
+  // of this rule reported `#[allow(dead_code)]` as unreadable.
+  assert.deepEqual(silencedIn(file("#[allow(dead_code)]")), []);
+  assert.deepEqual(silencedIn(file("#[allow(unused)]")), []);
+});
+
+void test("TOML comments are blanked, and only real comments", () => {
+  // The clippy-configuration gate reads `clippy.toml` and `Cargo.toml` as text.
+  // Commenting every rule out left all of their paths present, so the gate
+  // passed over a `clippy.toml` that was semantically empty.
+  const source = [
+    "disallowed-methods = [",
+    '  "tauri::path::PathResolver::app_data_dir",  # a note',
+    "]",
+    '# disallowed-types = ["tauri::path::BaseDirectory"]',
+    'name = "a # inside a basic string"',
+    "literal = 'a # inside a literal string'",
+    "",
+  ].join("\n");
+  const blanked = tomlWithoutComments(source);
+
+  assert.equal(blanked.length, source.length, "length changed");
+  assert.equal(
+    blanked.split("\n").length,
+    source.split("\n").length,
+    "line count changed",
+  );
+  assert.ok(blanked.includes("app_data_dir"), "a live rule was blanked");
+  assert.ok(!blanked.includes("BaseDirectory"), "a commented-out rule survived");
+  assert.ok(blanked.includes("inside a basic string"), "a hash in a string ended the line");
+  assert.ok(blanked.includes("inside a literal string"), "a hash in a literal string did too");
+});
+
+void test("a TOML literal string ends at its quote, backslash and all", () => {
+  // Literal (single-quoted) strings process no escapes, so a value ending in a
+  // backslash ends at the second quote. Treating that backslash as an escape
+  // left the scan inside a string for the rest of the file and copied every
+  // comment through unblanked — reopening the comment bypass in the same round
+  // it was closed, on a value as ordinary as a Windows path.
+  const source = [
+    "disallowed-names = ['C:" + String.fromCharCode(92) + "']",
+    '# disallowed-methods = ["tauri::path::PathResolver::app_data_dir"]',
+    "",
+  ].join("\n");
+
+  assert.ok(
+    !tomlWithoutComments(source).includes("app_data_dir"),
+    "a comment after a literal string ending in a backslash survived",
+  );
 });

@@ -241,7 +241,25 @@ const CLIPPY_RULES = JSON.parse(readFileSync("tests/fixtures/clippy-rules.json",
   // The `[lints.clippy]` table only, so a level set elsewhere in the manifest
   // cannot be mistaken for this one.
   const manifest = tomlWithoutComments(readFileSync("src-tauri/Cargo.toml", "utf8"));
-  const table = /\[lints\.clippy\]([\s\S]*?)(?=\n\[|$)/.exec(manifest)?.[1] ?? "";
+  // Every `[lints.clippy…]` table, not only the one headed exactly that.
+  //
+  // Slicing to the next `\n[` put `[lints.clippy.disallowed_methods]` — Cargo's
+  // sub-table spelling, which it honours — entirely *outside* the text being
+  // scanned, so the strongest form of this bypass did not need the allow
+  // pattern to be wrong at all. Two seats found it independently.
+  //
+  // A sub-table's own name is the lint, so `[lints.clippy.x]` + `level = "allow"`
+  // is rewritten into the `x = { level = "allow" }` form the scan below reads.
+  // `$(?![\s\S])` rather than `$`: under `m` the bare anchor matches the end of
+  // every *line*, so each table body came back empty and the required-levels
+  // check below reported all four missing on a correct manifest.
+  const table = [...manifest.matchAll(/^\[lints\.clippy([^\]]*)\]([\s\S]*?)(?=^\[|$(?![\s\S]))/gm)]
+    .map((found) => {
+      const lint = (found[1] ?? "").replace(/^\./, "");
+      const body = found[2] ?? "";
+      return lint ? `${lint} = { ${body} }` : body;
+    })
+    .join("\n");
   // Nothing in this table may be set to `allow`.
   //
   // Requiring the four `warn` lines is not enough on its own: appending
@@ -257,7 +275,10 @@ const CLIPPY_RULES = JSON.parse(readFileSync("tests/fixtures/clippy-rules.json",
   // rule off with this check green, which is verbatim the bypass it was added
   // to close.
   for (const allowed of table.matchAll(
-    /^\s*"?([a-z_:]+)"?\s*=\s*(?:['"]allow['"]|\{[^}]*level\s*=\s*['"]allow['"][^}]*\})/gm,
+    // A key may be bare, double-quoted or single-quoted, and may be dotted:
+    // `disallowed_methods.level = "allow"` says the same as the table form.
+    // All of those are one rule switched off.
+    /^\s*['"]?([a-z_:.]+)['"]?\s*=\s*(?:['"]allow['"]|\{[^}]*level\s*=\s*['"]allow['"][^}]*\})/gm,
   )) {
     const lint = allowed[1] ?? "a lint";
     problemsWithConfig.push(

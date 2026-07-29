@@ -372,7 +372,10 @@ fn len_of(path: &Path) -> u64 {
 
 /// Windows keeps an exclusive lock on a file that is still being written, so
 /// being able to open it is a second, cheap "the writer is done" signal.
-fn is_readable(path: &Path) -> bool {
+///
+/// Shared with `to_backfill`, which needs the same answer for the same reason
+/// and had been asking a clock instead.
+pub(super) fn is_readable(path: &Path) -> bool {
     std::fs::File::open(path).is_ok()
 }
 

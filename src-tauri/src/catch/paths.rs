@@ -177,7 +177,11 @@ fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
 ///
 /// `settle` filters what is not there, so naming a folder that does not exist
 /// costs nothing; naming none costs the user every screenshot.
-// Compiled everywhere, called from the Windows and Linux branches.
+// Compiled everywhere, called from the Windows and Linux branches — which was
+// asserted before it was true. The Linux branch restated the same rule inline
+// instead, so on Linux this had no non-test caller at all and `-D warnings`
+// failed the build with `function 'under_home' is never used`. CI builds all
+// three, which is the only reason that would have been caught.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 fn under_home(known: Option<PathBuf>, home: Option<&Path>, name: &str) -> Option<PathBuf> {
     known.or_else(|| home.map(|home| home.join(name)))
@@ -280,14 +284,8 @@ fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
     // (`home_dir()` and `~/Desktop` respectively). Linux was the one OS with no
     // fallback at all.
     let home = path.home_dir().ok();
-    let pictures = path
-        .picture_dir()
-        .ok()
-        .or_else(|| home.as_ref().map(|home| home.join("Pictures")));
-    let videos = path
-        .video_dir()
-        .ok()
-        .or_else(|| home.as_ref().map(|home| home.join("Videos")));
+    let pictures = under_home(path.picture_dir().ok(), home.as_deref(), "Pictures");
+    let videos = under_home(path.video_dir().ok(), home.as_deref(), "Videos");
 
     // The specific folder first, then its parent.
     //

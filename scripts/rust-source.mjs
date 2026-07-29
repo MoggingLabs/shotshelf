@@ -317,7 +317,15 @@ export function tomlWithoutComments(source) {
 
     if (inString) {
       out += char;
-      if (char === "\\") {
+      // A backslash escapes only inside a *basic* (double-quoted) string.
+      //
+      // TOML literal strings are single-quoted and process no escapes at all,
+      // so `'C:'` ends at the second quote. Treating `'` as an escape left
+      // this function inside a string for the rest of the file and copied every
+      // comment through unblanked — which reopened the comment bypass this was
+      // added to close, in the same round, on a value as ordinary as a Windows
+      // path in `disallowed-names`.
+      if (char === "\\" && quote === '"') {
         out += source[i + 1] ?? "";
         i += 1;
       } else if (char === quote) {

@@ -357,16 +357,6 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
 /// folder for.
 const BACKFILL_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// How recently a file may have been written and still count as finished.
-///
-/// Not a hand-off boundary — `watching_since` is that, per directory — but a
-/// liveness one. A backfill gets a single look at the folder and cannot tell a
-/// finished file from one mid-write, where the watcher's settle loop can.
-/// Comfortably longer than the ffmpeg silence `VIDEO_STABLE_TICKS` is sized
-/// for, so a recording that is merely stalled is never mistaken for a finished
-/// one.
-const BACKFILL_SETTLED: Duration = Duration::from_secs(5);
-
 /// The most captures a launch will bring back.
 ///
 /// A hard bound, because the alternative is a first run on a machine with four
@@ -418,7 +408,13 @@ pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Capture
     // nothing"), and a third above it described a `now` fallback that no longer
     // exists.
     let watching_since = engine.watching_since().unwrap_or_default();
-    let chosen = to_backfill(found, SystemTime::now(), since, &watching_since);
+    let chosen = to_backfill(
+        found,
+        SystemTime::now(),
+        since,
+        &watching_since,
+        folders::is_readable,
+    );
 
     // Move the watermark past what is being handed over.
     //
@@ -504,6 +500,7 @@ fn to_backfill(
     now: SystemTime,
     since_ms: u64,
     watching_since: &[(PathBuf, SystemTime)],
+    finished: impl Fn(&Path) -> bool,
 ) -> Vec<Capture> {
     let cutoff = now - BACKFILL_WINDOW;
 
@@ -538,26 +535,30 @@ fn to_backfill(
         let watchers_yet =
             took_over(path, watching_since).is_none_or(|started| *modified < started);
 
-        // And a file still being written is the watcher's whatever the boundary
-        // says.
+        // And a file the writer still holds open is the watcher's, whatever the
+        // boundary says.
         //
-        // The per-directory boundary answers "could a live event have been
-        // produced for this?"; it does not answer "is this file finished?". At
-        // a real launch the watcher started a fraction of a second ago, and a
-        // recording that was already running has its last flush *before* that —
-        // `VIDEO_STABLE_TICKS` is sized for an ffmpeg stall of about 2.8
-        // seconds with the file untouched. So the boundary alone handed over a
-        // partially written container, whose length and size cannot be read and
-        // whose drag-out is a truncated clip, and the watcher then shelved the
-        // finished file again under a different `ts`.
+        // This was a clock — "written more than five seconds ago" — ANDed with
+        // the boundary, and the conjunction lost captures. `watchers_yet` means
+        // "written before this folder's watcher registered, so backfill is the
+        // only way in"; a file in the band between those two answers yes to
+        // that and no to the clock, so backfill refused it and `notify`, which
+        // reports no history, never saw it. Permanently: `catch_backfill` runs
+        // once, and the first live capture moves the watermark past the dropped
+        // file's mtime. On an ordinary launch the watcher registers a fraction
+        // of a second in, so the band is nearly the whole five seconds — and
+        // `resolve_watch_dirs` can take seconds on a redirected profile, which
+        // widens it to the whole of start-up.
         //
-        // Backfill gets one look at the folder and cannot run a settle loop.
-        // The watcher can, so anything written this recently is left to it.
-        let settled = now
-            .duration_since(*modified)
-            .is_ok_and(|age| age >= BACKFILL_SETTLED);
+        // The real question was never "how old is this file" but "is anyone
+        // still writing it", and the watcher already has a signal for that:
+        // Windows keeps an exclusive lock on a file being written, so being
+        // able to open it means the writer has let go. A partially written
+        // recording is refused by that, and a screenshot finished two seconds
+        // before launch is not.
+        let done = finished(path);
 
-        as_ms(*modified) > since_ms && *modified >= cutoff && watchers_yet && settled
+        as_ms(*modified) > since_ms && *modified >= cutoff && watchers_yet && done
     });
 
     // Newest first to apply the cap, so the cap keeps the most recent...
@@ -752,7 +753,9 @@ mod tests {
         now: SystemTime,
         since_ms: u64,
     ) -> Vec<Capture> {
-        to_backfill(found, now, since_ms, &watcher_started())
+        // Everything in these fixtures is a finished file; the one test that
+        // cares about a half-written one supplies its own predicate.
+        to_backfill(found, now, since_ms, &watcher_started(), |_| true)
     }
 
     /// Written before the watcher was listening, and inside the window.
@@ -953,7 +956,7 @@ mod tests {
     #[test]
     fn a_recording_still_being_written_at_launch_is_left_to_the_watcher() {
         // The boundary answers "could a live event have been produced for
-        // this?"; it does not answer "is this file finished?".
+        // this?"; it does not answer "is anyone still writing it?".
         //
         // At a real launch the watcher started a fraction of a second ago, and a
         // recording that was already running has its last flush *before* that —
@@ -962,24 +965,34 @@ mod tests {
         // shelf a partially written container: a card whose length and size
         // cannot be read, whose drag-out is a truncated clip, and which the
         // watcher then shelved again under a different `ts` when it finished.
+        //
+        // The second question is asked of the *file*, not of a clock. A clock
+        // was tried — "written more than five seconds ago" — and it dropped
+        // every capture written in the band before its watcher registered,
+        // which is the permanent loss the boundary exists to prevent. The
+        // watcher's own signal is the right one: a writer still holding the
+        // file open has not finished with it.
         let watching = vec![(
             PathBuf::new(),
             SystemTime::UNIX_EPOCH + Duration::from_millis(NOW_SECS * 1000 - 200),
         )];
+        let mid_write = PathBuf::from("recording-in-progress.mp4");
+        let still_open = |path: &Path| path != mid_write;
 
-        // Last flush two seconds ago: before the watcher started, and well
-        // inside the stall `VIDEO_STABLE_TICKS` allows for.
-        let mid_write = seen(2, "recording-in-progress.mp4");
+        // Two seconds ago: before the watcher started, so the boundary admits
+        // it, and the writer still has it open.
+        let running = seen(2, "recording-in-progress.mp4");
         assert!(
-            to_backfill(vec![mid_write], now(), 0, &watching).is_empty(),
+            to_backfill(vec![running], now(), 0, &watching, still_open).is_empty(),
             "a partially written recording was handed to the shelf"
         );
 
-        // And one that really has finished still comes back.
-        let finished = seen(30, "yesterdays-clip.mp4");
+        // The same age, finished. This is the case the clock lost.
+        let done = seen(2, "taken-two-seconds-ago.png");
         assert_eq!(
-            names(&to_backfill(vec![finished], now(), 0, &watching)),
-            vec!["yesterdays-clip.mp4"]
+            names(&to_backfill(vec![done], now(), 0, &watching, still_open)),
+            vec!["taken-two-seconds-ago.png"],
+            "a capture no watcher could ever emit was dropped by backfill too"
         );
     }
 
@@ -1021,7 +1034,7 @@ mod tests {
             (between, late.join("nobody-saw-it.png"), CaptureKind::Image),
         ];
 
-        let chosen = to_backfill(found, now(), 0, &started);
+        let chosen = to_backfill(found, now(), 0, &started, |_| true);
         assert_eq!(
             names(&chosen),
             vec!["/late\nobody-saw-it.png"]
@@ -1050,18 +1063,23 @@ mod tests {
         // shared helper puts the watcher five seconds back, which is far enough
         // that the old five-second grace happened to admit the file anyway.
         //
-        // One second ago, then, and a screenshot taken two seconds ago — while
-        // Shotshelf was still coming up. Under the old rule that file was
+        // Six seconds ago, then, and a screenshot taken seven seconds ago —
+        // while Shotshelf was still coming up. Under the old rule that file was
         // inside the grace and skipped as "the watcher has it"; the watcher had
         // not started yet, so nothing had it.
+        //
+        // The numbers are comfortably apart because this test is about the
+        // *boundary*. The band immediately before a watcher's start — where a
+        // later round's five-second clock lost captures outright — is covered
+        // by `a_recording_still_being_written_at_launch_is_left_to_the_watcher`,
+        // which asserts a two-second-old file comes back.
         let started_just_now = vec![(
             PathBuf::new(),
             SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 6),
         )];
-        // Older than `BACKFILL_SETTLED`, so it is finished — and older than the
-        // watcher's start, so nothing live can ever have seen it.
+        // Older than the watcher's start, so nothing live can ever have seen it.
         let during_launch = seen(7, "taken-during-launch.png");
-        let chosen = to_backfill(vec![during_launch], now(), 0, &started_just_now);
+        let chosen = to_backfill(vec![during_launch], now(), 0, &started_just_now, |_| true);
         assert_eq!(
             names(&chosen),
             vec!["taken-during-launch.png"],
@@ -1073,7 +1091,7 @@ mod tests {
         // registration, and still growing.
         let after = seen(0, "still-being-written.mp4");
         assert!(
-            to_backfill(vec![after], now(), 0, &started_just_now).is_empty(),
+            to_backfill(vec![after], now(), 0, &started_just_now, |_| true).is_empty(),
             "a file written after the watcher came up is the watcher's to emit"
         );
     }
