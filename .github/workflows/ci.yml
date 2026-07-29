@@ -115,20 +115,19 @@ jobs:
         if: '!cancelled()'
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
-      # `--lib`, which is where every test in this crate lives — `main.rs` is a
-      # four-line shim around `shotshelf_lib::run()` and has none, and there is
-      # no `tests/` directory yet. Identical to what `npm run gate:rust` runs,
-      # deliberately, so README's "npm run gate runs the lot" stays true.
+      # `--all-targets`: lib, bins and — crucially — anything under
+      # `src-tauri/tests/`. It is not `--lib`, which was here briefly and would
+      # have silently not run an integration test the moment one was added,
+      # which is exactly the gate `webview_path.rs` says the repo most needs.
       #
-      # Plain `cargo test` additionally invokes rustdoc and links a test binary
-      # for the bin target, and Windows Smart App Control blocks both on the
-      # development machine the moment they are freshly linked (os error 4551).
-      # Nothing is lost here; if an integration test is ever added under
-      # `src-tauri/tests/` — see `webview_path.rs` for why one should be — this
-      # command and the npm script both need `--test '*'` alongside.
+      # It is also not plain `cargo test`, which additionally invokes rustdoc.
+      # This crate has no doctests, and rustdoc is one of the binaries Windows
+      # Smart App Control refuses on the development machine when freshly
+      # linked (os error 4551), so including it would make the local gate
+      # unrunnable for no coverage.
       - name: Rust tests
         if: '!cancelled()'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
 
       - name: Build app
         if: '!cancelled()'

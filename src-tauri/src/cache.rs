@@ -89,6 +89,88 @@ pub fn prune(dir: &Path, limit: usize, kind: Entry) {
     }
 }
 
+/// Which *version of which file* a piece of derived data belongs to.
+///
+/// Three caches need this and each had its own encoding — FNV-1a over
+/// milliseconds, `DefaultHasher` over seconds, and a bare `(PathBuf,
+/// Option<Duration>)` tuple — with the mtime read written out verbatim in two
+/// of them. The concept was not named, it was *narrated*: three docstrings
+/// pointing at each other ("the poster cache already keys on path and mtime
+/// for exactly this reason", "the mistake `handoff.rs`'s key docstring
+/// used to record", "the hand-off cache next door keys on path and mtime for exactly
+/// this reason"). Three cross-references is a codebase saying it has one
+/// concept and three copies of it.
+///
+/// The property they all exist for is the same, and each states it: serving
+/// the *previous* version's derived data under the new thumbnail is a
+/// disclosure bug rather than a stale cache. Three encodings meant it could be
+/// lost one at a time — and it was: `poster` keyed on seconds, so re-recording
+/// within a second served the old clip's frame, and it had no test at all
+/// until a reviewer deleted the mtime and watched everything stay green.
+///
+/// Milliseconds, because a capture tool overwriting its output inside one
+/// second is ordinary. `Ord` so callers can compare versions rather than only
+/// test equality.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct Version {
+    path: PathBuf,
+    /// `None` when the timestamp could not be read, which only means this file
+    /// shares a version with its other versions — where every one of these
+    /// caches was before mtime was part of the key.
+    modified_ms: Option<u128>,
+}
+
+impl Version {
+    /// Read the version of a file from disk.
+    pub fn of(source: &Path) -> Self {
+        Self::from_parts(source, std::fs::metadata(source).ok().as_ref())
+    }
+
+    /// Same, for a caller that already holds the metadata — `poster.rs` reads
+    /// it for the file size in the same breath.
+    pub fn from_meta(source: &Path, meta: &std::fs::Metadata) -> Self {
+        Self::from_parts(source, Some(meta))
+    }
+
+    fn from_parts(source: &Path, meta: Option<&std::fs::Metadata>) -> Self {
+        let modified_ms = meta
+            .and_then(|meta| meta.modified().ok())
+            .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|since| since.as_millis());
+        Self {
+            path: source.to_path_buf(),
+            modified_ms,
+        }
+    }
+
+    /// A filesystem-safe, fixed-width name for this version.
+    ///
+    /// Hashed because the alternative — the path itself — is not a legal
+    /// directory or file name on every platform. Fixed width so a prefix
+    /// cannot be ambiguous: `poster.rs` matches cached frames by prefix, and a
+    /// variable-length key would let one capture's sweep match another's.
+    pub fn key(&self) -> String {
+        // FNV-1a, deterministic across releases — unlike `DefaultHasher`,
+        // whose algorithm std explicitly does not promise to keep stable, and
+        // which was keying one of these caches. A cache key that changes when
+        // the toolchain does silently invalidates every entry.
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut eat = |bytes: &[u8]| {
+            for byte in bytes {
+                hash ^= u64::from(*byte);
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        };
+
+        eat(self.path.to_string_lossy().as_bytes());
+        if let Some(ms) = self.modified_ms {
+            eat(&ms.to_le_bytes());
+        }
+
+        format!("{hash:016x}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -101,6 +183,59 @@ mod tests {
 
     fn entry(seconds: u64, name: &str) -> (SystemTime, PathBuf) {
         (at(seconds), PathBuf::from(name))
+    }
+
+    fn version(path: &str, ms: Option<u128>) -> Version {
+        Version {
+            path: PathBuf::from(path),
+            modified_ms: ms,
+        }
+    }
+
+    #[test]
+    fn a_re_saved_capture_is_a_different_version() {
+        // The property all three caches exist for, stated once. Each of their
+        // docstrings calls serving the previous version's pixels under the new
+        // thumbnail a disclosure bug rather than a stale cache.
+        //
+        // Milliseconds: at one-second granularity — which one of the three
+        // used — a capture tool overwriting its output inside the same second
+        // served the old file's derived data. That cache had no test at all.
+        assert_ne!(
+            version("/p/shot.png", Some(1_700_000_000_000)).key(),
+            version("/p/shot.png", Some(1_700_000_000_020)).key(),
+            "same path, different contents, same key",
+        );
+        assert_eq!(
+            version("/p/shot.png", Some(1)).key(),
+            version("/p/shot.png", Some(1)).key(),
+        );
+        assert_ne!(
+            version("/one/Screenshot.png", Some(1)).key(),
+            version("/two/Screenshot.png", Some(1)).key(),
+            "two folders can each hold a Screenshot.png",
+        );
+    }
+
+    #[test]
+    fn a_version_key_is_a_legal_fixed_width_name() {
+        // A path is not a legal directory name on every platform, and
+        // `poster.rs` matches cached frames by *prefix* — a variable-length key
+        // would let one capture's sweep match another's.
+        for source in [
+            r"C:\Users\someone\Pictures\a b.png",
+            "/home/someone/图片/截图.png",
+        ] {
+            let key = version(source, Some(7)).key();
+            assert_eq!(key.len(), 16);
+            assert!(key.chars().all(|c| c.is_ascii_hexdigit()), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_capture_with_no_readable_timestamp_still_has_a_version() {
+        let key = version("/p/shot.png", None).key();
+        assert_eq!(key.len(), 16);
     }
 
     #[test]

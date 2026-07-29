@@ -54,6 +54,17 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # The gate, before anything is bundled.
+      #
+      # This workflow triggers on a `v*` tag and `ci.yml` does not — so a tag
+      # on a red commit built and "released" it, with no lint, no tests and no
+      # clippy anywhere in the path. A release is the one build that must not
+      # be the unchecked one.
+      - name: Gate
+        run: |
+          npx playwright install chromium --with-deps
+          npm run gate
+
       - name: Build frontend
         run: npm run build
 

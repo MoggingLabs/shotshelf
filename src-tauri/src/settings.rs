@@ -110,12 +110,12 @@ impl SettingsStore {
         // Through the same function `sanitise` uses. This path skips
         // `sanitise` entirely, which is how a rule applied on the settings
         // surface could miss the pin toggle — and did.
-        let snapshot = {
+        {
             let mut current = self.lock();
             current.pinned = allowed_pins(pinned);
-            current.clone()
-        };
-        self.persist(&snapshot);
+        }
+        // Only the local file: a pin toggle changes nothing in the preferences.
+        self.persist_local();
     }
 
     /// Write both files.
@@ -137,17 +137,37 @@ impl SettingsStore {
     /// hands over yesterday's after today's have already landed — and a
     /// watermark that went backwards would re-offer everything in between on
     /// the next launch.
+    ///
+    /// Writes **only the local file**, not the preferences beside it. This
+    /// used to call the full `persist`, which rewrites-and-renames both files;
+    /// and its caller is `CaptureSink::emit`, so every single screenshot
+    /// triggered an atomic rewrite of a preferences file in which nothing had
+    /// changed, synchronously, on the folder-watcher thread — which may be
+    /// watching an SMB share. Two records with two lifetimes and two writers
+    /// sharing one write path was the seam being wrong, not just slow.
     pub fn note_capture(&self, ts: u64) {
-        let mut newest = self
-            .last_capture
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if ts <= *newest {
-            return;
+        {
+            let mut newest = self
+                .last_capture
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if ts <= *newest {
+                return;
+            }
+            *newest = ts;
         }
-        *newest = ts;
-        drop(newest);
-        self.persist(&self.get());
+        self.persist_local();
+    }
+
+    /// Write the local file — pins and the watermark — and nothing else.
+    fn persist_local(&self) {
+        let local = LocalState {
+            pinned: self.lock().pinned.clone(),
+            last_capture_ms: self.last_capture_ms(),
+        };
+        if let Err(err) = write(&self.pins, &local) {
+            crate::diag::warn(&format!("could not save pins: {err}"));
+        }
     }
 
     fn persist(&self, settings: &Settings) {
@@ -158,13 +178,7 @@ impl SettingsStore {
         if let Err(err) = write(&self.path, &preferences) {
             crate::diag::warn(&format!("could not save settings: {err}"));
         }
-        let local = LocalState {
-            pinned: settings.pinned.clone(),
-            last_capture_ms: self.last_capture_ms(),
-        };
-        if let Err(err) = write(&self.pins, &local) {
-            crate::diag::warn(&format!("could not save pins: {err}"));
-        }
+        self.persist_local();
     }
 
     fn lock(&self) -> MutexGuard<'_, Settings> {
@@ -671,16 +685,23 @@ mod tests {
             current: Mutex::new(Settings::default()),
             last_capture: Mutex::new(0),
         };
+        // Preferences on disk first, as any real install has them.
+        store.replace(Settings::default());
+        let before = std::fs::read_to_string(&roaming).expect("preferences were written");
+        assert!(before.contains("hotkey"));
+
         store.set_pinned(vec![pin(&secret)]);
 
-        let roamed = std::fs::read_to_string(&roaming).expect("preferences were written");
+        let roamed = std::fs::read_to_string(&roaming).expect("preferences still there");
         assert!(
             !roamed.contains("acme-migration-plan"),
             "a capture path reached the roaming file: {roamed}",
         );
-        // And the preferences really are still there — the split must not cost
-        // the user their settings.
-        assert!(roamed.contains("hotkey"));
+        // Byte-for-byte untouched: a pin toggle changes nothing in the
+        // preferences, so it must not rewrite them. It used to — and so did
+        // every single capture, through `note_capture`, synchronously on the
+        // folder-watcher thread.
+        assert_eq!(before, roamed, "a pin toggle rewrote the preferences file");
 
         let kept = std::fs::read_to_string(&local).expect("pins were written");
         assert!(kept.contains("acme-migration-plan"), "the pin was not kept");

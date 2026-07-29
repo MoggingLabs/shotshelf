@@ -45,9 +45,16 @@ git commit -m "add clipboard-image capture on Windows"
 ```
 
 `npm run gate` is the same set CI runs: lint, dead code, type-check and bundle, the unit and
-browser suites, then `cargo fmt --check`, `clippy -D warnings`, `cargo test` and `cargo build`.
-It needs a Rust toolchain and the Playwright browser above; without them it stops rather than
-skipping quietly.
+browser suites, then `cargo fmt --check`, `clippy -D warnings`, `cargo test --lib` and
+`cargo build`. It needs a Rust toolchain and the Playwright browser above; without them it stops
+rather than skipping quietly.
+
+One difference, deliberate: CI runs `cargo test --all-targets`, which also covers anything under
+`src-tauri/tests/`. There is nothing there yet — see `webview_path.rs` for the integration test
+that should go there — and the local gate stays on `--lib` because Windows Smart App Control
+refuses the bin target's freshly linked test harness on the machine this was written on. If you
+add an integration test, CI will run it and your local gate will not; that is the one gap, and it
+fails loudly in CI rather than silently anywhere.
 
 ### Pull requests
 

@@ -142,37 +142,53 @@ mod tests {
         assert!(absolute(&gone.to_string_lossy()).is_ok());
     }
 
-    // `existing_file`'s **scope check has no automated coverage**, and the
-    // reason is structural rather than an oversight nobody got to.
+    // `existing_file`'s **scope check has no automated coverage**, and neither
+    // does anything else that takes an `AppHandle`.
     //
-    // Two gate populations, disjoint by construction. No Playwright spec can
-    // reach Rust: `tests/harness/tauri-mock.ts` replaces
+    // **The scope, stated properly.** Not a list of stragglers: it is *every
+    // one of the seventeen registered commands* and the whole `AppHandle`
+    // shell beneath them. `share.rs`, `edit.rs`, `poster.rs`, `window.rs`,
+    // `catch/mod.rs` (including `catch_backfill` and `catch_watch_dirs`),
+    // `catch/folders.rs`, `catch/paths.rs`, `catch/clipboard.rs`, `tray.rs`,
+    // `hotkey.rs`, `update.rs`, `imaging/mod.rs`, `diag.rs`, `settings::load`,
+    // `handoff::file_for`, `read_capture`'s ceiling, and `lib.rs`'s entire
+    // setup ordering. A reviewer demonstrated the reach twice: once by
+    // deleting the scope check below, and once by making `prepare_drag` never
+    // call `handoff::file_for` — killing export sizing outright. Both left
+    // clippy and every test green.
+    //
+    // **Why.** Two gate populations, disjoint by construction. No Playwright
+    // spec can reach Rust: `tests/harness/tauri-mock.ts` replaces
     // `window.__TAURI_INTERNALS__` wholesale, so no spec ever executes a
-    // `#[tauri::command]`. And no Rust test here can construct an `AppHandle`,
-    // so nothing taking one is callable. Everything in the intersection is
-    // ungated — this function, `read_capture`'s ceiling, `handoff::file_for`,
-    // `catch/clipboard.rs`, `tray.rs`, `hotkey.rs`, `update.rs`,
-    // `imaging::load`, `settings::load`. A reviewer proved the point by
-    // deleting the scope check below and watching all 108 tests pass.
+    // `#[tauri::command]`. And no Rust test here can construct an `AppHandle`.
     //
-    // **What was tried, so the next person does not repeat it.** Tauri ships
-    // `tauri::test::mock_builder`/`mock_app` for exactly this, and it was
-    // wired up three ways: as a `[dev-dependencies]` entry, as a `test`
-    // feature on the existing dependency, and with the WebView2 loader copied
-    // beside the test binary. All three compiled and all three died at load
-    // with `STATUS_ENTRYPOINT_NOT_FOUND` (0xc0000139) on Windows. The cause is
-    // this crate's own shape: `lib.rs` builds as `cdylib` and `staticlib` as
-    // well as `rlib` — Tauri requires that — and a unit test living inside a
-    // `cdylib` links against a symbol set the mock runtime changes.
+    // **What was tried, and what is actually known.** Tauri ships
+    // `tauri::test::mock_builder` for this. Three wirings were attempted — a
+    // `[dev-dependencies]` entry, the `test` feature on the existing
+    // dependency, and the WebView2 loader copied beside the test binary — and
+    // all three compiled and died at load with `STATUS_ENTRYPOINT_NOT_FOUND`
+    // (0xc0000139) on the development machine.
     //
-    // The route that should work is an **integration test** under
-    // `src-tauri/tests/`, which links the `rlib` and never touches the
-    // `cdylib`. It needs `pub mod webview_path;` and a CI run on all three
-    // OSes to confirm the linking holds, and it was not attempted here rather
-    // than attempted and left half-done: this machine cannot run the packaged
-    // app, so a change that alters what the shipped binary exports is not
-    // something to land unverified. It is the single highest-value gate this
-    // repository is missing.
+    // An earlier version of this comment blamed the crate building as a
+    // `cdylib`, and prescribed an integration test under `src-tauri/tests/` as
+    // "the route that should work". **Both claims were wrong**, and a reviewer
+    // disproved them in sixteen seconds: `cargo test --lib` builds a standalone
+    // *executable* and never links the `cdylib` at all, and an integration test
+    // that merely names `shotshelf_lib::run` dies with the identical error
+    // while one containing `2 + 2` passes. The variable is not the target kind
+    // — it is whether the linked object graph reaches the Tauri runtime.
+    // `--lib` passes today only because no test references `run()`, so the
+    // linker drops the runtime and its imports with it.
+    //
+    // So the honest statement is: **any Rust test that links the Tauri runtime
+    // fails to load on this machine, and the cause is unidentified.** Nothing
+    // about the failure is crate-shaped, which makes it most likely local — the
+    // same Smart App Control and WebView2 estate that refuses the packaged app.
+    // The way to find out is to land the mock-runtime test and let CI answer on
+    // three OSes; `--all-targets` is used by both the gate and CI precisely so
+    // such a test would run rather than be silently skipped. It is not landed
+    // here because a change that alters what the shipped binary links is not
+    // something to push unverified from a machine that cannot launch it.
     //
     // Until then the shape checks above are the half that is pure and tested.
     // The scope half rests on reading Tauri's `FsScope::is_allowed`, which

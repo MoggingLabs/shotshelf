@@ -8,12 +8,7 @@
 //! The source recording is never modified: ffmpeg writes its frame into the
 //! app cache directory and nowhere else.
 
-use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-    path::{Path, PathBuf},
-    time::UNIX_EPOCH,
-};
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
@@ -99,7 +94,7 @@ pub async fn video_details<R: Runtime>(
         let dir = poster_dir(&lookup_app)?;
         // Keyed on path *and* mtime, so a re-recorded file gets a fresh frame
         // but relaunching the app reuses what is already there.
-        let hit = cached(&dir, key);
+        let hit = cached(&dir, &key);
         Ok::<_, String>((bytes, key, dir, hit))
     })
     .await
@@ -126,13 +121,13 @@ pub async fn video_details<R: Runtime>(
     // module predates that pass and did not receive it until now.
     static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let ticket = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let staged = dir.join(format!("{key:016x}.{ticket}.staging.jpg"));
+    let staged = dir.join(format!("{key}.{ticket}.staging.jpg"));
     let duration_ms = extract_frame(&app, &source, &staged).await;
 
     // Named only once the length is known, so a cache hit never needs a second
     // ffmpeg run just to say how long the clip is.
     let poster = if has_frame(&staged) {
-        let target = dir.join(cache_name(key, duration_ms));
+        let target = dir.join(cache_name(&key, duration_ms));
         std::fs::rename(&staged, &target).map_err(|err| err.to_string())?;
         Some(target.to_string_lossy().into_owned())
     } else {
@@ -159,7 +154,7 @@ pub fn forget_video<R: Runtime>(app: AppHandle<R>, path: String) {
         return;
     };
 
-    let prefix = cache_prefix(cache_key(&source, &meta));
+    let prefix = cache_prefix(&cache_key(&source, &meta));
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return;
     };
@@ -331,7 +326,7 @@ fn parse_duration(stderr: &str) -> Option<u64> {
     Some(((hours * 3600 + minutes * 60) as f64 + seconds).max(0.0) as u64 * 1000)
 }
 
-fn cached(dir: &Path, key: u64) -> Option<(PathBuf, Option<u64>)> {
+fn cached(dir: &Path, key: &str) -> Option<(PathBuf, Option<u64>)> {
     let prefix = cache_prefix(key);
 
     for entry in std::fs::read_dir(dir).ok()?.flatten() {
@@ -357,13 +352,13 @@ fn cached(dir: &Path, key: u64) -> Option<(PathBuf, Option<u64>)> {
 /// the fixed-width key so `_na` cannot be read as part of it, and it is `_`
 /// where the staging name uses `.` — which is what keeps a half-written frame
 /// out of both `cached`'s scan and `forget_video`'s sweep.
-fn cache_prefix(key: u64) -> String {
-    format!("{key:016x}_")
+fn cache_prefix(key: &str) -> String {
+    format!("{key}_")
 }
 
 /// Duration rides along in the file name so a cache hit needs no second ffmpeg
 /// run just to say how long the clip is.
-fn cache_name(key: u64, duration_ms: Option<u64>) -> String {
+fn cache_name(key: &str, duration_ms: Option<u64>) -> String {
     let prefix = cache_prefix(key);
     match duration_ms {
         Some(ms) => format!("{prefix}{ms}.jpg"),
@@ -373,32 +368,15 @@ fn cache_name(key: u64, duration_ms: Option<u64>) -> String {
 
 /// Which *version of which file* a cached frame belongs to.
 ///
-/// Milliseconds, not seconds. `handoff.rs` cites this cache as its precedent —
-/// "the poster cache already keys on path and mtime for exactly this reason" —
-/// and calls serving the previous file's pixels under the new thumbnail "a
-/// disclosure bug rather than a stale cache". At one-second granularity the
-/// precedent was weaker than the thing citing it: re-recording within the same
-/// second served the previous clip's frame. `handoff` closed that at 1 ms; this
-/// had not.
-///
-/// Split from the `Metadata` so the property can be stated with two timestamps
-/// rather than by writing a file, sleeping, and hoping the filesystem records a
-/// distinct mtime — the mistake `handoff::fingerprint`'s docstring records.
-fn cache_key(source: &Path, meta: &std::fs::Metadata) -> u64 {
-    let modified = meta
-        .modified()
-        .ok()
-        .and_then(|at| at.duration_since(UNIX_EPOCH).ok());
-    version_key(source, modified)
-}
-
-fn version_key(source: &Path, modified: Option<std::time::Duration>) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    source.hash(&mut hasher);
-    if let Some(since) = modified {
-        since.as_millis().hash(&mut hasher);
-    }
-    hasher.finish()
+/// Through `cache::Version`, shared with the hand-off and scan caches. This
+/// keyed on **seconds** while `handoff.rs` cited it as the precedent for
+/// keying on milliseconds — so re-recording within one second served the
+/// previous clip's frame, in the cache being held up as the example of not
+/// doing that. It also used `DefaultHasher`, whose algorithm std does not
+/// promise to keep stable between releases: a toolchain upgrade would have
+/// silently invalidated every cached frame.
+fn cache_key(source: &Path, meta: &std::fs::Metadata) -> String {
+    crate::cache::Version::from_meta(source, meta).key()
 }
 
 fn poster_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
@@ -432,48 +410,15 @@ mod tests {
     }
 
     #[test]
-    fn a_re_recorded_clip_does_not_serve_the_previous_frame() {
-        // `cache_key` had no test at all: reducing it to path-only, dropping
-        // the mtime entirely, left all 108 tests passing while a comment three
-        // lines away claimed the mtime was what stopped a re-recording showing
-        // the old clip's frame.
-        //
-        // Milliseconds, because a screen recorder overwriting its output within
-        // the same second is ordinary, and this cache is cited by `handoff.rs`
-        // as the precedent for treating that as a disclosure bug.
-        let at = |ms| Some(std::time::Duration::from_millis(ms));
-        let clip = Path::new("/clips/demo.mp4");
-
-        assert_ne!(
-            version_key(clip, at(1_700_000_000_000)),
-            version_key(clip, at(1_700_000_000_020)),
-            "same path, different recording, same key",
-        );
-        assert_eq!(
-            version_key(clip, at(1_700_000_000_000)),
-            version_key(clip, at(1_700_000_000_000)),
-            "the same version keys the same way",
-        );
-        assert_ne!(
-            version_key(clip, at(1)),
-            version_key(Path::new("/clips/other.mp4"), at(1)),
-            "two recordings must not share one frame",
-        );
-        // An unreadable timestamp degrades to sharing a key with its other
-        // versions — where this cache was before — rather than panicking.
-        let _ = version_key(clip, None);
-    }
-
-    #[test]
     fn duration_survives_a_round_trip_through_the_cache_name() {
         // The length rides in the filename so a cache hit needs no second
         // ffmpeg run; a mismatch here would silently show the wrong duration.
         // Through `cache_prefix`, not a fourth hand-written copy of the
         // layout: writing the literal again here made the test agree with
         // itself rather than with the code that reads these names.
-        let name = cache_name(0xdead_beef, Some(8_000));
+        let name = cache_name("deadbeef00000000", Some(8_000));
         let suffix = name
-            .strip_prefix(&cache_prefix(0xdead_beef))
+            .strip_prefix(&cache_prefix("deadbeef00000000"))
             .expect("prefix must match what `cached` looks for");
         assert_eq!(
             suffix.trim_end_matches(".jpg").parse::<u64>().ok(),
@@ -483,9 +428,9 @@ mod tests {
 
     #[test]
     fn an_unknown_duration_still_produces_a_usable_name() {
-        let name = cache_name(1, None);
+        let name = cache_name("0000000000000001", None);
         assert!(name.ends_with("_na.jpg"));
-        assert!(name.starts_with(&cache_prefix(1)));
+        assert!(name.starts_with(&cache_prefix("0000000000000001")));
     }
 
     #[test]
@@ -496,18 +441,18 @@ mod tests {
         // only two of them, so a change here would have left `forget_video`
         // matching nothing: every removed recording leaking its frame, for
         // the life of the cache.
-        let key = 0x0123_4567_89ab_cdef_u64;
+        let key = "0123456789abcdef";
         let prefix = cache_prefix(key);
         assert!(cache_name(key, Some(1)).starts_with(&prefix));
         assert!(cache_name(key, None).starts_with(&prefix));
 
         // A different capture's frames must not be swept by this one's
         // prefix — the key is fixed-width precisely so it cannot be.
-        assert!(!cache_name(key + 1, Some(1)).starts_with(&prefix));
+        assert!(!cache_name("0123456789abcdee", Some(1)).starts_with(&prefix));
 
         // And the staged, half-written frame is matched by none of them: it
         // separates with `.` where a finished one uses `_`.
-        let staged = format!("{key:016x}.7.staging.jpg");
+        let staged = format!("{key}.7.staging.jpg");
         assert!(
             !staged.starts_with(&prefix),
             "a partial frame must not be served as a cache hit or swept as a finished one",

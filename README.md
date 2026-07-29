@@ -138,9 +138,17 @@ builds all three. Every push and PR runs, on **windows-latest, macos-latest and 
 | `npm run test:visual` | geometry and computed style everywhere; pixel goldens on Linux |
 | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo build` | the Rust half |
 
-`npm run gate` runs the lot locally — including the Rust row, which it did not until it was
-noticed that this sentence had been false since the table gained that row. One prerequisite,
-once per clone: `npx playwright install chromium`, which `npm install` does not do for you.
+`npm run gate` runs the lot locally, with one stated difference: it runs `cargo test --lib`
+where CI runs `cargo test --all-targets`. Every test this crate has is a `#[cfg(test)] mod` in
+the library, so the coverage is identical today — CI uses the wider form so that an integration
+test under `src-tauri/tests/`, which is the gate
+[`webview_path.rs`](./src-tauri/src/webview_path.rs) argues the repo most needs, would actually
+be run rather than silently skipped. The narrower local form exists because Windows Smart App
+Control refuses the freshly linked bin test harness on the development machine; see
+[SECURITY.md](./SECURITY.md#what-has-not-been-verified).
+
+One prerequisite, once per clone: `npx playwright install chromium`, which `npm install` does
+not do for you.
 
 The three-OS matrix is not ceremony: it has caught an unused parameter, two platform-only
 dead-code errors and an `unsafe` block that guarded nothing, none of which the other two hosts

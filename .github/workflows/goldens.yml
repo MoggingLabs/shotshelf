@@ -36,6 +36,10 @@ jobs:
 
       - name: Upload them
         uses: actions/upload-artifact@v7
+        # This workflow exists to hand back goldens when the visual suite
+        # *fails*, and without `always()` the upload is skipped in exactly that
+        # case. `ci.yml` gets this right; this one did not.
+        if: always()
         with:
           name: appearance-goldens
           path: tests/visual/**/*.png

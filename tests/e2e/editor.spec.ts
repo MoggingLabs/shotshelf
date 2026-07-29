@@ -863,6 +863,8 @@ test("the mark under the pointer looks like the mark that lands", async ({ page 
   expect(box).not.toBeNull();
   const from: [number, number] = [box!.width * 0.25, box!.height * 0.3];
   const to: [number, number] = [box!.width * 0.75, box!.height * 0.7];
+  // Sampled one pixel outside the rectangle's starting corner.
+  //
   // What this can and cannot see, stated because it was measured.
   //
   // It catches the divergence that matters — the two using different **ink**,

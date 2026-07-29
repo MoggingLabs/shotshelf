@@ -135,51 +135,12 @@ fn cache_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
 
 /// A directory name identifying *which version of which file*.
 ///
-/// Two captures can share a filename — `Screenshot.png` in two folders — so
-/// the key has to come from the whole path, and it has to be filesystem-safe
-/// on every platform, which rules out the path itself.
-///
-/// The modified time is in the key for a sharper reason. Plenty of capture
-/// tools reuse a filename: a fixed ShareX pattern, an overwritten
-/// `Screenshot.png`, a file re-saved from an editor. Keyed on path alone, the
-/// cache would hand over the *previous* image's pixels while the shelf showed
-/// the new thumbnail — the app's one job is handing over a specific
-/// screenshot, so delivering different pixels than the ones on screen is a
-/// disclosure bug rather than a stale cache. The poster cache already keys on
-/// path and mtime for exactly this reason.
+/// Through `cache::Version`, shared with the poster cache and the scan cache.
+/// All three needed the same thing and each wrote its own — this one FNV-1a
+/// over milliseconds, the poster cache `DefaultHasher` over seconds — with
+/// three docstrings pointing at each other instead of one function.
 fn key(source: &Path) -> String {
-    // An unreadable timestamp is not a reason to fail; it only means this
-    // capture shares a key with its other versions, which is where we were.
-    let modified = std::fs::metadata(source)
-        .and_then(|meta| meta.modified())
-        .ok()
-        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok());
-
-    fingerprint(&source.to_string_lossy(), modified)
-}
-
-/// The key itself, with the filesystem factored out.
-///
-/// Split from `key` so the "a re-saved capture gets a new key" property can be
-/// stated with two timestamps rather than by writing a file, sleeping, and
-/// hoping the filesystem records a distinct mtime. That test passed on NTFS
-/// and APFS and was one coarse-granularity runner away from failing for a
-/// reason that had nothing to do with the code.
-fn fingerprint(path: &str, modified: Option<std::time::Duration>) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    let mut eat = |bytes: &[u8]| {
-        for byte in bytes {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    };
-
-    eat(path.as_bytes());
-    if let Some(age) = modified {
-        eat(&age.as_millis().to_le_bytes());
-    }
-
-    format!("{hash:016x}")
+    crate::cache::Version::of(source).key()
 }
 
 /// Drop the oldest sized copies. Called on a timer from `lib.rs`, like the
@@ -214,31 +175,6 @@ mod tests {
     #[test]
     fn the_key_is_stable_for_the_same_capture() {
         assert_eq!(key(Path::new("/a/b.png")), key(Path::new("/a/b.png")));
-    }
-
-    #[test]
-    fn a_replaced_capture_gets_a_new_key() {
-        // A capture tool reusing a filename must not make the shelf hand over
-        // the previous image's pixels under the new thumbnail.
-        //
-        // Stated against `fingerprint` with two timestamps rather than by
-        // writing a file twice and sleeping: the property is "a different
-        // mtime is a different key", and going through the filesystem to say
-        // so made it depend on the runner's timestamp granularity instead.
-        let at = |ms| Some(std::time::Duration::from_millis(ms));
-        let first = fingerprint("/pictures/Screenshot.png", at(1_700_000_000_000));
-        let second = fingerprint("/pictures/Screenshot.png", at(1_700_000_000_020));
-
-        assert_ne!(first, second, "same path, different contents, same key");
-    }
-
-    #[test]
-    fn a_capture_with_no_readable_timestamp_still_gets_a_key() {
-        // Degrades to sharing a key with its other versions, which is where
-        // the cache was before mtime was part of it — not to a panic.
-        let keyed = fingerprint("/pictures/Screenshot.png", None);
-        assert_eq!(keyed.len(), 16);
-        assert!(keyed.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]

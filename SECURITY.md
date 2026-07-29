@@ -115,9 +115,13 @@ not be adopted and the reason no autostart plugin could be added. Both were re-t
 dependency works. The measured consequences are narrower and specific:
 
 - `cargo test` cannot run doctests here (`rustdoc` is blocked) and cannot run the bin target's
-  test harness after a relink. Neither matters — this crate has no doctests and `main.rs` is a
-  four-line shim — so `npm run gate:rust` runs `cargo test --lib`, which is every test there is,
-  and CI runs the identical command.
+  test harness after a relink — reproducibly, not intermittently: it stays refused across
+  retries until something outside this repository changes. Neither matters for coverage, since
+  this crate has no doctests and `main.rs` is a four-line shim, so `npm run gate:rust` runs
+  `cargo test --lib` — every test there is. **CI runs `--all-targets` instead**, deliberately
+  wider, so that an integration test under `src-tauri/tests/` would be run rather than silently
+  skipped. That is the only place the local gate and CI differ, and it is stated in README and
+  CONTRIBUTING as well as here.
 - `tauri`'s `test` feature, which would let Rust tests construct an `App` and reach the command
   tier, could not be landed: three wirings all died at load with `STATUS_ENTRYPOINT_NOT_FOUND`
   because this crate builds as a `cdylib`. The route that should work is an integration test

@@ -396,7 +396,7 @@ test("the watching indicator is not green when nothing is being watched", async 
   await bootShelf(page);
 
   await expect(page.locator("#shelf-mark")).not.toHaveClass(/shelf__mark--live/);
-  await expect(page.locator("#shelf-alert")).toContainText(/No capture folders are being watched/i);
+  await expect(page.locator("#shelf-alert")).toContainText(/No capture folders are being watched — only the clipboard/i);
 });
 
 test("the watching indicator is green when a folder really is watched", async ({ page }) => {

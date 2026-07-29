@@ -16,6 +16,15 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 // Derived from platform/arch rather than `rustc -vV` so this works before the
 // Rust toolchain is installed, which is the order CI happens to use.
+/**
+ * ffmpeg is GPL-3.0, and a distributed build carries obligations for it.
+ *
+ * `ffmpeg-static` downloads `ffmpeg.LICENSE` alongside the binary; copying
+ * only the binary shipped a GPL-licensed executable with no licence text in
+ * every installer. README states the obligation and nothing discharged it.
+ */
+const LICENSE_SUFFIX = ".LICENSE";
+
 const TRIPLES = {
   "win32-x64": "x86_64-pc-windows-msvc",
   "win32-arm64": "aarch64-pc-windows-msvc",
@@ -29,8 +38,13 @@ const platform = `${process.platform}-${process.arch}`;
 const triple = TRIPLES[platform];
 
 if (!triple) {
-  console.error(`[sidecar] no target triple known for ${platform}`);
-  process.exit(1);
+  // A warning, not a failure. This runs from `postinstall`, so exiting non-zero
+  // here failed `npm install` outright on any platform outside the map —
+  // including `linux-arm`, which `ffmpeg-static` does support. Someone
+  // installing dependencies to work on the front end does not need a sidecar,
+  // and `tauri build` complains loudly if one is genuinely missing.
+  console.warn(`[sidecar] no target triple known for ${platform} — skipping`);
+  process.exit(0);
 }
 
 let source;
@@ -52,12 +66,29 @@ if (!source || !existsSync(source)) {
 const suffix = process.platform === "win32" ? ".exe" : "";
 const target = join(root, "src-tauri", "binaries", `ffmpeg-${triple}${suffix}`);
 
+mkdirSync(dirname(target), { recursive: true });
+
+// The GPL text, beside the binary it covers.
+//
+// `ffmpeg-static` downloads `ffmpeg.LICENSE` next to the executable. Copying
+// only the executable meant every installer would have shipped a GPL-3.0
+// binary with no licence text — an obligation README states plainly and
+// nothing discharged.
+// Named after the binary — `ffmpeg.exe.LICENSE` on Windows, `ffmpeg.LICENSE`
+// elsewhere — so it is derived rather than guessed.
+const licence = `${source}${LICENSE_SUFFIX}`;
+const licenceTarget = join(dirname(target), `ffmpeg${LICENSE_SUFFIX}`);
+if (existsSync(licence)) {
+  copyFileSync(licence, licenceTarget);
+} else {
+  console.warn(`[sidecar] no licence beside ffmpeg — GPL text must ship with the binary`);
+}
+
 if (existsSync(target) && statSync(target).size === statSync(source).size) {
   console.log(`[sidecar] ffmpeg-${triple}${suffix} is already in place`);
   process.exit(0);
 }
 
-mkdirSync(dirname(target), { recursive: true });
 copyFileSync(source, target);
 if (process.platform !== "win32") chmodSync(target, 0o755);
 

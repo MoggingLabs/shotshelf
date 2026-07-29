@@ -93,7 +93,12 @@ export function showWatchState(dirs: readonly string[]): void {
   setMark(dirs.length > 0, describeWatch(dirs));
 
   if (dirs.length === 0) {
-    say("No capture folders are being watched — captures will not be picked up. See the log.");
+    // Not "captures will not be picked up": the clipboard watcher is started
+    // unconditionally and is independent of the folder watchers, so
+    // Win+Shift+S and ⌘⌃⇧4 *are* still caught in exactly this state — Rust
+    // even logs "clipboard watch only". The old sentence was false whenever
+    // the tooltip beside it ("Watching the clipboard only") was true.
+    say("No capture folders are being watched — only the clipboard. See the log for why.");
   }
 }
 

@@ -36,6 +36,69 @@ test.describe("appearance", () => {
     );
   }
 
+  /** The editor, mounted and painted, ready to be photographed. */
+  async function openEditorForGolden(page: import("@playwright/test").Page): Promise<void> {
+    await bootShelf(page);
+    await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", null));
+    await land(page, FIXTURE.wide);
+    await openBrowse(page);
+    await page.keyboard.press("ArrowDown");
+    await page.locator("#shelf-edit").click();
+    await expect(page.locator(".editor__canvas")).toBeVisible();
+    await settled(page);
+  }
+
+  test("the editor, open on a capture", async ({ page }) => {
+    // The editor is the largest visual feature in the app — 671 lines across
+    // `editor/index.ts` and `editor/draw.ts` — and had **no committed image of
+    // itself**, while the shelf had six. The canvas-pixel tests next door
+    // check that two code paths agree with each other; nothing checked that
+    // either of them renders what it should. A toolbar that loses its layout,
+    // a stage that stops centring, a control that disappears: all invisible.
+    await openEditorForGolden(page);
+    await expect(page.locator(".editor")).toHaveScreenshot("editor.png");
+  });
+
+  test("the quick look, open on a capture", async ({ page }) => {
+    await bootShelf(page);
+    await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", null));
+    await land(page, FIXTURE.wide);
+    await openBrowse(page);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press(" ");
+    await expect(page.locator(".preview__picture")).toBeVisible();
+    await settled(page);
+    await expect(page.locator(".preview")).toHaveScreenshot("preview.png");
+  });
+
+  test("the settings panel", async ({ page }) => {
+    // Four controls, and their layout is the only place the app asks the user
+    // for anything.
+    await bootShelf(page);
+    await openBrowse(page);
+    await page.locator("#shelf-settings").click();
+    await expect(page.locator("#settings-panel")).toBeVisible();
+    await settled(page);
+    await expect(page.locator("#settings-panel")).toHaveScreenshot("settings.png");
+  });
+
+  test("a card carrying a credential warning", async ({ page }) => {
+    // The badge that says "this screenshot has a token in it" — the most
+    // consequential thing the shelf draws, and it had no image either.
+    await bootShelf(page);
+    await page.evaluate(() =>
+      window.__shotshelf__.respond("describe_capture", {
+        scanned: true,
+        secrets: [{ kind: "serviceToken", label: "GitHub token", preview: "ghp_••••••" }],
+      }),
+    );
+    await land(page, FIXTURE.wide);
+    await openBrowse(page);
+    await expect(page.locator(".tile__secret")).toBeVisible();
+    await settled(page);
+    await expect(page.locator(".shelf")).toHaveScreenshot("secret-warning.png");
+  });
+
   test("the empty shelf", async ({ page }) => {
     await bootShelf(page);
     await openBrowse(page);

@@ -280,19 +280,18 @@ fn sizing_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
 /// something else, and the shelf is usable the whole time either way.
 const SCAN_CONCURRENCY: usize = 2;
 
-/// Identity of a capture's *contents*: where it is, and when it last changed.
+/// Identity of a capture's *contents*, through `cache::Version`.
 ///
-/// An unreadable timestamp only means this file shares a key with its other
-/// versions, which is where we were before.
-fn scan_key(source: &Path) -> (PathBuf, Option<std::time::Duration>) {
-    let modified = std::fs::metadata(source)
-        .and_then(|meta| meta.modified())
-        .ok()
-        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok());
-    (source.to_path_buf(), modified)
+/// The same answer the hand-off and poster caches key on, rather than a third
+/// encoding of it — this one carried its own copy of the mtime read, byte for
+/// byte identical to `handoff.rs`'s. An unreadable timestamp only means the
+/// file shares a version with its other versions, which is where all three
+/// caches were before mtime was part of the key.
+fn scan_key(source: &Path) -> ScanKey {
+    crate::cache::Version::of(source)
 }
 
-type ScanKey = (PathBuf, Option<std::time::Duration>);
+type ScanKey = crate::cache::Version;
 
 fn scan_cache() -> &'static std::sync::Mutex<std::collections::HashMap<ScanKey, Findings>> {
     static CACHE: std::sync::OnceLock<
@@ -407,19 +406,24 @@ mod tests {
         // granularity: that an existing file gets a version at all, and that
         // an unreadable one degrades to `None` rather than panicking. The
         // "a different mtime is a different key" half is the tuple's own
-        // definition, and `handoff::fingerprint` learned the hard way that
+        // definition, and `cache::Version` learned the hard way that
         // going through the filesystem to say so tests the filesystem.
         let dir = std::env::temp_dir().join(format!("shotshelf-scan-key-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("a temp dir");
         let file = dir.join("capture.png");
         std::fs::write(&file, b"pixels").expect("a temp file");
 
-        let (path, version) = scan_key(&file);
-        assert_eq!(path, file, "the key carries which file it is about");
-        assert!(version.is_some(), "an existing capture has a version");
-
-        let (_, missing) = scan_key(&dir.join("never-existed.png"));
-        assert_eq!(missing, None, "an unreadable timestamp is not a panic");
+        // Two versions of the same path differ; a missing file still answers.
+        // The encoding itself is `cache::Version`'s, tested there once for all
+        // three caches rather than three times in three shapes.
+        assert_eq!(scan_key(&file), scan_key(&file), "stable for one version");
+        assert_ne!(
+            scan_key(&file),
+            scan_key(&dir.join("other.png")),
+            "two captures are two versions",
+        );
+        // An unreadable timestamp is not a panic.
+        let _ = scan_key(&dir.join("never-existed.png"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
