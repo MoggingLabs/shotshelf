@@ -30,16 +30,28 @@ const MANIFEST = "tests/fixtures/wire-fields.json";
 const declared = Object.keys(JSON.parse(readFileSync(MANIFEST, "utf8")));
 
 /**
- * Every `pub struct` in the crate that derives `Serialize`.
+ * Every struct in the crate that derives `Serialize`, at any visibility.
  *
  * Comments and strings blanked first, through the same parser the other two
  * scripts use — a struct quoted in a docstring is not a struct.
+ *
+ * `pub`, `pub(crate)` and bare all count. This matched `pub struct` only, under
+ * a header claiming it "asks the crate which types serialise" — so the moment
+ * someone wrote `pub(crate) struct` and returned it through a `pub` wrapper, or
+ * nested a private one inside a payload, the manifest would have gone on
+ * looking complete. Every type here happens to be `pub` today, which is exactly
+ * when a gap like that is invisible.
+ *
+ * Attributes may sit between the derive and the keyword — `#[serde(rename_all
+ * = "camelCase")]` does on half of these — so they are skipped explicitly
+ * rather than by allowing a fixed run of any characters, which is a budget that
+ * a long enough docstring silently exceeds.
  */
 const serialised = globSync("src-tauri/src/**/*.rs").flatMap((file) => {
   const code = codeOnly(readFileSync(file, "utf8"));
   return [
     ...code.matchAll(
-      /#\[derive\([^)]*\bSerialize\b[^)]*\)\][\s\S]{0,200}?\bpub struct\s+([A-Za-z_]\w*)/g,
+      /#\[derive\([^)]*\bSerialize\b[^)]*\)\](?:\s|#\[[^\]]*\])*(?:pub(?:\([^)]*\))?\s+)?struct\s+([A-Za-z_]\w*)/g,
     ),
   ].map((found) => found[1] ?? "");
 });

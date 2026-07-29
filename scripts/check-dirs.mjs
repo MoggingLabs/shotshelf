@@ -185,8 +185,9 @@ const ALLOWANCES = new Map([
     "clippy::cast_possible_truncation",
   ]],
   // `Duration::as_millis` is a `u128`, and `u64::try_from` is not usable in a
-  // const initialiser. Both of these are const arithmetic over sub-second
-  // constants declared a few lines above them.
+  // const initialiser. Both are const arithmetic over sub-second constants —
+  // `folders.rs`'s declared a few lines above it, `clipboard.rs`'s imported
+  // from `folders.rs`, which is the point of that one.
   ["src-tauri/src/catch/clipboard.rs", ["clippy::cast_possible_truncation"]],
   ["src-tauri/src/catch/folders.rs", ["clippy::cast_possible_truncation"]],
   // The rustc allowances, which this table could not see until now.
@@ -209,7 +210,7 @@ const ALLOWANCES = new Map([
 ]);
 
 import {
-  clippyLevelsIn,
+  lintLevelsIn,
   disallowedIn,
   grantsIn,
   silencedIn,
@@ -287,23 +288,32 @@ const STRENGTH = ["allow", "warn", "deny", "forbid"];
   // table at all, `x.level = "allow"`, and `{ level = "allow" }` in place of
   // `"allow"` — were separate bypasses of this check, found and closed one at a
   // time over five rounds, each fix a new pattern beside the last.
-  // `clippyLevelsIn` resolves the key instead, so a spelling nobody has thought
+  // `lintLevelsIn` resolves the key instead, so a spelling nobody has thought
   // of yet arrives at the same name, and `scripts/rust-source.test.mjs` holds
   // every form as a row.
-  const levels = clippyLevelsIn(readFileSync("src-tauri/Cargo.toml", "utf8"));
+  const levels = lintLevelsIn(readFileSync("src-tauri/Cargo.toml", "utf8"));
 
-  // Nothing here may be switched off, whether or not the fixture names it.
+  // Nothing under `[lints]` may be switched off, whether or not the fixture
+  // names it — and `[lints.rust]` counts.
   //
   // Requiring the four `warn` lines is not enough on its own: appending
   // `disallowed_methods = "allow"` leaves all four present and still switches
   // the `clippy.toml` rules off, which is the bypass this whole check exists
   // for. An `allow` here is the escape hatch spelled as configuration, and it
   // gets the same treatment as the attribute form — argue for it in a diff.
+  //
+  // "The same treatment as the attribute form" was true of clippy's lints and
+  // false of rustc's for a round: the attribute half had just been widened to
+  // count `#[allow(dead_code)]` — which the table above calls the strongest
+  // escape hatch in the crate — while this half still read `lints.clippy` only.
+  // Four lines of `[lints.rust] dead_code = "allow"` switched off the one thing
+  // enforcing "no dead code" in the whole crate, crate-wide, with clippy and
+  // this script both green.
   for (const [lint, level] of levels) {
     if (level === "allow") {
       problemsWithConfig.push(
-        `  src-tauri/Cargo.toml: [lints.clippy] sets \`${lint}\` to "allow". ` +
-          `That switches a clippy rule off for the whole crate with no attribute ` +
+        `  src-tauri/Cargo.toml: [lints] sets \`${lint}\` to "allow". ` +
+          `That switches the rule off for the whole crate with no attribute ` +
           `anywhere for the allowance table to see.`,
       );
     }
@@ -312,7 +322,7 @@ const STRENGTH = ["allow", "warn", "deny", "forbid"];
   // The third place a lint level comes from, which nothing here read.
   //
   // A level is the union of `[lints.clippy]`, the attributes in the source, and
-  // the rustc flags cargo assembles from every a .cargo/config.toml on its
+  // the rustc flags cargo assembles from every .cargo/config.toml on its
   // discovery path. This gate modelled the first two. A four-line file at the
   // repo root —
   //
@@ -324,28 +334,62 @@ const STRENGTH = ["allow", "warn", "deny", "forbid"];
   // success, while a module alias wrote the diagnostic log into `%APPDATA%`.
   // The file is not git-ignored and CI runs clippy from the repo root.
   //
-  // Enumerated by glob rather than by a list of paths this file believes in:
-  // cargo walks up from wherever it is invoked, so one beside the crate counts
-  // too, and the legacy extensionless `config` is still honoured.
+  // The rule is about the *file*, not about a list of flag names.
+  //
+  // The first version enumerated four rustc flag spellings, and a reviewer went
+  // straight past it with a spelling that is not a flag at all:
+  //
+  //     [env]
+  //     CLIPPY_CONF_DIR = { value = "_empty", relative = true, force = true }
+  //
+  // — which does not weaken a lint. It points clippy at a *different*
+  // `clippy.toml`, so every `disallowed-methods` and `disallowed-types` entry
+  // stops being read. The roaming-profile rule went with it, and the check
+  // above still passed, because it verifies the rules are *written* while the
+  // config makes clippy never open the file they are written in.
+  //
+  // Enumerating spellings is the same mistake as the five TOML bypasses this
+  // gate already records, one layer out. A cargo config's power over lint
+  // enforcement is not confined to `rustflags`, and the next lever will not be
+  // on any list either. This repository commits no cargo config and needs none,
+  // so the rule is: there is not one. Adding one is a decision — it goes on the
+  // list below, in a diff, and is still read for weakening flags after that.
+  const CARGO_CONFIGS = new Set();
   for (const config of globSync([".cargo/config.toml", ".cargo/config", "*/.cargo/config*"])) {
+    const named = config.replaceAll("\\", "/");
+    if (!CARGO_CONFIGS.has(named)) {
+      problemsWithConfig.push(
+        `  ${named}: cargo reads this on every build, and what it can do to lint ` +
+          `enforcement is open-ended — \`rustflags\`, \`[env] RUSTFLAGS\`, ` +
+          `\`[env] CLIPPY_CONF_DIR\` pointing clippy at a different clippy.toml. ` +
+          `Nothing here needs one. If something does, name it in CARGO_CONFIGS ` +
+          `in ${import.meta.filename} and say why.`,
+      );
+      continue;
+    }
+
     const weakening = weakeningFlagsIn(readFileSync(config, "utf8"));
     if (weakening.length > 0) {
       problemsWithConfig.push(
-        `  ${config.replaceAll("\\", "/")}: passes [${weakening.join(", ")}] to rustc. ` +
-          `Cargo adds these to every build, so they override \`[lints.clippy]\` ` +
-          `and leave \`cargo clippy -- -D warnings\` green over a rule that is ` +
-          `no longer in force. A lint level is a decision — make it in ` +
-          `Cargo.toml, where this gate can see it.`,
+        `  ${named}: passes [${weakening.join(", ")}] to rustc. Cargo adds these ` +
+          `to every build, so they override \`[lints.clippy]\` and leave ` +
+          `\`cargo clippy -- -D warnings\` green over a rule that is no longer in ` +
+          `force. A lint level is a decision — make it in Cargo.toml, where this ` +
+          `gate can see it.`,
       );
     }
   }
 
-  // And the same flags set as environment variables in CI, which cargo also
-  // reads and which no committed TOML would show.
-  for (const workflow of globSync(".github/workflows/*.yml")) {
+  // And the same variables set in CI, which no committed TOML would show.
+  //
+  // Both ways a workflow can set one: the `env:` mapping, and appending to
+  // `$GITHUB_ENV` from a `run:` step — which is GitHub's documented way to set
+  // a variable for later steps, and which the first version of this check,
+  // looking only for `NAME:`, walked straight past.
+  for (const workflow of globSync([".github/workflows/*.yml", ".github/workflows/*.yaml"])) {
     const text = readFileSync(workflow, "utf8");
-    for (const name of ["RUSTFLAGS", "RUSTDOCFLAGS", "CLIPPY_CONF_DIR"]) {
-      if (new RegExp(String.raw`^\s*${name}\s*:`, "m").test(text)) {
+    for (const name of ["RUSTFLAGS", "RUSTDOCFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CLIPPY_CONF_DIR"]) {
+      if (new RegExp(String.raw`\b${name}\s*[:=]`).test(text)) {
         problemsWithConfig.push(
           `  ${workflow.replaceAll("\\", "/")}: sets \`${name}\`, which cargo ` +
             `folds into every lint level and this gate cannot resolve. ` +
@@ -364,9 +408,9 @@ const STRENGTH = ["allow", "warn", "deny", "forbid"];
     const set = levels.get(lint);
     if (STRENGTH.indexOf(set ?? "allow") < STRENGTH.indexOf(wanted)) {
       problemsWithConfig.push(
-        `  src-tauri/Cargo.toml: [lints.clippy] no longer sets \`${lint}\` to "${wanted}" or ` +
+        `  src-tauri/Cargo.toml: [lints] no longer sets \`${lint}\` to "${wanted}" or ` +
           `stronger (it is ${set === undefined ? "unset" : `"${set}"`}). Every ` +
-          `\`#[allow(clippy::${lint})]\` in the tree silences nothing without it.`,
+          `\`#[allow(${lint})]\` in the tree silences nothing without it.`,
       );
     }
   }

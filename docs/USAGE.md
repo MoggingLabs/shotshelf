@@ -6,8 +6,8 @@ an always-on-top shelf. This guide takes you from download to first drag-out.
 > **Your captures never leave your machine.** Shotshelf makes exactly one network request: on
 > launch it asks the internal release feed whether a newer version exists. That request carries the
 > running version, the operating system and the CPU architecture — they are part of the feed's URL —
-> plus the updater's User-Agent. No capture, no filename, no metadata, no telemetry, no analytics,
-> and nothing identifying you or the machine. Not now and not later. Everything else it does happens
+> plus the updater's User-Agent, and — as any HTTPS request does — your IP address to whatever
+> serves that host. No capture, no filename, no metadata, no telemetry, no analytics. Everything else it does happens
 > on local disk, and switching the check off — `checkForUpdates` in `settings.json`, a hand-edit rather than a
 > control in the panel — sends nothing at all.
 
@@ -383,9 +383,9 @@ it creates there is an empty capture folder that was missing, and those are left
 | The hotkey does nothing | Another app already owns that combination; change it in settings |
 | Nothing appeared after a reboot | Shotshelf does not start itself — add it to your startup items. A launch brings back **up to 20** captures from the previous 24 hours, newest first, so the recent ones are still there |
 | A recording shows a film glyph, not a frame | ffmpeg couldn't decode that file. The tile still drags out |
-| A tile shows ⚠ | The file has been moved or deleted since it was caught |
+| A tile shows ⚠ | The capture could not be loaded. Usually it has been moved or deleted since it was caught — but the same mark appears for a file that will not decode, or one Shotshelf is no longer allowed to read, so check it is still where it was |
 | The shelf is nowhere to be seen | It's a popover — click the tray/menu-bar icon, or press the hotkey |
-| It closes while you're still using it | Hover it to hold it open; it only auto-closes a peek |
+| It closes while you're still using it | The appearance at launch, and a peek after a capture, both take themselves away. Start doing something — drag a capture, open one, open settings — and it stays; or press the hotkey to open it deliberately, which never self-closes |
 
 Shotshelf writes diagnostics to `shotshelf.log` in its local app data directory —
 `%LOCALAPPDATA%\com.mogginglabs.shotshelf\` on Windows,

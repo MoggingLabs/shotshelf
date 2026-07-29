@@ -377,8 +377,8 @@ void whenEngineIsUp("the watch folders", () => invoke<WatchState>("catch_watch_d
     // premise holds: there the engine has answered and `started.clipboard` is a
     // fact. Here it has answered nothing. `catch_watch_dirs` fails only with
     // `STARTING`, and `whenEngineIsUp` retries that — so reaching this line
-    // means `catch::start` has not finished after two minutes, and `started` is
-    // its last statement. Either the engine is still before `folders::start`,
+    // means `catch::start` has not finished inside `ENGINE_WAIT` (a minute, as
+    // that constant's own comment says), and `started` is its last statement. Either the engine is still before `folders::start`,
     // and *nothing* is being caught while this names only folders; or it is
     // past it, and folder watching is running while this says it is off. There
     // is no state in which the sentence was true.

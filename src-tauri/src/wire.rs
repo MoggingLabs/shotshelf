@@ -11,7 +11,7 @@
 //! Invalid Date, and `set_pinned` rejects every pin.
 //!
 //! So the manifest is the contract for *every* serialising type, and
-//! `scripts/check-commands.mjs` asks the crate which those are rather than
+//! `scripts/check-wire.mjs` asks the crate which those are rather than
 //! trusting this list to be complete. `src/wire.test.ts` asserts the other half
 //! against the same file: rename a field on either side and one of the two goes
 //! red, whichever side moved.
@@ -123,9 +123,15 @@ mod tests {
         // would simply not run for it — which is the shape of the gap this
         // whole file exists to close.
         //
-        // `check-commands.mjs` holds the manifest to what the *crate*
+        // `check-wire.mjs` holds the manifest to what the *crate*
         // serialises; this holds the samples to the manifest. Between them
         // there is no way to add a serialising type and be checked nowhere.
+        //
+        // Named carefully: this credited `check-commands.mjs`, which reads
+        // `generate_handler!` and greps `invoke(` and never opens the manifest.
+        // `check-references.mjs` cannot catch that — the file it named exists —
+        // so a maintainer trimming the `deadcode` chain could have deleted the
+        // script that does the work on this comment's word.
         let declared: Vec<&str> = expected.keys().map(String::as_str).collect();
         let built: Vec<&str> = samples.keys().copied().collect();
         assert_eq!(

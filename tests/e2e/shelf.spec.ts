@@ -458,6 +458,44 @@ test("the watching indicator is not green when nothing is being watched", async 
   await expect(page.locator("#shelf-alert")).toContainText(/No capture folders are being watched — only the clipboard/i);
 });
 
+test("the tooltip says what is watched, in every state it can be in", async ({ page }) => {
+  // The empty-folder branch is the state the whole e2e suite boots into — the
+  // harness defaults `catch_watch_dirs` to `{ dirs: [], clipboard: true }` — and
+  // it was asserted nowhere. Swapping its two arms left 127 unit and 136 e2e
+  // tests green while the tooltip read "Watching nothing" with the clipboard
+  // watcher running, on the indicator `docs/USAGE.md` sends the user to first.
+  //
+  // The count and its plural are here too, for the same reason: nothing read
+  // them, so "Watching 1 folders" passed everything.
+  const said = async (
+    dirs: string[],
+    clipboard: boolean,
+  ): Promise<string> => {
+    await page.addInitScript((stub) => {
+      window.__shotshelfStubs__ = { catch_watch_dirs: stub };
+    }, { dirs, clipboard });
+    await bootShelf(page);
+    return (await page.locator("#shelf-mark").getAttribute("title")) ?? "";
+  };
+
+  await expect
+    .poll(async () => await said([], true))
+    .toMatch(/^Watching the clipboard only$/m);
+
+  await page.reload();
+  await expect.poll(async () => await said([], false)).toMatch(/^Watching nothing$/m);
+
+  await page.reload();
+  await expect
+    .poll(async () => await said(["/home/someone/Pictures"], true))
+    .toMatch(/^Watching 1 folder \+ the clipboard$/m);
+
+  await page.reload();
+  await expect
+    .poll(async () => await said(["/a", "/b"], false))
+    .toMatch(/^Watching 2 folders$/m);
+});
+
 test("the watching indicator is green when a folder really is watched", async ({ page }) => {
   await page.addInitScript(() => {
     window.__shotshelfStubs__ = { catch_watch_dirs: { dirs: ["/home/someone/Pictures"], clipboard: true } };

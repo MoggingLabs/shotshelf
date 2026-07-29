@@ -201,15 +201,19 @@ pub async fn describe_capture<R: Runtime>(
         // mid-build, sending the shelf back to full-resolution OCR for the whole
         // visible list. `poster.rs` records the same defect in its own cache and
         // fixed it by evicting the oldest; this is that, in memory.
-        while cache.len() >= SCAN_CACHE_LIMIT {
-            let Some(oldest) = cache
-                .iter()
-                .min_by_key(|(_, entry)| entry.seen)
-                .map(|(key, _)| key.clone())
-            else {
-                break;
-            };
-            cache.remove(&oldest);
+        //
+        // Through `cache::make_room` rather than a loop written out here. The
+        // loop was inside this `#[tauri::command]`, which no test in this crate
+        // can call, so reversing its `min_by_key` to `max_by_key` — after which
+        // the *newest* entries are evicted and a full shelf re-runs OCR on every
+        // visible tile forever — left clippy and all 156 tests green. The other
+        // two caches had their eviction rule split out for exactly that reason;
+        // this one had not.
+        for stale in crate::cache::make_room(
+            cache.iter().map(|(key, entry)| (key.clone(), entry.seen)),
+            SCAN_CACHE_LIMIT,
+        ) {
+            cache.remove(&stale);
         }
         cache.insert(
             version,

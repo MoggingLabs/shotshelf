@@ -12,8 +12,8 @@
  * `dayKey` yields Invalid Date headings, and `set_pinned` rejects every pin.
  *
  * Coverage that tracks bug history is not coverage. So the manifest covers
- * every serialising type, `scripts/check-commands.mjs` asks the crate which
- * those are rather than trusting the manifest to be complete, and
+ * every serialising type, `scripts/check-wire.mjs` asks the crate which those
+ * are rather than trusting the manifest to be complete, and
  * `src-tauri/src/wire.rs` asserts the Rust half against the same file.
  *
  * Each sample below is annotated with its real type, and the two halves of that
@@ -31,6 +31,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import type { PinnedItem, Settings } from "./settings.ts";
+import type { WatchState } from "./status.ts";
 import type {
   Capture,
   CaptureContext,
@@ -46,11 +47,14 @@ interface LocalState {
   lastCaptureMs: number;
 }
 
-/** What `catch_watch_dirs` answers with. Rust's `Watching`. */
-interface Watching {
-  dirs: string[];
-  clipboard: boolean;
-}
+/**
+ * `catch_watch_dirs`'s answer is `WatchState`, imported rather than restated.
+ *
+ * It was re-declared here, which made three hand-typed copies of `Watching` on
+ * the front end under a `status.ts` docstring saying the names "have one home".
+ * A join that keeps its own second copy of the thing it joins is checking the
+ * fixture against itself.
+ */
 
 const capture: Capture = { path: "", kind: "image", ts: 0, context: { label: "" } };
 const context: CaptureContext = { label: "" };
@@ -68,7 +72,7 @@ const settings: Settings = {
   pinned: [],
 };
 const videoDetails: VideoDetails = { poster: null, durationMs: null, bytes: 0 };
-const watching: Watching = { dirs: [], clipboard: false };
+const watching: WatchState = { dirs: [], clipboard: false };
 
 const SAMPLES: Record<string, object> = {
   Capture: capture,

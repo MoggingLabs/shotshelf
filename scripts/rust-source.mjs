@@ -351,7 +351,7 @@ const PAIR = new RegExp(
  * which is the only question asked of it.
  *
  * Not exported: every spelling above is a row in `rust-source.test.mjs` against
- * [`clippyLevelsIn`], which is the only caller and the only thing the gate asks.
+ * [`lintLevelsIn`], which is the only caller and the only thing the gate asks.
  * Exporting it for the tests' sake would be a second public surface with no
  * second consumer.
  *
@@ -381,31 +381,53 @@ function tomlEntries(source) {
 }
 
 /**
- * What every `[lints.clippy]` entry sets its lint to, whatever way it is spelled.
+ * What every `[lints]` entry sets its lint to, whatever way it is spelled.
  *
- * `warn`, `deny`, `allow` — the word Cargo will act on, keyed by the lint. Both
- * `x = "allow"` and `x = { level = "allow", priority = 1 }` reduce to the same
- * answer here, so the caller compares levels rather than re-deriving them from
- * two shapes.
+ * `warn`, `deny`, `allow` — the word Cargo will act on, keyed by the lint under
+ * the name an attribute would use: `clippy::disallowed_methods` for a clippy
+ * one, bare `dead_code` for a rustc one. Both `x = "allow"` and
+ * `x = { level = "allow", priority = 1 }` reduce to the same answer here, so the
+ * caller compares levels rather than re-deriving them from two shapes.
+ *
+ * **Every table under `[lints]`, not just clippy's.** This read `lints.clippy`
+ * only, so four lines in the manifest —
+ *
+ * ```toml
+ * [lints.rust]
+ * dead_code = "allow"
+ * ```
+ *
+ * — switched off the one thing enforcing "no dead code" in the whole crate,
+ * with `cargo clippy -- -D warnings` printing "Finished" and the directory gate
+ * printing success. A round had just made rustc lints first-class in the
+ * *attribute* half, and left the *configuration* half clippy-only — under a
+ * comment in `check-dirs.mjs` saying an `allow` in configuration "gets the same
+ * treatment as the attribute form". `[lints.rust] warnings = "allow"` is the
+ * same lever one size larger.
  *
  * @param {string} manifest
  * @returns {Map<string, string>}
  */
-export function clippyLevelsIn(manifest) {
+export function lintLevelsIn(manifest) {
   const levels = new Map();
 
   for (const [key, value] of tomlEntries(manifest)) {
     // `.level` optional: the sub-table and dotted-key spellings both put the
     // word one segment deeper than the plain one.
-    const under = /^lints\.clippy\.([\w-]+)(?:\.level)?$/.exec(key);
+    const under = /^lints\.([\w-]+)\.([\w-]+)(?:\.level)?$/.exec(key);
     if (!under) continue;
+
+    // `rust` is the toolchain's own lints, which an attribute names bare;
+    // everything else is a tool whose lints an attribute names with its prefix.
+    const tool = under[1] ?? "";
+    const lint = tool === "rust" ? (under[2] ?? "") : `${tool}::${under[2] ?? ""}`;
 
     // `x = "allow"` and `x = { level = "allow" }` say the same thing. The second
     // form was the bypass that switched `disallowed_methods` off with this gate
     // green, so it is read rather than pattern-matched away.
     const level =
       /^(['"])(.*?)\1/.exec(value)?.[2] ?? /level[ \t]*=[ \t]*(['"])(.*?)\1/.exec(value)?.[2];
-    if (level !== undefined) levels.set(under[1] ?? "", level);
+    if (level !== undefined) levels.set(lint, level);
   }
 
   return levels;
@@ -474,7 +496,7 @@ export function disallowedIn(source) {
 }
 
 /**
- * Every flag in a cargo config that weakens a lint level.
+ * Every flag in a cargo config that switches a lint off or caps one.
  *
  * A clippy lint's level is not just `[lints.clippy]` and the attributes in the
  * source. It is the union of those with the rustc flags cargo assembles — from
@@ -500,7 +522,10 @@ export function disallowedIn(source) {
  * That distinction is the same one that let five TOML spellings past the
  * `[lints.clippy]` scan.
  *
- * `-D`/`--deny`/`--forbid` are hardenings and are not returned.
+ * `-D`/`--deny`/`--forbid` are hardenings and are not returned, and neither is
+ * `-W`/`--warn`: raising a lint from allow to warn is a hardening too, and
+ * `cargo clippy -- -D warnings` is applied last, so a `warn` cannot hide a
+ * finding. `--force-warn` *is* returned, because it overrides a `deny`.
  *
  * @param {string} source
  * @returns {string[]}

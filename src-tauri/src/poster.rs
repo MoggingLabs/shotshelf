@@ -42,7 +42,12 @@ pub struct VideoDetails {
 /// Derived rather than copied. Both numbers were written out here by hand
 /// while living private in `settings.rs`, so raising the item cap would have
 /// made 750 too small and this paragraph false — and re-introduced the exact
-/// failure it records. The margin stays a decision made here.
+/// failure it records.
+///
+/// The margin is `cache::shelf_wide_limit`'s now, not this file's: the same
+/// sentence stood in `share.rs` over a second copy of the derivation, and a
+/// number written down twice is the defect one step later. `share.rs`'s copy of
+/// this paragraph was updated when they were unified and this one was not.
 const POSTER_CACHE_LIMIT: usize = crate::cache::shelf_wide_limit();
 
 /// Drop the oldest cached frames. Called on a timer from `lib.rs`.

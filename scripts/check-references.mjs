@@ -37,7 +37,7 @@
 // skipped rather than guessed at.
 
 import { execFileSync } from "node:child_process";
-import { globSync, readFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -298,6 +298,22 @@ function repoFiles() {
 
   for (const entry of listed.split("\0")) {
     if (entry === "") continue;
+    // On disk, not merely in the index.
+    //
+    // `--cached` lists a file git is still tracking, and a file deleted with
+    // `rm` is still tracked until the deletion is staged. So for the whole of a
+    // change that removes a file, every comment naming it passed this gate —
+    // and then failed the moment the deletion was committed, which is the one
+    // point at which nobody is watching the gate.
+    //
+    // That is exactly how it happened: a round retired a per-struct field
+    // fixture into tests/fixtures/wire-fields.json, ran `npm run gate` green
+    // with the deletion unstaged, committed, and pushed a tree whose own gate
+    // was red. (The retired name is written without backticks here for the
+    // obvious reason.) The gate reads git to know what is *ignored* — `prompts/`,
+    // `node_modules/` — which is a question about which files to scan, not
+    // about which files exist. Existence is a question for the filesystem.
+    if (!existsSync(entry)) continue;
     const name = path.basename(entry);
     if (!byName.has(name)) byName.set(name, []);
     byName.get(name).push(entry);

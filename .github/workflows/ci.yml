@@ -93,8 +93,10 @@ jobs:
         run: npx playwright install chromium --with-deps
 
       # The real front-end in a real browser, with the Tauri runtime stubbed.
-      # Behaviour on every OS; the deterministic half of the appearance gate
-      # (geometry and computed style) comes with it.
+      # Behaviour on every OS. The geometry-and-computed-style half of the
+      # appearance gate lives in `tests/visual` and runs in the step below, not
+      # here — `npm run test:e2e` is `playwright test tests/e2e` and nothing
+      # else, which this used to claim otherwise.
       - name: Front-end behaviour
         if: '!cancelled()'
         run: npm run test:e2e -- --fail-on-flaky-tests

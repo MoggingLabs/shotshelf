@@ -12,7 +12,7 @@ import { maybeEl } from "./dom.ts";
  * What `catch_watch_dirs` answers with.
  *
  * Declared here rather than inline at the `invoke` in `main.ts`, so the names
- * the front end reads have one home and `tests/fixtures/watch-state-fields.json`
+ * the front end reads have one home and `tests/fixtures/wire-fields.json`
  * can join them to Rust's `Watching`. Nothing joined the two before: renaming
  * a field on either side compiles, keeps every Rust test green, and lands
  * `undefined` here. `undefined` is falsy, so `showWatchState` would raise

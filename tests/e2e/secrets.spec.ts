@@ -87,6 +87,33 @@ test("the warning never blocks the drag or the copy", async ({ page }) => {
   await page.mouse.up();
 });
 
+test("the warning reads as English for a label starting with a vowel", async ({ page }) => {
+  // `article()` exists because the sentence hard-coded "a" and three of the
+  // labels Rust sends begin with a vowel — one of them `email address`, which
+  // carries the lowest severity and so is the label the ordinary case reaches
+  // for. The commonest wording of this warning read "a email address".
+  //
+  // The rule itself was untested: changing `/^[aeiou]/i` to `/^[qxz]/i` left
+  // every unit and e2e test green and shipped the wording back.
+  await bootShelf(page);
+  await withFindings(page, [
+    { kind: "personalData", label: "email address", preview: "a…@example.com", severity: 1 },
+  ]);
+  await land(page, FIXTURE.wide);
+
+  await expect
+    .poll(async () => await page.locator(".tile__secret").getAttribute("title"))
+    .toMatch(/contains an email address/);
+
+  // And a consonant still takes "a", so the fix is not "always an".
+  await page.reload();
+  await withFindings(page, [TOKEN_FINDING]);
+  await land(page, FIXTURE.wide);
+  await expect
+    .poll(async () => await page.locator(".tile__secret").getAttribute("title"))
+    .toMatch(/contains a GitHub token/);
+});
+
 test("the warning never puts the secret itself in the page", async ({ page }) => {
   await bootShelf(page);
   // What Rust would have masked — asserted here in case it ever stops masking.

@@ -82,6 +82,38 @@ pub fn overflow(mut entries: Vec<(SystemTime, PathBuf)>, limit: usize) -> Vec<Pa
         .collect()
 }
 
+/// Make room in a keyed cache for one more entry, oldest first.
+///
+/// The in-memory twin of [`overflow`], for a cache that is a map rather than a
+/// directory: given each key with the sequence number it was remembered at, and
+/// how many the cache may hold *after* the insertion, this is the keys to drop.
+///
+/// Here rather than inline at the one call site, which is why this exists.
+/// `share.rs` wrote the eviction as a `while` loop inside a
+/// `#[tauri::command]` — a function no test in this crate can call, because it
+/// takes an `AppHandle`. Reversing `min_by_key` to `max_by_key` there evicts the
+/// **newest** entries, the ones whose tiles are on screen, so a full shelf
+/// re-runs OCR on everything visible on every render, forever. Clippy and all
+/// 156 tests stayed green. That is verbatim the failure this module's header
+/// names, and verbatim the reason `overflow` was split out for the other two
+/// caches — the third one never got it.
+///
+/// The boundary is stated once too. `overflow` keeps `len() <= limit`; the loop
+/// evicted at `len() >= limit` *before* inserting, so the two spellings of one
+/// rule were an off-by-one apart.
+pub fn make_room<K: Clone>(entries: impl Iterator<Item = (K, u64)>, limit: usize) -> Vec<K> {
+    let mut seen: Vec<(K, u64)> = entries.collect();
+    // Room for the one about to go in.
+    let keep = limit.saturating_sub(1);
+    if seen.len() <= keep {
+        return Vec::new();
+    }
+
+    seen.sort_unstable_by_key(|(_, at)| *at);
+    let excess = seen.len() - keep;
+    seen.into_iter().take(excess).map(|(key, _)| key).collect()
+}
+
 /// Drop the oldest entries in `dir` until at most `limit` remain.
 ///
 /// Every failure is silent by design: this runs on a timer with nobody
@@ -282,6 +314,60 @@ mod tests {
             overflow(entries, 2).is_empty(),
             "at the limit is not over it"
         );
+    }
+
+    #[test]
+    fn a_shelf_wide_cache_holds_more_than_the_largest_shelf() {
+        // The derivation that ended two hand-written copies of this number, and
+        // nothing read it — `MARGIN` to 0, or `MAX_PINNED` dropped from the sum,
+        // both left every test green. Both files this replaced record having
+        // *already* been fixed once for hand-writing the number too small, which
+        // is a cache that overflows exactly when the shelf it serves is full.
+        assert!(
+            shelf_wide_limit() > crate::settings::MAX_ITEMS + crate::settings::MAX_PINNED,
+            "a full shelf fills the cache that exists to serve it",
+        );
+
+        // And the room above it is real, not a rounding: a shelf at its cap plus
+        // a handful of arrivals must still not evict a tile that is on screen.
+        assert!(
+            shelf_wide_limit() >= crate::settings::MAX_ITEMS + crate::settings::MAX_PINNED + 10,
+            "the margin is too thin to survive a burst of captures",
+        );
+    }
+
+    #[test]
+    fn making_room_in_a_keyed_cache_drops_the_oldest_too() {
+        // The same property with a direction, for the map-shaped cache. It had
+        // no test at all: the rule was a `while` loop inside a
+        // `#[tauri::command]`, which no test in this crate can call, so
+        // reversing it evicted the *newest* entries — the ones whose tiles are
+        // on screen — and a full shelf re-ran OCR on all of them on every
+        // render. Clippy and every test stayed green.
+        // Room is made for the one about to be inserted, so a cache of three
+        // with a limit of three loses one — and it is the oldest, whatever
+        // order the map hands them back in.
+        assert_eq!(
+            make_room(vec![("b", 2), ("a", 1), ("c", 3)].into_iter(), 3),
+            vec!["a"],
+            "the newest entry was evicted",
+        );
+
+        // Well under the limit, nothing goes.
+        assert!(make_room(vec![("a", 1), ("b", 2)].into_iter(), 9).is_empty());
+
+        // Exactly one short of full, still nothing: the insertion fits.
+        assert!(make_room(vec![("a", 1), ("b", 2)].into_iter(), 3).is_empty());
+
+        // Far over — every extra goes, oldest first, and the survivors are the
+        // newest.
+        assert_eq!(
+            make_room(vec![("a", 1), ("b", 2), ("c", 3), ("d", 4)].into_iter(), 2),
+            vec!["a", "b", "c"],
+        );
+
+        // A limit of zero cannot underflow into "keep everything".
+        assert_eq!(make_room(vec![("a", 1)].into_iter(), 0), vec!["a"]);
     }
 
     #[test]

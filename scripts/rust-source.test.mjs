@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  clippyLevelsIn,
+  lintLevelsIn,
   codeOnly,
   disallowedIn,
   grantsIn,
@@ -330,7 +330,7 @@ void test("every way of switching a clippy lint off is read as the same setting"
 
   for (const lines of off) {
     assert.equal(
-      clippyLevelsIn([...lines, ""].join("\n")).get("disallowed_methods"),
+      lintLevelsIn([...lines, ""].join("\n")).get("clippy::disallowed_methods"),
       "allow",
       `this switches the lint off and was not read as "allow": ${lines.join(" / ")}`,
     );
@@ -340,7 +340,7 @@ void test("every way of switching a clippy lint off is read as the same setting"
   // off. Reading the manifest as one flat text called this a bypass and failed a
   // manifest that was correct.
   assert.equal(
-    clippyLevelsIn([...head, 'lints.clippy.disallowed_methods = "allow"', ""].join("\n")).get(
+    lintLevelsIn([...head, 'lints.clippy.disallowed_methods = "allow"', ""].join("\n")).get(
       "disallowed_methods",
     ),
     undefined,
@@ -364,20 +364,20 @@ void test("a clippy level is read from the clippy table and nowhere else", () =>
     'cast_precision_loss = "allow"',
     "",
   ].join("\n");
-  const levels = clippyLevelsIn(manifest);
+  const levels = lintLevelsIn(manifest);
 
-  assert.equal(levels.get("cast_sign_loss"), "warn", "a rustc lint's level was taken for clippy's");
-  assert.equal(levels.get("unsafe_code"), undefined, "a rustc lint was reported as a clippy one");
+  assert.equal(levels.get("clippy::cast_sign_loss"), "warn", "a rustc lint's level was taken for clippy's");
+  assert.equal(levels.get("clippy::unsafe_code"), undefined, "a rustc lint was reported as a clippy one");
   assert.equal(
-    levels.get("cast_precision_loss"),
+    levels.get("clippy::cast_precision_loss"),
     undefined,
     "a level under `[workspace.lints.clippy]` is a different table",
   );
 
   // A commented-out level is not a level.
   assert.equal(
-    clippyLevelsIn(["[lints.clippy]", '# cast_sign_loss = "allow"', ""].join("\n")).get(
-      "cast_sign_loss",
+    lintLevelsIn(["[lints.clippy]", '# cast_sign_loss = "allow"', ""].join("\n")).get(
+      "clippy::cast_sign_loss",
     ),
     undefined,
   );
@@ -429,7 +429,7 @@ void test("a disallowed path is read from the array it has to be in", () => {
 
 void test("a cargo config that weakens a lint is read as weakening it", () => {
   // The third place a clippy level comes from, and the gate read neither of the
-  // first two spellings of it. A four-line a .cargo/config.toml at the repo
+  // first two spellings of it. A four-line .cargo/config.toml at the repo
   // root switched off the resolved-path half of the roaming-profile rule with
   // `cargo clippy -- -D warnings` printing "Finished" and the directory gate
   // printing success, while a module alias wrote the diagnostic log into
