@@ -43,8 +43,23 @@ export function dayLabel(ts: number, now: number = Date.now()): string {
   const today = new Date(now);
   const midnight = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
 
+  // Yesterday's boundary is computed the same way today's is — by asking the
+  // calendar — rather than by subtracting 24 hours from it.
+  //
+  // A local day is not always 86,400,000 ms. The day a clock springs forward
+  // is 23 hours, so `midnight - 86_400_000` landed an hour *before* yesterday
+  // began and labelled the last hour of the day before that "Yesterday"; the
+  // day it falls back is 25 hours, so the same expression landed an hour
+  // *after*, and captures taken in yesterday's first hour were filed under a
+  // date heading while the rest of that day sat under "Yesterday". Twice a
+  // year, on the two days a person is most likely to notice a clock.
+  //
+  // `Date` handles a zero or negative day-of-month by rolling into the
+  // previous month, so no special case is needed at a month or year boundary.
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1).getTime();
+
   if (ts >= midnight) return "Today";
-  if (ts >= midnight - 86_400_000) return "Yesterday";
+  if (ts >= yesterday) return "Yesterday";
   return new Date(ts).toLocaleDateString([], { day: "numeric", month: "long" });
 }
 

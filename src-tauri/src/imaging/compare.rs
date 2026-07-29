@@ -309,15 +309,37 @@ fn blit(canvas: &mut RgbaImage, image: &DynamicImage, offset_x: u32) {
 
 /// Draw a hollow rectangle. Hollow because the point is to direct attention to
 /// what changed, not to hide it.
+/// How thick a border one edge can carry and still leave something inside it.
+///
+/// A fixed `OUTLINE` on both sides meets in the middle of anything narrower
+/// than twice it, and the two bands then cover every pixel — a solid block of
+/// highlight over the change, in a function whose test is named "outlines the
+/// change *without covering it*".
+///
+/// Not a rare shape. `merge` emits a region bounded by the last partial block
+/// of the image: a 1366-wide capture with a 16-pixel block leaves a final
+/// column six pixels across, and `2 * OUTLINE` is six. A change confined to the
+/// right-hand edge of a very common laptop width came out painted over.
+///
+/// Below three pixels there is no interior to preserve and the region is filled
+/// — a one-pixel-wide box cannot be both a border and a middle.
+fn stroke(extent: u32) -> u32 {
+    if extent < 3 {
+        return extent;
+    }
+    OUTLINE.min((extent - 1) / 2).max(1)
+}
+
 fn outline(canvas: &mut DynamicImage, region: Region, offset_x: u32) {
     let (canvas_width, canvas_height) = (canvas.width(), canvas.height());
+    let (across, down) = (stroke(region.width), stroke(region.height));
 
     for y in region.y..(region.y + region.height).min(canvas_height) {
         for x in region.x..(region.x + region.width) {
-            let on_edge = y < region.y + OUTLINE
-                || y + OUTLINE >= region.y + region.height
-                || x < region.x + OUTLINE
-                || x + OUTLINE >= region.x + region.width;
+            let on_edge = y < region.y + down
+                || y + down >= region.y + region.height
+                || x < region.x + across
+                || x + across >= region.x + region.width;
             if !on_edge {
                 continue;
             }
@@ -547,6 +569,36 @@ mod tests {
             "after on the right"
         );
         assert_eq!(sheet.get_pixel(41, 0), BACKGROUND, "gutter between them");
+    }
+
+    #[test]
+    fn a_narrow_region_is_outlined_rather_than_painted_over() {
+        // Six pixels across is what `merge` produces for the last column of a
+        // 1366-wide capture at the default block size, and `2 * OUTLINE` is
+        // six — so the left and right bands met and filled the region solid,
+        // hiding the very change it was marking.
+        let before = filled(64, 64, [255, 255, 255, 255]);
+        let after = filled(64, 64, [255, 255, 255, 255]);
+        let region = Region {
+            x: 10,
+            y: 10,
+            width: 6,
+            height: 6,
+        };
+
+        let sheet = side_by_side(&before, &after, &[region]).expect("a small pair fits");
+        let offset = 64 + GUTTER;
+
+        assert_eq!(
+            sheet.get_pixel(offset + 10, 10),
+            HIGHLIGHT,
+            "the border is still drawn"
+        );
+        assert_eq!(
+            sheet.get_pixel(offset + 12, 12),
+            Rgba([255, 255, 255, 255]),
+            "the middle of a narrow region must still show the capture",
+        );
     }
 
     #[test]

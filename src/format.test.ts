@@ -59,3 +59,45 @@ test("a day key is the calendar date it says it is", () => {
   assert.equal(dayKey(new Date(2026, 10, 5).getTime()), "2026-11-05", "November is 11, not 10");
   assert.equal(dayKey(new Date(2026, 11, 31).getTime()), "2026-12-31");
 });
+
+test("the Yesterday boundary follows the clock, not a 24-hour constant", () => {
+  // A local day is 23 hours when the clock springs forward and 25 when it
+  // falls back, so `midnight - 86_400_000` misses yesterday's start by an hour
+  // twice a year. Assigning `TZ` here is what makes that reachable: Node clears
+  // its cached zone on assignment, and CI runs in UTC, which has no DST at all.
+  const previous = process.env["TZ"];
+  process.env["TZ"] = "Europe/London";
+
+  try {
+    // 2026-03-29 01:00 UTC is when London goes to BST, so 2026-03-29 is 23
+    // hours long. `now` is noon on the 30th; yesterday is the short day.
+    const now = new Date(2026, 2, 30, 12, 0, 0).getTime();
+    const yesterdayStarted = new Date(2026, 2, 29, 0, 0, 0).getTime();
+
+    assert.equal(dayLabel(yesterdayStarted, now), "Yesterday");
+    // One millisecond earlier is the day before, and must not be "Yesterday" —
+    // the 24-hour subtraction reached a whole hour past this point.
+    assert.notEqual(dayLabel(yesterdayStarted - 1, now), "Yesterday");
+    assert.notEqual(dayLabel(yesterdayStarted - 3_600_000, now), "Yesterday");
+
+    // And the long day, in the other direction: 2026-10-25 is 25 hours, so a
+    // capture in its first hour was filed under a date heading while the rest
+    // of the same day read "Yesterday".
+    const autumnNow = new Date(2026, 9, 26, 12, 0, 0).getTime();
+    const autumnStarted = new Date(2026, 9, 25, 0, 30, 0).getTime();
+    assert.equal(dayLabel(autumnStarted, autumnNow), "Yesterday");
+  } finally {
+    if (previous === undefined) delete process.env["TZ"];
+    else process.env["TZ"] = previous;
+  }
+});
+
+test("Yesterday rolls into the previous month and year", () => {
+  // `getDate() - 1` is 0 on the first of a month, which `Date` resolves to the
+  // last day of the one before — including across a year boundary.
+  const firstOfMarch = new Date(2026, 2, 1, 12, 0, 0).getTime();
+  assert.equal(dayLabel(new Date(2026, 1, 28, 23, 0, 0).getTime(), firstOfMarch), "Yesterday");
+
+  const newYear = new Date(2026, 0, 1, 12, 0, 0).getTime();
+  assert.equal(dayLabel(new Date(2025, 11, 31, 23, 0, 0).getTime(), newYear), "Yesterday");
+});
