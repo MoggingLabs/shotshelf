@@ -54,7 +54,12 @@ pub fn cache<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<PathBuf, Stri
 /// A gate that forbade only the `app_data_dir` spelling reported success on a
 /// tree calling `app_config_dir` for the same directory.
 ///
-/// **Nothing that names a capture may be written here.** `settings.rs::persist`
+/// **Nothing that names a capture may be written here.** `check-dirs.mjs`
+/// keeps this to one caller — `settings.rs`, for `settings.json` alone —
+/// because this function being `pub` was otherwise the whole enforcement: a
+/// module could call the correct helper for the wrong data and both gates
+/// would pass, since they check that a root is resolved *through* here, not
+/// that the right root was chosen. `settings.rs::persist`
 /// blanks `pinned` before serialising for that reason, and a test asserts it.
 pub fn preferences<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     under(

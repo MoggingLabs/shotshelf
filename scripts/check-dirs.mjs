@@ -50,6 +50,24 @@ const OWNED = ["app_data_dir", "app_config_dir", "app_local_data_dir", "app_cach
  */
 const BASE_DIRECTORY = "BaseDirectory::";
 
+/**
+ * Who may write into the roaming profile.
+ *
+ * `dirs.rs` states the rule in bold — "Nothing that names a capture may be
+ * written here" — and until now nothing enforced it. `dirs::preferences` is
+ * `pub`, so any module could call the correct helper for the wrong data and
+ * both this script and `clippy.toml` would report success: they check that a
+ * root is resolved *through* `dirs`, not that the right root was chosen.
+ *
+ * One caller is what makes the rule checkable. `settings.rs` writes exactly one
+ * file there and blanks `pinned` before serialising it, which a test pins. A
+ * second caller is not necessarily wrong, but it is a decision that has to be
+ * argued for rather than made by autocomplete — which is what a failing gate
+ * turns it into.
+ */
+const ROAMING = "dirs::preferences";
+const ROAMING_CALLER = "src-tauri/src/settings.rs";
+
 const problems = [];
 
 for (const file of globSync("src-tauri/src/**/*.rs")) {
@@ -78,6 +96,14 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
         `without naming it. Go through \`dirs\`.`,
     );
   }
+
+  if (normalised !== ROAMING_CALLER && source.includes(ROAMING)) {
+    problems.push(
+      `  ${normalised}: calls \`${ROAMING}\`, which is the **roaming** profile. ` +
+        `Only \`${ROAMING_CALLER}\` may, and only for settings — nothing naming ` +
+        `a capture goes there. Use \`dirs::local\`.`,
+    );
+  }
 }
 
 if (problems.length > 0) {
@@ -89,4 +115,7 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-console.info(`Checked that only ${OWNER} resolves a data root.`);
+console.info(
+  `Checked that only ${OWNER} resolves a data root, ` +
+    `and only ${ROAMING_CALLER} reaches the roaming one.`,
+);

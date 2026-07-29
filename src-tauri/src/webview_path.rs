@@ -198,7 +198,7 @@ mod tests {
     // because Smart App Control refuses the bin target's freshly linked test
     // harness here. Add a test under `src-tauri/tests/` and CI will run it and
     // your local gate will not — a difference stated in README, CONTRIBUTING
-    // and SECURITY.md, and stated backwards right here, in the one paragraph
+    // and SECURITY.md, and, until this was corrected, stated backwards right here, in the one paragraph
     // that reasons about why it matters. It is not landed
     // here because a change that alters what the shipped binary links is not
     // something to push unverified from a machine that cannot launch it.
