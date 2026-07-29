@@ -420,10 +420,14 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
 
 /// How many unreadable copies are kept before new ones stop being set aside.
 ///
-/// Small on purpose: these live beside the file they came from — which is the
-/// **local** data directory, `dirs::local`, not the preferences one, because
-/// `pinned.json` names captures and nothing naming a capture may roam. An
-/// unbounded set of them is its own kind of mess.
+/// Small on purpose: these live beside the file they came from, and there are
+/// two such files. `pinned.json` is in the **local** data directory, because it
+/// names captures and nothing naming a capture may roam. `settings.json` is in
+/// the preferences one — so a `settings.json.corrupt` sits in the roaming
+/// profile, and for a pre-split install it can still carry the `pinned` array
+/// the migration path exists to read. Worth knowing when clearing up.
+///
+/// An unbounded set of either is its own kind of mess.
 ///
 /// They carry capture paths, so `docs/USAGE.md`'s uninstall list names them.
 const KEPT_CORRUPT: u32 = 5;

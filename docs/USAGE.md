@@ -268,7 +268,7 @@ relaunch knows not to bring back something you removed. The same local-data fold
 `shotshelf.log` and a small `video-drag-preview.png` that Shotshelf writes for drag previews;
 both are re-derivable and safe to delete.
 
-If `pinned.json` is ever unreadable, Shotshelf sets it aside as `pinned.json.corrupt` (then
+If either settings file is ever unreadable, Shotshelf sets it aside as `<name>.corrupt` (then
 `.corrupt.1`, up to five) rather than overwriting it, and says so in the log — the file is
 hand-repairable and losing it loses your pins. Those copies name captures, so delete them
 along with `pinned.json` if you are removing Shotshelf's data.

@@ -78,6 +78,36 @@ const ROAMING_CALLER = "src-tauri/src/settings.rs";
  * Shotshelf itself writes. Anything else wanting the webview to read a file
  * should name that file.
  */
+/**
+ * How many `#[allow(clippy::disallowed_methods)]` each file may carry.
+ *
+ * Every rule in `clippy.toml` — the roaming root, the four `PathResolver`
+ * functions, `Scope::allow_directory` — is silenced by one of these at the call.
+ * That attribute is three words, copy-pasteable, and there are already eight of
+ * them in the tree to copy from, so a reviewer added one to `handoff.rs` next to
+ * `Scope::allow_directory(&scope, …)` and to `diag.rs` next to
+ * `roots::preferences(app)` and both gates reported success: clippy was
+ * silenced, and the checks below match spellings that UFCS and module aliases
+ * walk past.
+ *
+ * Counting them here is what closes that. The two gates were each other's
+ * blind spot only for *where a call is written*; neither covered *the escape
+ * hatch itself*, which is the same hole in both. Adding an allowance now needs a
+ * line in this table — a diff, which is what the whole arrangement claimed to
+ * be and was not.
+ */
+const ALLOWANCES = new Map([
+  // Resolves every root; one per resolving statement, never file-scope.
+  ["src-tauri/src/dirs.rs", 3],
+  // The watch list and the clipboard folder.
+  ["src-tauri/src/catch/mod.rs", 1],
+  // Caches Shotshelf writes itself.
+  ["src-tauri/src/poster.rs", 1],
+  ["src-tauri/src/edit.rs", 1],
+  // The one permitted reach into the roaming profile.
+  ["src-tauri/src/settings.rs", 1],
+]);
+
 const DIRECTORY_GRANTERS = new Set([
   "src-tauri/src/catch/mod.rs",
   "src-tauri/src/poster.rs",
@@ -140,8 +170,11 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
   // First: this matches the *spelling* `.allow_directory(`, so
   // `tauri::scope::fs::Scope::allow_directory(&scope, …)` walks past it — a
   // reviewer did exactly that, and it is the third spelling-matched rule in
-  // this file to be bypassed that way. Clippy resolves the path instead, and
-  // the three legitimate granters carry a named `#[allow]` at the call.
+  // this file to be bypassed that way. Clippy resolves the path instead — but
+  // a per-call `#[allow]` silences clippy, so "each covers the other's blind
+  // spot" was false for the one thing both share. The allowance count above is
+  // what covers it, and this rule now matches the bare name so UFCS is caught
+  // here as well.
   //
   // Second: the exemption here is per *file*. That once let a directory grant
   // hide inside an exempt module, which is why a grant belongs in a file that
@@ -150,11 +183,32 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
   // `allow_reading_captures`, this check could not see it and the escalation
   // re-landed with every gate green. A reviewer proved exactly that. A module
   // wanting a directory grant now has to join the set, in a diff.
-  if (source.includes(".allow_directory(") && !DIRECTORY_GRANTERS.has(normalised)) {
+  // `allow_directory(` — the name and its open paren, not `.allow_directory(`.
+  //
+  // UFCS never writes the dot: `tauri::scope::fs::Scope::allow_directory(&scope,
+  // …)` walked straight past the older spelling, and a reviewer used exactly
+  // that. The paren keeps prose out — several files name the function while
+  // explaining why they must not call it.
+  if (source.includes("allow_directory(") && !DIRECTORY_GRANTERS.has(normalised)) {
     problems.push(
       `  ${normalised}: calls \`allow_directory\`, which opens every file beside ` +
         `the one named. Only ${[...DIRECTORY_GRANTERS].join(", ")} may — everything ` +
         `else grants \`allow_file\`, by name.`,
+    );
+  }
+
+  // Every escape hatch is counted, wherever it is.
+  //
+  // Deliberately outside the `resolvesRootsByDesign` exemption: `dirs.rs` is
+  // allowed to resolve roots, not to grant itself extra allowances.
+  const allowances = source.split("#[allow(clippy::disallowed_methods)]").length - 1;
+  const permitted = ALLOWANCES.get(normalised) ?? 0;
+  if (allowances !== permitted) {
+    problems.push(
+      `  ${normalised}: carries ${allowances} \`#[allow(clippy::disallowed_methods)]\`, ` +
+        `and ${permitted} ${permitted === 1 ? "is" : "are"} accounted for in check-dirs.mjs. ` +
+        `That attribute silences every rule in \`clippy.toml\` at the call, so adding one is a ` +
+        `decision, not a formality — say why in the table there.`,
     );
   }
 

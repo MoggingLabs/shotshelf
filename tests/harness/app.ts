@@ -175,7 +175,10 @@ export async function land(
  * instead of cancelling it with its own event.
  */
 export async function openBrowse(page: Page): Promise<void> {
-  await page.evaluate(() => window.__shotshelf__.emit("shelf://opened", true));
+  await page.evaluate(
+    ([event, deliberate]) => window.__shotshelf__.emit(event, deliberate),
+    [WINDOW_EVENTS.opened, WINDOW_EVENTS.deliberate] as const,
+  );
 }
 
 export const test = base;

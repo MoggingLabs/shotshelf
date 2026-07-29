@@ -284,7 +284,18 @@ export class Shelf {
    */
   #dropFromColumn(id: string): void {
     this.#column.remove(id);
-    if (this.#column.isEmpty) this.#options.onColumnChange();
+    // Always, not only when the column empties.
+    //
+    // The `isEmpty` guard made the non-empty branch of `onColumnChange` —
+    // which is the only route to `show_shelf` with a height — unreachable from
+    // the ×, the item cap and the retention sweep. So removing one card of
+    // three left an always-on-top panel a card's worth too tall, opaque and
+    // swallowing clicks, with nothing to correct it while the pointer stayed
+    // over the window holding the column open.
+    //
+    // Whether that means resize, dismiss or ignore is the popover's decision,
+    // and it now has the shape check it needs to make it.
+    this.#options.onColumnChange();
   }
 
   /** `true` if anything was evicted, which is the caller's cue to refresh. */

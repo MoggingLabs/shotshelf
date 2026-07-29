@@ -515,10 +515,10 @@ fn allow_reading_captures<R: Runtime>(app: &AppHandle<R>, dirs: &[PathBuf]) {
             // Watch folders may be logged — `diag.rs` names them as one of the
             // two permitted kinds — but this list also carries the clipboard
             // capture directory, which is a capture's own folder and is not.
-            // Twenty lines up, `allow_reading_pinned` refuses to log its path
-            // citing that rule; this one printed it.
+            // `diag.rs` names watch folders as loggable and a capture's own
+            // folder as not; this list carries both, so it names neither.
             crate::diag::warn(&format!(
-                "the shelf will not be able to show captures from one of its                  watch folders: {err}"
+                "the shelf will not be able to show captures from one of its watch folders: {err}"
             ));
         }
     }

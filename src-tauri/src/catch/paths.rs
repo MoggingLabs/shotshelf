@@ -195,7 +195,7 @@ fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
     // The parent is deliberate and it is broad: `catch::allow_reading_captures`
     // grants the webview asset-protocol read over exactly this list, so on Linux
     // that is every image and video sitting directly in `~/Pictures` and
-    // `~/Videos`. Windows grants three leaf folders and macOS one. It is here
+    // `~/Videos`. Windows grants several leaf folders and macOS one — `docs/USAGE.md` has the list. It is here
     // because Linux has no single conventional screenshot directory — GNOME,
     // KDE and Flameshot each choose differently, and several write straight into
     // `~/Pictures` — so watching only the leaf would catch nothing on most

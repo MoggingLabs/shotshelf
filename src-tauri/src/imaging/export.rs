@@ -85,7 +85,7 @@ pub fn for_handoff(image: DynamicImage, long_edge: u32) -> Sized {
 ///
 /// The floor is `.max(1)`, and `.round()` is round-to-nearest. `for_handoff` used
 /// to credit the guarantee to "rounding up", which this function does not do —
-/// and a test two hundred lines below asserts, correctly, that "the floor is a
+/// and a test further down this file asserts, correctly, that "the floor is a
 /// floor, not a rounding-up rule". One file, three statements, two of them
 /// agreeing and the third describing a mechanism that was never here.
 fn scale_edge(edge: u32, scale: f64) -> u32 {

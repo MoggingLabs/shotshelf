@@ -273,6 +273,7 @@ recording is never touched.
 | :-- | :-- |
 | **Windows** | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\posters` |
 | **macOS** | `~/Library/Caches/com.mogginglabs.shotshelf/posters` |
+| **Linux** | `~/.cache/com.mogginglabs.shotshelf/posters` |
 
 The sidecar is ~80 MB per platform, so it's fetched at install time by
 `scripts/prepare-sidecar.mjs` (via `ffmpeg-static`) and git-ignored rather than committed — it

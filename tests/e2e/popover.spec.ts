@@ -17,6 +17,7 @@
  * shelf simply stopped popping up, for the rest of the session.
  */
 
+import { CARD_GAP, CARD_HEIGHT, COLUMN_PADDING } from "../../src/shelf/geometry.ts";
 import { bootShelf, expect, FIXTURE, land, openBrowse, test } from "../harness/app.ts";
 
 test("adopting an open does not ask Rust to open again", async ({ page }) => {
@@ -291,4 +292,57 @@ test("removing the last card of a peeked column puts the window away", async ({ 
   // poll waits long enough to catch it — so a polled assertion passed with this
   // fix reverted and was measuring the wrong timer entirely.
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(1);
+});
+
+test("a capture leaving during the launch appearance does not hide the window", async ({ page }) => {
+  // The launch appearance is the browse shape with an empty column and
+  // `#opened === false` — nobody asked for it. `onColumnChange` read
+  // `columnIsEmpty` and dismissed, so anything that took a capture off the
+  // shelf in those four seconds put the window away: a × on a backfilled card,
+  // or choosing a retention window, whose sweep drops cards while the user is
+  // looking at the settings panel.
+  //
+  // No browser test emitted the launch payload before this one — the harness
+  // and `openBrowse` both send `true` — so the whole suite ran in a state a
+  // real launch never produces.
+  await page.clock.install();
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await page.evaluate(() => window.__shotshelf__.emit("shelf://opened", false));
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "browse");
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.locator(".tile").hover();
+  await page.locator(".tile__action--remove").click();
+  await expect(page.locator(".tile")).toHaveCount(0);
+
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+});
+
+test("removing one card of several shrinks the peeked column", async ({ page }) => {
+  // `#dropFromColumn` only reported when the column *emptied*, so the branch
+  // that asks Rust for a new height was unreachable from the ×, the item cap
+  // and the retention sweep. Removing one of three left an always-on-top panel
+  // a card too tall — opaque, and swallowing clicks.
+  await page.clock.install();
+  await bootShelf(page);
+  await land(page, FIXTURE.wide, { ts: 1 });
+  await land(page, FIXTURE.tall, { ts: 2 });
+  await land(page, FIXTURE.square, { ts: 3 });
+  await expect(page.locator(".tile")).toHaveCount(3);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.locator(".tile").first().hover();
+  await page.locator(".tile").first().locator(".tile__action--remove").click();
+  await expect(page.locator(".tile")).toHaveCount(2);
+
+  // Two cards' worth, plus whatever the alert strip is taking.
+  const asked = await page.evaluate(() => {
+    const calls = window.__shotshelf__.callsTo("show_shelf");
+    return calls.at(-1)?.args["height"] as number | undefined;
+  });
+  const strip = await page
+    .locator("#shelf-alert")
+    .evaluate((el: HTMLElement) => (el.hasAttribute("hidden") ? 0 : el.offsetHeight));
+  expect(asked).toBe(2 * CARD_HEIGHT + CARD_GAP + COLUMN_PADDING + strip);
 });

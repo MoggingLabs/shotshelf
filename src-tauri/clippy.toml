@@ -26,8 +26,10 @@
 # rustc never compiles — a module not yet declared in `lib.rs`, or one behind a
 # `cfg` for another OS.
 #
-# `src-tauri/src/dirs.rs` carries `#![allow(clippy::disallowed_methods)]`. It
-# needs no `disallowed_types` allowance: it resolves roots by calling the
+# `src-tauri/src/dirs.rs` carries **no** blanket allowance — it has one per
+# resolving statement, because a file-scope `#![allow(clippy::disallowed_methods)]`
+# also silences `Scope::allow_directory`, which that module must never call. It
+# needs no `disallowed_types` allowance either: it resolves roots by calling the
 # `PathResolver` functions and never names `BaseDirectory`.
 disallowed-methods = [
   { path = "tauri::path::PathResolver::app_data_dir", reason = "roaming; go through `dirs::preferences`" },

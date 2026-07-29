@@ -40,7 +40,7 @@ tokens visible on screen, private messages. Shotshelf's core privacy guarantee:
   `settings.json` is in the **roaming** profile: on Windows `app_config_dir()` and
   `app_data_dir()` are the same directory, and a managed profile copies it to a network share
   at logoff. That is deliberate for a hotkey and an item cap, which should follow you between
-  machines. It is why `pinned.json` — the only file naming captures — lives in
+  machines. It is why `pinned.json` — the only *settings* file naming captures — lives in
   `%LOCALAPPDATA%` instead, why `settings::persist` blanks `pinned` before writing, and why
   `scripts/check-dirs.mjs` and `src-tauri/clippy.toml` both refuse to let another module
   resolve a root for itself.
@@ -50,13 +50,19 @@ tokens visible on screen, private messages. Shotshelf's core privacy guarantee:
   way, so one poster frame per recording is written to the cache and the card renders that —
   which the next paragraph lists, and which this sentence used to contradict.
 
-  Shotshelf does write picture data derived from your captures, in four places, and an earlier
-  version of this sentence said poster frames were the only one — which `docs/USAGE.md` had
-  already contradicted. They are: video poster frames (`posters`), the downscaled copies made
-  for hand-off while "Send smaller copies" is on (`handoff`), saved edits and comparisons
-  (`edits`), and a single `video-drag-preview.png` — which is the bundled app icon written
-  out verbatim, so no capture data reaches it; three of the four are derived, not four. All are on the local device, none roam, and
-  the first two are caches Shotshelf prunes; the third is your own work and is never pruned.
+  Shotshelf writes picture data of its own in five places. Three are derived from your captures:
+  video poster frames (`posters`), the downscaled copies made for hand-off while "Send smaller
+  copies" is on (`handoff`), and saved edits and comparisons (`edits`). One is not derived at
+  all — `video-drag-preview.png` is the bundled app icon written out verbatim. And one is not a
+  copy of anything: `clipboard` holds captures caught off the clipboard, which exist nowhere
+  else, which is why `dirs.rs` singles it out and why the uninstall notes flag it.
+
+  All are on the local device and none roam. The first two are caches Shotshelf prunes; `edits`
+  is your own work and is never pruned; `clipboard` is never pruned either, deliberately.
+
+  This sentence has been wrong twice — first claiming poster frames were the only one, then
+  claiming four after `README.md` had been corrected to five in the same commit. `docs/USAGE.md`
+  holds the table both of these defer to.
 - Any change that would introduce a network call touching captures is a privacy regression and will
   be rejected.
 

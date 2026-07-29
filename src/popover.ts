@@ -221,6 +221,20 @@ export class Popover {
     // because the mode is still `"column"` — took the `else` branch and showed a
     // window the user had dismissed.
     if (!this.#showing || this.#opened) return;
+
+    // And nothing to put away unless the window is *showing the column*.
+    //
+    // `#opened` is false during the launch appearance — nobody asked for it —
+    // but the shape is browse and the column is legitimately empty. Without this
+    // check, anything that took a capture off the shelf in those four seconds
+    // hid the window: a × on a backfilled card, or choosing a retention window,
+    // whose sweep drops cards the user is looking at the settings panel about.
+    //
+    // The guard is the mode rather than `columnIsEmpty` because those are
+    // different questions, and answering the second in place of the first is
+    // what `resizeColumn` was extracted to avoid one method above.
+    if (this.#root.dataset["mode"] !== "column") return;
+
     if (this.#shelf.columnIsEmpty) this.dismiss();
     else this.showColumn();
   }
