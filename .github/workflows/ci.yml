@@ -115,16 +115,20 @@ jobs:
         if: '!cancelled()'
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
-      # `--all-targets`, which runs lib, bin and integration tests but not
-      # doctests. The crate has none — every Rust test is a `#[cfg(test)] mod`
-      # — so nothing is lost, and it keeps this identical to what
-      # `npm run gate:rust` runs locally. Plain `cargo test` always invokes
-      # rustdoc, which Windows Smart App Control blocks on the development
-      # machine (os error 4551), so the two commands could not otherwise be
-      # the same and README's "npm run gate runs the lot" would be false again.
+      # `--lib`, which is where every test in this crate lives — `main.rs` is a
+      # four-line shim around `shotshelf_lib::run()` and has none, and there is
+      # no `tests/` directory yet. Identical to what `npm run gate:rust` runs,
+      # deliberately, so README's "npm run gate runs the lot" stays true.
+      #
+      # Plain `cargo test` additionally invokes rustdoc and links a test binary
+      # for the bin target, and Windows Smart App Control blocks both on the
+      # development machine the moment they are freshly linked (os error 4551).
+      # Nothing is lost here; if an integration test is ever added under
+      # `src-tauri/tests/` — see `webview_path.rs` for why one should be — this
+      # command and the npm script both need `--test '*'` alongside.
       - name: Rust tests
         if: '!cancelled()'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
       - name: Build app
         if: '!cancelled()'

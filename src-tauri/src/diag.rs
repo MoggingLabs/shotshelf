@@ -14,15 +14,23 @@
 //! platform, survives the session, and is something a user can attach to a bug
 //! report — which is the only reason any of this is written down.
 //!
-//! Hand-rolled rather than adopting `tauri-plugin-log`, and that is a
-//! compromise rather than a preference. The plugin is the right answer and the
-//! standing rule is to adopt rather than hand-roll; it cannot be added here,
-//! because any edit to `Cargo.toml` forces Cargo to relink its build script and
-//! Windows Smart App Control refuses the freshly-linked binary, breaking the
-//! Rust build on the development machine (see SECURITY.md). Thirty lines with
-//! no dependency is the honest way to close the gap from inside that
-//! constraint, and the plugin should replace this the moment the manifest can
-//! be touched.
+//! Hand-rolled rather than adopting `tauri-plugin-log`, and the reason first
+//! given for that was wrong: it said the manifest could not be edited, which
+//! turned out to be false when it was actually tested (see SECURITY.md). So
+//! the decision has to stand on its own merits, and it does — this is a
+//! **policy boundary, not a logging framework**.
+//!
+//! What earns its place is the contract below: two levels, one destination,
+//! and a stated rule about what may be written. A general-purpose logger takes
+//! whatever any call site passes it, which is precisely the property this must
+//! not have — the app's whole privacy claim is that captures do not leave the
+//! machine, and this writes to a file that outlives the session. Sixty lines
+//! with the rule enforced by the vocabulary beats a dependency that would
+//! happily log a window title.
+//!
+//! If richer plumbing is ever wanted — rotation, levels, forwarding to the
+//! webview — the plugin is the right way to get it, and `warn`/`info` are the
+//! right things to keep in front of it.
 //!
 //! **What may go through here, exactly.** Two things, and no others:
 //!

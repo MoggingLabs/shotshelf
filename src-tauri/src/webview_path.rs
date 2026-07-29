@@ -142,16 +142,40 @@ mod tests {
         assert!(absolute(&gone.to_string_lossy()).is_ok());
     }
 
-    // `existing_file` additionally consults the asset-protocol scope, which
-    // needs a running app — so it has **no automated coverage at all**, here or
-    // anywhere. The front-end gate cannot reach it: `tests/harness/tauri-mock.ts`
-    // replaces `window.__TAURI_INTERNALS__` wholesale, so no Playwright spec
-    // ever executes a `#[tauri::command]`. An earlier version of this comment
-    // said the front-end gate exercised it, which was simply false and is the
-    // kind of claim that stops the next reader from looking.
+    // `existing_file`'s **scope check has no automated coverage**, and the
+    // reason is structural rather than an oversight nobody got to.
     //
-    // The shape checks above are the half that is pure and are tested. The
-    // scope half rests on reading Tauri's `FsScope::is_allowed`, which
-    // canonicalizes before matching, and on the watcher and the grant being
+    // Two gate populations, disjoint by construction. No Playwright spec can
+    // reach Rust: `tests/harness/tauri-mock.ts` replaces
+    // `window.__TAURI_INTERNALS__` wholesale, so no spec ever executes a
+    // `#[tauri::command]`. And no Rust test here can construct an `AppHandle`,
+    // so nothing taking one is callable. Everything in the intersection is
+    // ungated — this function, `read_capture`'s ceiling, `handoff::file_for`,
+    // `catch/clipboard.rs`, `tray.rs`, `hotkey.rs`, `update.rs`,
+    // `imaging::load`, `settings::load`. A reviewer proved the point by
+    // deleting the scope check below and watching all 108 tests pass.
+    //
+    // **What was tried, so the next person does not repeat it.** Tauri ships
+    // `tauri::test::mock_builder`/`mock_app` for exactly this, and it was
+    // wired up three ways: as a `[dev-dependencies]` entry, as a `test`
+    // feature on the existing dependency, and with the WebView2 loader copied
+    // beside the test binary. All three compiled and all three died at load
+    // with `STATUS_ENTRYPOINT_NOT_FOUND` (0xc0000139) on Windows. The cause is
+    // this crate's own shape: `lib.rs` builds as `cdylib` and `staticlib` as
+    // well as `rlib` — Tauri requires that — and a unit test living inside a
+    // `cdylib` links against a symbol set the mock runtime changes.
+    //
+    // The route that should work is an **integration test** under
+    // `src-tauri/tests/`, which links the `rlib` and never touches the
+    // `cdylib`. It needs `pub mod webview_path;` and a CI run on all three
+    // OSes to confirm the linking holds, and it was not attempted here rather
+    // than attempted and left half-done: this machine cannot run the packaged
+    // app, so a change that alters what the shipped binary exports is not
+    // something to land unverified. It is the single highest-value gate this
+    // repository is missing.
+    //
+    // Until then the shape checks above are the half that is pure and tested.
+    // The scope half rests on reading Tauri's `FsScope::is_allowed`, which
+    // canonicalizes before matching, and on the grant and the watcher being
     // non-recursive over the same resolved list.
 }

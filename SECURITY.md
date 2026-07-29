@@ -99,12 +99,27 @@ And plainly, because the list is otherwise easy to read as Windows-specific: **n
 this**. macOS's `defaults read` subprocess, the Accessory activation policy and the private-API
 transparency are unverified, and the entire Linux target is compile-checked only.
 
-One local-environment limit worth recording, because it shapes what can be checked here at all:
-**editing `src-tauri/Cargo.toml` breaks the Rust build on the development machine.** Any manifest
-change forces Cargo to relink its build script, and Smart App Control refuses the freshly-linked
-binary (`os error 4551`) exactly as it refuses the app. Reverting the manifest restores the cached
-artifact and the build succeeds. So dependency changes — including the advisory below — cannot be
-validated locally; they can only be validated in CI.
+One local-environment limit worth recording, because it shapes what can be checked here at all.
+**Smart App Control refuses freshly linked executables on the development machine** (`os error
+4551`) — the same policy that refuses the packaged app. It is not, as an earlier version of this
+paragraph claimed, "any edit to `Cargo.toml`": a manifest edit that adds a dependency builds and
+tests fine. What triggers it is a *newly linked binary* that the policy has not seen before, and
+what gets relinked varies — a build script after a manifest change, the bin target's test
+harness, `rustdoc`. Once a given binary has been accepted it keeps working until something
+relinks it.
+
+That claim was wrong and it was load-bearing: it was given as the reason `tauri-plugin-log` could
+not be adopted and the reason no autostart plugin could be added. Both were re-tested. Adding a
+dependency works. The measured consequences are narrower and specific:
+
+- `cargo test` cannot run doctests here (`rustdoc` is blocked) and cannot run the bin target's
+  test harness after a relink. Neither matters — this crate has no doctests and `main.rs` is a
+  four-line shim — so `npm run gate:rust` runs `cargo test --lib`, which is every test there is,
+  and CI runs the identical command.
+- `tauri`'s `test` feature, which would let Rust tests construct an `App` and reach the command
+  tier, could not be landed: three wirings all died at load with `STATUS_ENTRYPOINT_NOT_FOUND`
+  because this crate builds as a `cdylib`. The route that should work is an integration test
+  under `src-tauri/tests/`, and it is documented in `webview_path.rs` rather than half-attempted.
 
 None of these can leak a capture off the machine — the network surface is one URL, and the CSP
 that seals the webview is written to allow nothing else. But that policy is itself on the list

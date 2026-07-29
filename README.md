@@ -102,9 +102,8 @@ npm run tauri build             # release bundle (.msi/.exe on Windows, .dmg/.ap
 
 **Starting it automatically is a manual step, and deliberately not automated here.** Shotshelf
 registers no login item and writes nothing to a startup folder — an app that adds itself to
-startup without being asked is a bad neighbour, and doing it properly needs a platform plugin
-this build cannot currently add (`Cargo.toml` cannot be edited on the development machine; see
-[SECURITY.md](./SECURITY.md#what-has-not-been-verified)). Until then: on Windows put a shortcut
+startup without being asked is a bad neighbour, and registering a login item is something that
+should be offered in Settings rather than assumed — which is work this branch has not done. Until then: on Windows put a shortcut
 in `shell:startup`, on macOS add it under System Settings → General → Login Items, on Linux drop
 a `.desktop` file in `~/.config/autostart`. A launch picks up anything from the previous 24
 hours, so a late start is not a lost morning.
