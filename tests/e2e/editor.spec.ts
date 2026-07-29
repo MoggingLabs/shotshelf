@@ -253,25 +253,56 @@ test("a redaction destroys the pixels rather than drawing over them", async ({ p
       if (!context) throw new Error("no 2d context");
       context.drawImage(bitmap, 0, 0);
 
-      // Middle of the drag, converted from rendered pixels to image pixels.
-      // Each axis uses its own ratio: the element can be letterboxed by
-      // `max-height`, so the two are not the same number.
-      const data = context.getImageData(
-        Math.round((105 / width) * bitmap.width),
-        Math.round((62 / height) * bitmap.height),
-        1,
-        1,
-      ).data;
-      return [data[0], data[1], data[2], data[3]];
+      const at = (x: number, y: number): [number, number, number, number] => {
+        const data = context.getImageData(
+          Math.round((x / width) * bitmap.width),
+          Math.round((y / height) * bitmap.height),
+          1,
+          1,
+        ).data;
+        return [data[0] ?? 0, data[1] ?? 0, data[2] ?? 0, data[3] ?? 0];
+      };
+
+      // Inside the drag, and outside it on all four sides.
+      //
+      // The drag is [20, 20] → [190, 105], and each axis converts by its own
+      // ratio: the element can be letterboxed by `max-height`, so the two are
+      // not the same number.
+      return {
+        inside: at(105, 62),
+        above: at(105, 8),
+        below: at(105, height - 6),
+        left: at(6, 62),
+        right: at(width - 6, 62),
+      };
     },
     { width: shown!.width, height: shown!.height },
   );
 
   // Opaque and near-black: the fill, not the fixture's blue gradient.
-  expect(covered[3]).toBe(255);
-  expect(covered[0]).toBeLessThan(40);
-  expect(covered[1]).toBeLessThan(40);
-  expect(covered[2]).toBeLessThan(40);
+  expect(covered.inside[3]).toBe(255);
+  expect(covered.inside[0]).toBeLessThan(40);
+  expect(covered.inside[1]).toBeLessThan(40);
+  expect(covered.inside[2]).toBeLessThan(40);
+
+  // And *only* inside.
+  //
+  // One sample proved a redaction happened and said nothing about where. A
+  // `fillRect(0, 0, 100000, 100000)` — every save destroying the whole capture
+  // instead of the dragged rectangle — passed this test, which is the only test
+  // of the app's one irreversible operation. Over-redaction is the direction
+  // that loses data, and it was the direction with no assertion at all.
+  // The predicate is "this is not the fill", not "this is bright": the
+  // fixture's gradient is genuinely dark down its right edge, so a brightness
+  // threshold fails on intact pixels. Near-black on *every* channel is what the
+  // fill looks like, and it is the same test the inside sample passes.
+  const isFill = (pixel: readonly number[]) =>
+    pixel[3] === 255 && pixel[0]! < 40 && pixel[1]! < 40 && pixel[2]! < 40;
+
+  for (const [side, pixel] of Object.entries(covered)) {
+    if (side === "inside") continue;
+    expect(isFill(pixel), `the capture was destroyed ${side} the redaction as well`).toBe(false);
+  }
 });
 
 test("undo takes back the last mark", async ({ page }) => {
@@ -795,7 +826,12 @@ test("the crop guide dims around the selection without erasing it", async ({ pag
   expect(box).not.toBeNull();
   const inside: [number, number] = [box!.width * 0.5, box!.height * 0.5];
 
+  // Outside the selection, which is the half this test is named for and did
+  // not check. Both samples are taken before and during the drag.
+  const outside: [number, number] = [box!.width * 0.08, box!.height * 0.5];
+
   const before = await inkAt(page, ...inside);
+  const beforeOutside = await inkAt(page, ...outside);
 
   // Hold a crop drag open across the middle of the capture.
   await page.mouse.move(box!.x + box!.width * 0.25, box!.y + box!.height * 0.25);
@@ -803,11 +839,21 @@ test("the crop guide dims around the selection without erasing it", async ({ pag
   await page.mouse.move(box!.x + box!.width * 0.75, box!.y + box!.height * 0.75, { steps: 6 });
 
   const guided = await inkAt(page, ...inside);
+  const guidedOutside = await inkAt(page, ...outside);
   await page.mouse.up();
 
   // The capture is still there, at full opacity, inside the selection.
   expect(guided[3]).toBe(255);
   expect(guided).toEqual(before);
+
+  // And it *is* dimmed outside it.
+  //
+  // `paintCropGuide` draws its bands strictly outside the selection, so a
+  // sample taken only at the centre could never observe them: setting the dim
+  // fill fully transparent — no dimming anywhere — left this test passing under
+  // a name that promises the opposite. The two historical bugs in the comment
+  // above are caught by the inside sample; the dimming itself was unguarded.
+  expect(guidedOutside).not.toEqual(beforeOutside);
 });
 
 test("the crop guide still frames the selection on a second crop", async ({ page }) => {

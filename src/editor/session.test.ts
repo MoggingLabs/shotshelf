@@ -73,9 +73,18 @@ test("undoing a callout frees its number rather than leaving a gap", () => {
   assert.equal(edit.nextNumber(), 2);
 });
 
-test("a redaction is a different kind from a box", () => {
-  // A box outlines something; a redaction destroys what is under it.
-  // Conflating them is how an annotation ships as if it were a redaction.
+test("a mark keeps the kind it was added with", () => {
+  // Narrow on purpose. A box outlines something and a redaction destroys what
+  // is under it, but that distinction lives in `src/editor/draw.ts` — a
+  // destructive fill against a hollow stroke — and `#clip` here handles both
+  // in one arm, returning `kind` verbatim.
+  //
+  // So this checks that the field survives clipping, which is all it can
+  // check; it used to be titled and commented as though it guarded against an
+  // annotation shipping as a redaction, which no edit to this file could
+  // cause. The behavioural guarantee is
+  // `tests/e2e/editor.spec.ts` — "a redaction destroys the pixels rather than
+  // drawing over them".
   const edit = session();
   edit.add({ kind: "redact", x: 10, y: 10, width: 20, height: 20 });
 

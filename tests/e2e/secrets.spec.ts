@@ -144,7 +144,12 @@ test("a capture that cannot be read is marked unread, not warned about", async (
   // outright, so this held even while the strip carried "No capture folders
   // are being watched", which the boot genuinely says. One shared element
   // cannot answer "did *this* feature stay quiet" by being invisible.
-  await expect(page.locator("#shelf-alert")).not.toContainText(/secret|credential|scan/i);
+  //
+  // Matched against the words the app would actually use if it *did* report
+  // this — `status.ts` and `main.ts` are the only writers, and "credential"
+  // is the word they use for it. A pattern no reachable message can contain
+  // would pass for the same reason `toBeHidden` did.
+  await expect(page.locator("#shelf-alert")).not.toContainText(/credential|secret/i);
 });
 
 test("recordings are not scanned", async ({ page }) => {

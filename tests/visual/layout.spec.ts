@@ -274,16 +274,22 @@ test("the CSS mirrors the card metrics the column window is sized against", asyn
   expect(card!.height).toBeCloseTo(CARD_HEIGHT, 0);
 });
 
-test("every secret kind the wire can carry has a style that matches it", async ({ page }) => {
+test("no badge selector names a secret kind the wire cannot send", async ({ page }) => {
   // The third and fourth declarations of `SecretKind`. Rust and TypeScript are
   // joined by `tests/fixtures/secret-kinds.json`; the CSS selectors were not,
   // so renaming a variant kept every gate green while the badge silently fell
   // back to the default colour — which is exactly what the round-trip test's
   // own docstring says the join exists to prevent.
   //
-  // Two kinds are styled deliberately and three fall through; what this pins
-  // is that each *styled* selector still matches a kind that exists, and that
-  // every kind renders a badge at all.
+  // One direction only, and the name now says so. Two kinds are styled
+  // deliberately and three fall through to the default colour, which is
+  // intended — so "every kind has a style" is not the property, and this test
+  // used to claim it in its title while asserting the reverse: that no styled
+  // selector names a kind Rust cannot send. That is the direction a rename
+  // breaks, and it is the one worth gating.
+  //
+  // `src/shelf/types.test.ts` and `secrets.rs` hold the other direction —
+  // every shipped kind exists on both sides of the wire.
   await bootShelf(page);
 
   const results = await page.evaluate((kinds) => {

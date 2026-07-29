@@ -27,7 +27,11 @@ const LICENSE_SUFFIX = ".LICENSE";
 
 const TRIPLES = {
   "win32-x64": "x86_64-pc-windows-msvc",
-  "win32-arm64": "aarch64-pc-windows-msvc",
+  // No `win32-arm64`. `ffmpeg-static` ships no Windows-on-ARM binary, so
+  // naming the triple here implied a platform that cannot be built: the
+  // download step warned and exited 0, and the failure surfaced minutes
+  // later inside `tauri build` as a missing sidecar. An unmapped platform
+  // now says so immediately, and says why.
   "darwin-arm64": "aarch64-apple-darwin",
   "darwin-x64": "x86_64-apple-darwin",
   "linux-x64": "x86_64-unknown-linux-gnu",
@@ -43,7 +47,12 @@ if (!triple) {
   // including `linux-arm`, which `ffmpeg-static` does support. Someone
   // installing dependencies to work on the front end does not need a sidecar,
   // and `tauri build` complains loudly if one is genuinely missing.
-  console.warn(`[sidecar] no target triple known for ${platform} — skipping`);
+  console.warn(
+    `[sidecar] no target triple known for ${platform} — skipping. ` +
+      `A bundle built here will have no ffmpeg, so poster frames for recordings ` +
+      `will be missing; everything else works. Windows on ARM is the known case: ` +
+      `\`ffmpeg-static\` publishes no binary for it.`,
+  );
   process.exit(0);
 }
 

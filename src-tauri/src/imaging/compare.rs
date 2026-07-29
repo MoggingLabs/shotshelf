@@ -312,6 +312,27 @@ fn blit(canvas: &mut RgbaImage, image: &DynamicImage, offset_x: u32) {
     }
 }
 
+/// How thick a border one edge can carry and still leave something inside it.
+///
+/// A fixed `OUTLINE` on both sides meets in the middle of anything narrower
+/// than twice it, and the two bands then cover every pixel â€” a solid block of
+/// highlight over the change, in a function whose test is named "outlines the
+/// change *without covering it*".
+///
+/// Not a rare shape. `merge` emits a region bounded by the last partial block
+/// of the image: a 1366-wide capture with a 16-pixel block leaves a final
+/// column six pixels across, and `2 * OUTLINE` is six. A change confined to the
+/// right-hand edge of a very common laptop width came out painted over.
+///
+/// Below three pixels there is no interior to preserve and the region is filled
+/// â€” a one-pixel-wide box cannot be both a border and a middle.
+fn stroke(extent: u32) -> u32 {
+    if extent < 3 {
+        return extent;
+    }
+    OUTLINE.min((extent - 1) / 2).max(1)
+}
+
 /// Draw a hollow rectangle. Hollow because the point is to direct attention to
 /// what changed, not to hide it.
 /// How thick a border one edge can carry and still leave something inside it.
@@ -328,13 +349,6 @@ fn blit(canvas: &mut RgbaImage, image: &DynamicImage, offset_x: u32) {
 ///
 /// Below three pixels there is no interior to preserve and the region is filled
 /// — a one-pixel-wide box cannot be both a border and a middle.
-fn stroke(extent: u32) -> u32 {
-    if extent < 3 {
-        return extent;
-    }
-    OUTLINE.min((extent - 1) / 2).max(1)
-}
-
 fn outline(canvas: &mut DynamicImage, region: Region, offset_x: u32) {
     let (canvas_width, canvas_height) = (canvas.width(), canvas.height());
     let (across, down) = (stroke(region.width), stroke(region.height));

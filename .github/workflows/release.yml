@@ -104,6 +104,13 @@ jobs:
       # on a red commit built and "released" it, with no lint, no tests and no
       # clippy anywhere in the path. A release is the one build that must not
       # be the unchecked one.
+      #
+      # One part of it is a no-op here, and deliberately: the pixel goldens in
+      # `tests/visual/appearance.spec.ts` skip on anything but Linux — font
+      # rasterisation differs between platforms — and there is no Linux runner
+      # in this matrix, because there is no Linux artifact to build. Appearance
+      # is gated by `ci.yml`, which does run on `ubuntu-latest`, on the same
+      # commit. Worth knowing rather than assuming this run covers it.
       - name: Gate
         run: |
           npx playwright install chromium --with-deps

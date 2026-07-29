@@ -576,19 +576,31 @@ and again: {token}
     /// Exact equality, not `!contains(…)`: a containment check passes for any
     /// marker that happens to stop before the fixture's chosen tail, so it
     /// tests the fixture rather than the rule.
-    const SAMPLES: &[(&str, &str, &str)] = &[
+    const SAMPLES: &[(&str, &str, &str, &str)] = &[
         (
             "private key",
             "-----BEGIN RSA PRIVATE KEY-----",
             "-----BEGIN\u{2026}",
+            "PRIVATE KEY",
         ),
-        ("GitHub token", "ghp_A1b2C3d4E5f6G7h8I9j0", "ghp_\u{2026}"),
+        (
+            "GitHub token",
+            "ghp_A1b2C3d4E5f6G7h8I9j0",
+            "ghp_\u{2026}",
+            "A1b2",
+        ),
         (
             "OpenAI or Anthropic API key",
             "sk-ant-A1b2C3d4E5f6G7h8",
             "sk-\u{2026}",
+            "ant-",
         ),
-        ("AWS access key ID", "AKIAIOSFODNN7EXAMPLE", "AKIA\u{2026}"),
+        (
+            "AWS access key ID",
+            "AKIAIOSFODNN7EXAMPLE",
+            "AKIA\u{2026}",
+            "IOSF",
+        ),
         (
             "Google API key",
             // Exactly 35 characters after `AIza`, which is what the pattern
@@ -596,27 +608,40 @@ and again: {token}
             // test said so rather than passing on an empty result.
             "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
             "AIza\u{2026}",
+            "SyA1",
         ),
-        ("Slack token", "xoxb-A1b2C3d4E5f6G7h8", "xoxb-\u{2026}"),
+        (
+            "Slack token",
+            "xoxb-A1b2C3d4E5f6G7h8",
+            "xoxb-\u{2026}",
+            "A1b2",
+        ),
         (
             "Stripe secret key",
             "sk_live_A1b2C3d4E5f6G7h8",
             "sk_\u{2026}",
+            "live",
         ),
         (
             "signed token",
             "eyJhbGciOiJI.eyJzdWIiOiIx.SflKxwRJSMeK",
             "eyJ\u{2026}",
+            "hbGc",
         ),
         (
             "secret in a config value",
             "API_KEY=A1b2C3d4E5f6",
             "API_KEY=\u{2022}\u{2022}\u{2022}",
+            "A1b2",
         ),
         (
             "email address",
             "someone@example.com",
             "\u{2022}\u{2022}\u{2022}@example.com",
+            // The *person*, not the tail. Keeping the domain is this rule's
+            // documented behaviour, so "the last few characters never appear"
+            // is false here — and was standing in for the real question.
+            "someone",
         ),
     ];
 
@@ -625,10 +650,37 @@ and again: {token}
         // The coverage half. Without it, adding an eleventh pattern — the way
         // every one of the ten arrived — silently adds an unverified
         // disclosure decision, and the test below still passes.
+        // Exactly one sample per pattern, and exactly one pattern per label.
+        //
+        // `any(â€¦)` alone counted a *label* as covered, so an eleventh pattern
+        // reusing an existing label â€” the natural way to add a second spelling
+        // of the same credential â€” was covered by the first one's sample and
+        // its own `marker` was never exercised. That is the whole failure this
+        // test exists to prevent, reachable by adding a pattern the way every
+        // pattern here was added.
         for pattern in PATTERNS.iter() {
-            assert!(
-                SAMPLES.iter().any(|(label, ..)| *label == pattern.label),
-                "no sample covers the shipped pattern {:?}",
+            let covering = SAMPLES
+                .iter()
+                .filter(|(label, ..)| *label == pattern.label)
+                .count();
+            assert_eq!(
+                covering, 1,
+                "the shipped pattern {:?} has {covering} samples; it needs exactly one",
+                pattern.label,
+            );
+        }
+
+        // And the labels are distinct, so "one sample per label" means "one
+        // sample per pattern". Without this, two patterns sharing a label each
+        // see one sample and the count above still passes.
+        for pattern in PATTERNS.iter() {
+            let sharing = PATTERNS
+                .iter()
+                .filter(|other| other.label == pattern.label)
+                .count();
+            assert_eq!(
+                sharing, 1,
+                "{:?} labels {sharing} patterns; a label names one rule",
                 pattern.label,
             );
         }
@@ -645,7 +697,7 @@ and again: {token}
         // Through `scan`, not `mask`: the preview a card actually renders is
         // the product of the pattern's own marker travelling through the whole
         // pipeline, and only one of the ten was ever checked that far.
-        for (label, sample, expected) in SAMPLES {
+        for (label, sample, expected, secret) in SAMPLES {
             let findings = scan(sample);
             let found = findings
                 .iter()
@@ -657,12 +709,18 @@ and again: {token}
                 "{label:?} previewed {:?} for {sample:?}",
                 found.preview,
             );
-            // And the belt: whatever the rule, the tail of the credential is
-            // never in the rendered string.
-            let tail: String = sample.chars().rev().take(6).collect();
+            // The belt, independent of the marker: the secret-bearing part of
+            // the sample never appears in the rendered string.
+            //
+            // Named per sample rather than computed as "the last six
+            // characters". That version was written `.rev().take(6)`, which
+            // yields the tail *reversed* — no preview can contain it, so it
+            // held even against a preview that leaked the sample whole.
+            // Corrected, it then failed on the email rule, which keeps the
+            // domain deliberately: the tail was never the question. This is.
             assert!(
-                !found.preview.contains(&tail),
-                "{label:?} leaked the tail of its own sample: {:?}",
+                !found.preview.contains(secret),
+                "{label:?} leaked {secret:?}: {:?}",
                 found.preview,
             );
         }
@@ -703,7 +761,7 @@ and again: {token}
         // deadline. `regex` guarantees linear time; this asserts the wiring.
         let haystack = SAMPLES
             .iter()
-            .map(|(_, sample, _)| format!("lorem ipsum {sample} dolor sit amet "))
+            .map(|(_, sample, ..)| format!("lorem ipsum {sample} dolor sit amet "))
             .collect::<String>()
             .repeat(4_000);
         let started = std::time::Instant::now();

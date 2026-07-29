@@ -283,8 +283,10 @@ Each tile also has a **copy** button for the apps that take a paste but refuse a
 images go on the clipboard as pixels, recordings as a file reference. Shotshelf flags its own
 clipboard writes so copying a capture doesn't shelve a second copy of it.
 
-The webview holds four permissions and no more: listen and unlisten for events, window
-drag-start for the title strip, and the drag plugin. Notably **not** `core:default`, which is
+The webview holds three permissions and no more: listen for events, window drag-start for the
+title strip, and the drag plugin. `unlisten` was a fourth until it was noticed that nothing
+calls it — every `listen` registration here is subscribed for the life of the window — so it
+was dead reach granted to the least-trusted process. Notably **not** `core:default`, which is
 what this granted until it was audited — nine permission sets including `core:image`, whose
 `from-path` and `rgba` together are a file-read primitive that bypasses both the asset-protocol
 scope and `webview_path`, and `core:tray`/`core:menu`, which let the page rewrite the tray icon
@@ -389,8 +391,10 @@ already-installed apps.
 ## 🔐 Privacy — captures never leave your machine
 
 Screenshots and recordings routinely contain sensitive material (client data, tokens on screen).
-Shotshelf is **local-only**: no cloud, no telemetry, no upload. Thumbnails and any index stay on the
-device. See [SECURITY.md](./SECURITY.md). This repo never contains real captures.
+Shotshelf is **local-only**: no cloud, no telemetry, no upload. There are no thumbnail files and
+no capture index — cards render from the capture itself, and the only derived images on disk are
+video poster frames in the cache directory. What is stored is two JSON files, and the one naming
+captures is kept out of the roaming profile on purpose. See [SECURITY.md](./SECURITY.md). This repo never contains real captures.
 
 ## ⚖️ Internal use
 
