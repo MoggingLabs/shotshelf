@@ -495,14 +495,6 @@ fn as_ms(at: SystemTime) -> u64 {
     })
 }
 
-/// Let the webview render captures straight off disk.
-///
-/// The asset protocol is scoped shut by default, and the scope has to be
-/// granted here rather than in `tauri.conf.json`: the macOS capture folder is
-/// only known once `defaults read` has run, and `SHOTSHELF_WATCH_DIRS` can
-/// replace the list outright. Deriving it from the resolved watch list keeps
-/// one source of truth — the shelf can read exactly what the engine watches,
-/// non-recursively, and nothing else.
 /// Let the webview read the captures a restart is about to put back.
 ///
 /// Called synchronously from `setup`, before the engine starts on its worker,
@@ -520,22 +512,47 @@ fn as_ms(at: SystemTime) -> u64 {
 /// "moved or deleted since it was caught". `describe_capture` fails the same
 /// scope check, so the card also reads as never scanned for credentials.
 ///
-/// Only the parent directories of pinned captures, because those are the only
-/// paths the front end can ask for before the engine is up — nothing else is on
-/// the shelf yet. The engine's own wider grant follows and supersedes it.
+/// Each pinned file by name — `allow_file`, never `allow_directory`.
+///
+/// The distinction is the whole security of this function. `pinned.json` is
+/// hand-editable, and `set_pinned` and `set_settings` both let the webview
+/// write it; `allowed_pins` keeps any path that merely parses as absolute. So
+/// this list is *webview-supplied and persisted*, which is exactly the input
+/// `webview_path.rs` describes the scope as containing.
+///
+/// An earlier version granted each pin's **parent directory**, and
+/// `allow_directory(p, false)` admits `p/*` — every file beside it. One
+/// hand-edited path, or one session run with `SHOTSHELF_WATCH_DIRS` pointed at
+/// a client folder, would have opened that whole directory to `describe_capture`
+/// (OCR and credential scanning), `copy_capture`, `prepare_drag` and
+/// `convertFileSrc` — for the rest of the session, since `Scope` only ever
+/// adds. That is the escalation the scope exists to prevent, reintroduced by
+/// the fix for a rendering race.
+///
+/// `allow_file` grants the one path and nothing beside it, which is all a tile
+/// needs, and the engine's own directory grant follows for everything watched.
 pub fn allow_reading_pinned<R: Runtime>(app: &AppHandle<R>, pinned: &[PathBuf]) {
     let scope = app.asset_protocol_scope();
 
-    for parent in pinned.iter().filter_map(|path| path.parent()) {
-        if let Err(err) = scope.allow_directory(parent, false) {
+    for path in pinned {
+        if let Err(err) = scope.allow_file(path) {
+            // The path is not logged: `diag.rs` forbids a capture's directory,
+            // and a pinned capture's folder is not a watch folder.
             crate::diag::warn(&format!(
-                "a pinned capture in {} may not show until the catch engine is up: {err}",
-                parent.display()
+                "a pinned capture may not show until the catch engine is up: {err}"
             ));
         }
     }
 }
 
+/// Let the webview render captures straight off disk.
+///
+/// The asset protocol is scoped shut by default, and the scope has to be
+/// granted here rather than in `tauri.conf.json`: the macOS capture folder is
+/// only known once `defaults read` has run, and `SHOTSHELF_WATCH_DIRS` can
+/// replace the list outright. Deriving it from the resolved watch list keeps
+/// one source of truth — the shelf can read exactly what the engine watches,
+/// non-recursively, and nothing else.
 fn allow_reading_captures<R: Runtime>(app: &AppHandle<R>, dirs: &[PathBuf]) {
     let scope = app.asset_protocol_scope();
 

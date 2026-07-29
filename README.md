@@ -301,9 +301,11 @@ and the app menu. No filesystem, no clipboard, no shell, no network.
 Thumbnails are rendered straight from disk over Tauri's asset protocol, never inlined as
 base64. That protocol is scoped shut by default, and the scope is granted at **runtime** from
 the same resolved watch list the engine uses, non-recursively, plus the clipboard folder, the
-edits directory and the poster cache. Three call sites, one of them a loop over the resolved
-watch list, so the number of directories granted depends on how many the OS turns out to have —
-this said "four grants", which was a count of neither. `webview_path::existing_file` consults
+edits directory and the poster cache. Each pinned capture is granted too, **by file rather than
+by directory**, so that captures restored at launch render before the engine finishes starting
+without opening the folders they happen to sit in. No count is given here: it depends on how
+many watch folders the OS turns out to have, and two earlier versions of this sentence quoted
+numbers that were wrong. `webview_path::existing_file` consults
 exactly this scope before Rust reads any capture.
 A static scope in `tauri.conf.json` could not express the macOS location, which is only known
 after `defaults read` has run, nor a `SHOTSHELF_WATCH_DIRS` override. The asset URL differs by
@@ -329,6 +331,7 @@ still succeeds and emits unsigned artifacts.
 | :-- | :-- |
 | `WINDOWS_CERT_THUMBPRINT` | Authenticode signing on Windows (cert must be in the Windows cert store) |
 | `APPLE_SIGNING_IDENTITY` | Developer ID signing on macOS |
+| `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD` | The Developer ID certificate itself, base64-encoded, for a runner with no keychain — both are read by `scripts/build-release.mjs` and passed by the release workflow |
 | `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | macOS notarization (or `APPLE_API_KEY` + `APPLE_API_ISSUER` + `APPLE_API_KEY_PATH`) |
 | `TAURI_SIGNING_PRIVATE_KEY` | Signing the update payload — without it, installed apps reject the update |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | If that key has a password |
@@ -398,9 +401,11 @@ already-installed apps.
 
 Screenshots and recordings routinely contain sensitive material (client data, tokens on screen).
 Shotshelf is **local-only**: no cloud, no telemetry, no upload. There are no thumbnail files and
-no capture index — cards render from the capture itself, and the only derived images on disk are
-video poster frames in the cache directory. What is stored is two JSON files, and the one naming
-captures is kept out of the roaming profile on purpose. See [SECURITY.md](./SECURITY.md). This repo never contains real captures.
+no capture index — cards render from the capture itself. Shotshelf does write picture data of
+its own in four places, all local and all listed in [USAGE](./docs/USAGE.md): video poster
+frames, the downscaled copies made for hand-off when "Send smaller copies" is on, saved edits
+and comparisons, and one drag-preview image. Settings live in two JSON files, and the one
+naming captures is kept out of the roaming profile on purpose. See [SECURITY.md](./SECURITY.md). This repo never contains real captures.
 
 ## ⚖️ Internal use
 

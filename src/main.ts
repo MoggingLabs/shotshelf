@@ -8,9 +8,11 @@
  * introduces them to each other and to the events coming out of Rust.
  *
  * What it owns outright: the platform sniff that sets `data-os`, the visibility
- * of the Compare and Edit controls, key normalisation for CapsLock, and the two
- * retry budgets with the predicate that reads Rust's "still starting" sentinel.
- * Those are decisions, not wiring, and three of them have had bugs.
+ * of the Compare and Edit controls, key normalisation for CapsLock, and the
+ * catch-engine retry budget with the predicate that reads Rust's "still
+ * starting" sentinel. (The settings retry budget is *not* here — `settings.ts`
+ * owns that one, and its predicate is deliberately different.) Those are
+ * decisions, not wiring, and three of them have had bugs.
  */
 
 import { invoke } from "@tauri-apps/api/core";

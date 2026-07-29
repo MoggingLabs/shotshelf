@@ -156,7 +156,7 @@ shows rather defeats the point.
 | `Delete` or `Backspace` | Take it off the shelf — **the file stays on disk** |
 | `e` | Mark the picked capture up |
 | `Ctrl+Z` | Undo the last mark, while marking up |
-| `Esc` | Close the editor, then the preview, then the shelf |
+| `Esc` | Close the editor, then the settings panel, then the preview, then the shelf |
 
 Escape backs out one level at a time on purpose: one key that closes two things
 at once is one key that loses your place.

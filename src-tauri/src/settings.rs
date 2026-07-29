@@ -1,10 +1,25 @@
 //! What the shelf remembers between launches.
 //!
-//! Two JSON files, split by what may roam. `settings.json` in the OS config
-//! directory — no accounts, no sync, no
-//! network, and deliberately few knobs. It holds where the shelf sits, how long
-//! captures stay, the toggle shortcut, and the paths of pinned items. Capture
-//! *contents* are never written here; only paths and a little metadata.
+//! Two JSON files, split by what may roam — no accounts, no sync, no network,
+//! and deliberately few knobs.
+//!
+//! `settings.json` lives in the OS config directory, which on Windows **is** the
+//! roaming profile. It holds how long captures stay, the item cap, the toggle
+//! shortcut, whether copies are downscaled, and whether to check for updates.
+//!
+//! `pinned.json` lives in the local data directory and holds the pinned capture
+//! paths, plus a note of the newest capture seen. It is a separate file
+//! precisely so those paths never roam: `persist` blanks `pinned` before
+//! serialising the roaming file, and
+//! `pinned_paths_are_never_written_to_the_roaming_file` asserts it.
+//!
+//! An earlier version of this header credited `settings.json` with the pinned
+//! paths — the one thing the split exists to keep out of it, and the thing
+//! `SECURITY.md` promises cannot be there — and with "where the shelf sits",
+//! which no field has held since the shelf became a popover.
+//!
+//! Capture *contents* are never written to either; only paths and a little
+//! metadata.
 
 use std::{
     path::PathBuf,
@@ -1113,8 +1128,11 @@ pub fn get_settings(store: tauri::State<'_, SettingsStore>) -> Settings {
     store.get()
 }
 
-/// Applies the new settings as well as storing them, so the shelf moves and the
-/// shortcut re-registers without a restart.
+/// Applies the new settings as well as storing them, so the shortcut
+/// re-registers without a restart.
+///
+/// "The shelf moves" was in that sentence too, from before the shelf became a
+/// popover that parks itself in a corner. Nothing here moves a window.
 #[tauri::command]
 pub fn set_settings<R: Runtime>(
     app: AppHandle<R>,

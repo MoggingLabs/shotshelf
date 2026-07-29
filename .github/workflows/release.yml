@@ -33,11 +33,15 @@ jobs:
     # producing no `.sig`, was not a check at all. `env` *is* available, so this
     # is the shape GitHub's own secrets guide prescribes.
     #
-    # The value is only ever compared against empty — never echoed, never passed
-    # to a shell — and `TAURI_SIGNING_PRIVATE_KEY` still reaches the bundler
-    # through the step-level `env` block, unchanged.
+    # A *boolean*, not the key. Job-level `env` applies to every step, so
+    # putting the minisign private key here would hand it to `npm ci` — which
+    # runs `postinstall` and every lifecycle script in the dependency tree — and
+    # to `npm run gate`, where every crate's `build.rs` and proc-macro runs with
+    # the full environment. The comparison happens here, once; only `'true'` or
+    # `'false'` travels. `TAURI_SIGNING_PRIVATE_KEY` itself still reaches the
+    # bundler alone, through the step-level `env` block.
     env:
-      HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -107,6 +111,12 @@ jobs:
       # a different compiler from the one `ci.yml` checks with and from the one
       # that goes on to build the bundle a few steps later.
       - uses: dtolnay/rust-toolchain@stable
+        # Asked for rather than assumed. The gate's first two commands are
+        # `cargo fmt --check` and `cargo clippy`, this action installs with
+        # `--profile minimal`, and only the runner image happening to
+        # preinstall them made it work. `ci.yml` already spells it out.
+        with:
+          components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -161,7 +171,7 @@ jobs:
       # documented outcome. The failure being caught is "you meant to sign and
       # did not", which is silent in every other signal.
       - name: Check the signed artifacts were actually signed
-        if: env.HAS_SIGNING_KEY != ''
+        if: env.HAS_SIGNING_KEY == 'true'
         shell: bash
         run: |
           signatures=$(find src-tauri/target/release/bundle -type f -name '*.sig' | wc -l)

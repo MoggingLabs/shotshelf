@@ -106,10 +106,11 @@ pub fn set_capture_count<R: Runtime>(app: AppHandle<R>, count: usize) {
     // Both macOS and every GTK platform have a real `set_title`; only Windows
     // does not. The sites that spell it the narrower way are each choosing a
     // GTK-specific *implementation*, which is a different question from "does
-    // this API exist here" — and no list of them is given, because the last one
-    // was wrong on the count and named `share.rs`, which uses this same wider
-    // form for the same reason. A tally in prose goes stale; the criterion does
-    // not.
+    // this API exist here". No list of those sites is given: the first attempt
+    // at one was wrong on its count, and the attempt to correct that was wrong
+    // about `share.rs`, which uses the narrow form and always has. Two wrong
+    // enumerations of one set is the argument for stating the criterion
+    // instead.
     //
     // What was wrong before was `any(macos, linux)`: an enumeration, so the
     // capture count silently never reached the tray on any other Unix

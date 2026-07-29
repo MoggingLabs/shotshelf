@@ -55,12 +55,12 @@ export interface Capture {
  * them.
  */
 export function isEditable(item: Pick<ShelfItem, "kind">): boolean {
-  return item.kind === "image";
+  return isImage(item);
 }
 
 /** Same rule, different question — see {@link isEditable}. */
 export function canPreview(item: Pick<ShelfItem, "kind">): boolean {
-  return item.kind === "image";
+  return isImage(item);
 }
 
 /**
@@ -73,7 +73,21 @@ export function canPreview(item: Pick<ShelfItem, "kind">): boolean {
  * button invited.
  */
 export function canCompare(items: readonly Pick<ShelfItem, "kind">[]): boolean {
-  return items.length === 2 && items.every((item) => item.kind === "image");
+  return items.length === 2 && items.every(isImage);
+}
+
+/**
+ * The one comparison against `kind` in this module.
+ *
+ * The three questions above are genuinely different questions — a fourth
+ * capture kind might be previewable without being editable — which is why they
+ * are three functions. What they must not be is three copies of the *test*:
+ * `isEditable`'s own docstring names the hazard ("the Edit control hides
+ * itself, reading 'not an image', while `openEditor` accepts it"), and the
+ * module written to remove that hazard had grown three of them.
+ */
+function isImage(item: Pick<ShelfItem, "kind">): boolean {
+  return item.kind === "image";
 }
 
 /**

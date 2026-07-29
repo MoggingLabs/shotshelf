@@ -70,6 +70,20 @@ const BASE_DIRECTORY = "BaseDirectory";
 const ROAMING = "dirs::preferences";
 const ROAMING_CALLER = "src-tauri/src/settings.rs";
 
+/**
+ * The modules whose asset-protocol grants are whole folders on purpose.
+ *
+ * `src-tauri/src/catch/mod.rs` grants the watch list and the clipboard folder, whose
+ * contents are captures by definition; `src-tauri/src/poster.rs` and `src-tauri/src/edit.rs` grant caches
+ * Shotshelf itself writes. Anything else wanting the webview to read a file
+ * should name that file.
+ */
+const DIRECTORY_GRANTERS = new Set([
+  "src-tauri/src/catch/mod.rs",
+  "src-tauri/src/poster.rs",
+  "src-tauri/src/edit.rs",
+]);
+
 const problems = [];
 
 for (const file of globSync("src-tauri/src/**/*.rs")) {
@@ -96,6 +110,25 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
     problems.push(
       `  ${normalised}: uses \`${BASE_DIRECTORY}…\`, which resolves a root ` +
         `without naming it. Go through \`dirs\`.`,
+    );
+  }
+
+  // A directory grant is a decision; a file grant is not.
+  //
+  // `allow_directory(p, false)` opens `p` *and* `p/*` to the webview — OCR and
+  // credential scanning, clipboard, drag payloads, `convertFileSrc`. That is
+  // correct for the folders the engine watches, whose contents are captures by
+  // definition, and it was briefly used for the parent of every **pinned**
+  // capture. `pinned.json` is hand-editable and two commands let the webview
+  // write it, so one edited path opened a whole directory for the session —
+  // `Scope` only ever adds. The fix was `allow_file`; this keeps it that way by
+  // holding `allow_directory` to the four modules whose grants are folders by
+  // design.
+  if (source.includes(".allow_directory(") && !DIRECTORY_GRANTERS.has(normalised)) {
+    problems.push(
+      `  ${normalised}: calls \`allow_directory\`, which opens every file beside ` +
+        `the one named. Only ${[...DIRECTORY_GRANTERS].join(", ")} may — everything ` +
+        `else grants \`allow_file\`, by name.`,
     );
   }
 

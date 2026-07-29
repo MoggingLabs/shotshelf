@@ -148,7 +148,18 @@ export class Popover {
     // treating either as "the user asked for this" meant the launch appearance
     // cancelled its own timer and stayed up. Rust now says which it was.
     if (deliberate) this.#standDown();
-    this.#opened = true;
+    // `deliberate`, not `true`. `#opened` means "up because you asked for it",
+    // and its own docstring gives the consequence of conflating that with the
+    // browse *shape*: a capture arriving during the launch appearance is
+    // filed into the browse list instead of popping the column, so the very
+    // first capture never pops. The launch timer then dismisses the window,
+    // and `adoptHidden`'s `setMode("column")` finds an empty queue, so nothing
+    // pops afterwards either.
+    //
+    // Round 21 added the flag that answers this and spent it only on the
+    // dismissal timer one line above, leaving the rule stated in a docstring
+    // and enforced nowhere.
+    this.#opened = deliberate;
     this.#showing = true;
     this.#root.dataset["mode"] = "browse";
     this.#shelf.setMode("browse");

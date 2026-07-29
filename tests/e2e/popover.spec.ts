@@ -208,3 +208,38 @@ test("a deliberate open during those four seconds keeps the shelf up", async ({ 
 
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
 });
+
+test("a capture arriving during the launch appearance still pops the column", async ({ page }) => {
+  // `#opened` means "up because you asked for it", and the launch appearance is
+  // the one nobody asked for. Setting it unconditionally on `shelf://opened`
+  // meant `catch()` took its early return and filed the capture into the browse
+  // list instead — so the very first capture never popped, and the launch timer
+  // then dismissed the window with an empty column behind it, so nothing popped
+  // afterwards either.
+  //
+  // Exactly what `lib.rs` does at launch: open with `deliberate: false`.
+  await page.clock.install();
+  await bootShelf(page);
+  await page.evaluate(() => window.__shotshelf__.emit("shelf://opened", false));
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "browse");
+
+  await land(page, FIXTURE.wide);
+
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
+  await expect(page.locator(".tile")).toHaveCount(1);
+});
+
+test("a capture arriving in a shelf you opened does not reshape it", async ({ page }) => {
+  // The other half of the same rule: a deliberate open must keep the browse
+  // shape, or a capture landing while you are browsing yanks the window out
+  // from under you.
+  await page.clock.install();
+  await bootShelf(page);
+  await openBrowse(page);
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "browse");
+
+  await land(page, FIXTURE.wide);
+
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "browse");
+  await expect(page.locator(".tile")).toHaveCount(1);
+});

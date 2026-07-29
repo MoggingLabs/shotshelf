@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { SECRET_KINDS, canCompare } from "./types.ts";
+import { SECRET_KINDS, canCompare, isEditable, canPreview } from "./types.ts";
 
 /**
  * The other half of a cross-language check.
@@ -34,4 +34,17 @@ test("comparison is offered for two images and nothing else", () => {
   assert.equal(canCompare([image]), false, "one capture is not a comparison");
   assert.equal(canCompare([image, image, image]), false);
   assert.equal(canCompare([]), false);
+});
+
+test("editing and previewing are offered for images and refused for recordings", () => {
+  // Neither had a test: `canCompare` was covered and these two were not, so a
+  // third capture kind could have been missed in whichever copy of the rule the
+  // change forgot — which is the hazard `isEditable`'s docstring names.
+  const image = { kind: "image" } as const;
+  const video = { kind: "video" } as const;
+
+  assert.equal(isEditable(image), true);
+  assert.equal(isEditable(video), false);
+  assert.equal(canPreview(image), true);
+  assert.equal(canPreview(video), false);
 });

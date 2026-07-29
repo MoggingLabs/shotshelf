@@ -93,8 +93,9 @@ const registered = registeredCommands();
  * numbers on every run.
  * Requiring it — `invoke<T>(` — silently skipped every call whose result is
  * discarded, which is most of the ones that only ever fail: `hide_shelf`,
- * `set_pinned`, `show_shelf`. Six of sixteen call sites were invisible to the
- * check that exists to catch a renamed command.
+ * `set_pinned`, `show_shelf`. A large share of call sites were invisible to the
+ * check that exists to catch a renamed command — no figure here, for the reason
+ * given above.
  *
  * Plugin commands are namespaced (`plugin:drag|start_drag`) and are not ours
  * to check.

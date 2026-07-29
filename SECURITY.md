@@ -46,8 +46,14 @@ tokens visible on screen, private messages. Shotshelf's core privacy guarantee:
   resolve a root for itself.
 
   There is also no "capture index" and there are no thumbnail files: cards render from the
-  capture itself through `convertFileSrc`, and the only derived images on disk are video
-  poster frames in the cache directory.
+  capture itself through `convertFileSrc`.
+
+  Shotshelf does write picture data derived from your captures, in four places, and an earlier
+  version of this sentence said poster frames were the only one — which `docs/USAGE.md` had
+  already contradicted. They are: video poster frames (`posters`), the downscaled copies made
+  for hand-off while "Send smaller copies" is on (`handoff`), saved edits and comparisons
+  (`edits`), and a single `video-drag-preview.png`. All are on the local device, none roam, and
+  the first two are caches Shotshelf prunes; the third is your own work and is never pruned.
 - Any change that would introduce a network call touching captures is a privacy regression and will
   be rejected.
 

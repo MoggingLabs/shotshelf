@@ -440,7 +440,7 @@ fn file_uri(path: &Path) -> String {
     // **Linux: `file://` and percent-encoded.**
     //
     // This is a `text/uri-list`, where escaping is required by the format: a raw
-    // space makes the entry malformed. See `percent_encode_path` above for why
+    // space makes the entry malformed. See `percent_encode_path` below for why
     // recordings are the case that always needs it.
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
