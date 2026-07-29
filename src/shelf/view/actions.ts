@@ -52,16 +52,44 @@ function flash(button: HTMLElement, ok: boolean): void {
   );
 }
 
+/**
+ * The class that says "this is the pin control", so nothing has to count.
+ *
+ * `reflectPin` used to find this button with `querySelector(".tile__action")`
+ * — the first of three controls that all carry that class, which is the pin
+ * only because `actions()` happens to append it first. Reordering them, an
+ * entirely ordinary edit, would have left the star never lighting when you
+ * pinned and the *copy* button quietly relabelled "Pinned — kept until you
+ * unpin it". Nothing would have failed.
+ */
+const PIN = "tile__action--pin";
+
 function pinButton(id: string, pinned: boolean, handlers: TileHandlers): HTMLButtonElement {
   const button = action("star", pinLabel(pinned));
-  button.classList.toggle("tile__action--on", pinned);
+  button.classList.add(PIN);
+  setPinned(button, pinned);
   button.addEventListener("click", () => handlers.togglePin(id));
   return button;
+}
+
+/**
+ * How a pin control shows its state — in one place, used on build and on
+ * update.
+ *
+ * The appearance was established twice: once here at build time and once in
+ * `reflectPin`, three lines that had to stay in step by hand.
+ */
+function setPinned(button: HTMLElement, pinned: boolean): void {
+  button.classList.toggle("tile__action--on", pinned);
+  button.title = pinLabel(pinned);
 }
 
 /** For the apps that take a paste but refuse a file drop. */
 function copyButton(id: string, name: string, handlers: TileHandlers): HTMLButtonElement {
   const button = action("copy", `Copy ${name} to the clipboard`);
+  // Named, like its two siblings. All three carried one shared class, so
+  // anything reaching for a particular control had to count — see `PIN`.
+  button.classList.add("tile__action--copy");
 
   button.addEventListener("click", () => {
     // The shelf reports the failure; this only says which button it was.
@@ -106,8 +134,8 @@ export function actions(
  */
 export function reflectPin(tile: HTMLElement, pinned: boolean): void {
   tile.classList.toggle("tile--pinned", pinned);
-  const button = tile.querySelector<HTMLButtonElement>(".tile__action");
+  // By name, not by position.
+  const button = tile.querySelector<HTMLButtonElement>(`.${PIN}`);
   if (!button) return;
-  button.classList.toggle("tile__action--on", pinned);
-  button.title = pinLabel(pinned);
+  setPinned(button, pinned);
 }

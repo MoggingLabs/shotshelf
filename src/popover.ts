@@ -77,9 +77,37 @@ export class Popover {
    * call back into `show_shelf`.
    */
   adoptBrowse(): void {
+    // The launch timer stands down here too, and this was the one route that
+    // did not clear it.
+    //
+    // `onFocusChanged(true)` covers the usual case, because `window::open`
+    // focuses as well as emitting. It does not cover a focus that never
+    // *changes*: a window manager that refuses focus-stealing, or opening a
+    // window that already had focus. The timer then fired on a shelf the user
+    // had deliberately opened — and `dismiss` runs `setMode("column")` after
+    // `setMode("browse")` has already emptied the column queue, so every tile
+    // disappeared before the window went away.
+    //
+    // This also decides whether the browser suite is a gate. Five spec files
+    // install no clock, so before this they simply had to finish within four
+    // seconds of wall clock; the suite failed two runs in four on a reviewer's
+    // machine, and CI's single retry is exactly what would have hidden it.
+    this.#standDown();
     this.#opened = true;
     this.#root.dataset["mode"] = "browse";
     this.#shelf.setMode("browse");
+  }
+
+  /**
+   * Cancel the launch dismissal, whatever armed it.
+   *
+   * One method rather than three `clearTimeout` calls, because "which routes
+   * stand the timer down" is the rule that was wrong — and a rule spread
+   * across three call sites is one that can be fixed in two of them.
+   */
+  #standDown(): void {
+    window.clearTimeout(this.#launchTimer);
+    this.#launchTimer = undefined;
   }
 
   /**
@@ -87,7 +115,7 @@ export class Popover {
    * hotkey, none of which pass through here. Front-end state only.
    */
   adoptHidden(): void {
-    window.clearTimeout(this.#launchTimer);
+    this.#standDown();
     this.#opened = false;
     // The editor and the quick look mount outside the list so the list can
     // rebuild under them; that also means nothing else ends their lifetime.
@@ -134,6 +162,6 @@ export class Popover {
   /** Focus arriving means you are using it; the launch timer stands down. */
   onFocusChanged(focused: boolean): void {
     this.#shelf.holdColumn("focus", focused);
-    if (focused) window.clearTimeout(this.#launchTimer);
+    if (focused) this.#standDown();
   }
 }

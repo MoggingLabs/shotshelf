@@ -10,6 +10,7 @@
 //! never leave the machine — this used to claim no network plugin was
 //! registered at all, forty-nine lines above the line registering one.
 
+mod cache;
 mod catch;
 mod edit;
 mod enrich;

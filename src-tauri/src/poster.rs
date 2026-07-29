@@ -53,27 +53,10 @@ const POSTER_CACHE_LIMIT: usize = 750;
 /// anyone a capture.
 pub fn prune_cache<R: Runtime>(app: &AppHandle<R>) {
     let Ok(dir) = poster_dir(app) else { return };
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return;
-    };
-
-    let mut frames: Vec<(std::time::SystemTime, PathBuf)> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let modified = entry.metadata().ok()?.modified().ok()?;
-            Some((modified, entry.path()))
-        })
-        .collect();
-
-    if frames.len() <= POSTER_CACHE_LIMIT {
-        return;
-    }
-
-    // Newest first, so the tail is what gets dropped.
-    frames.sort_unstable_by_key(|(modified, _)| std::cmp::Reverse(*modified));
-    for (_, stale) in frames.drain(POSTER_CACHE_LIMIT..) {
-        let _ = std::fs::remove_file(stale);
-    }
+    // One file per recording. Through `cache::prune`, shared with the hand-off
+    // cache — see that module for why the sort direction is the thing worth
+    // testing.
+    crate::cache::prune(&dir, POSTER_CACHE_LIMIT, crate::cache::Entry::File);
 }
 
 /// Poster frames are rendered through the asset protocol like any other

@@ -1,4 +1,10 @@
-// Every file, symbol and test a comment names must exist.
+// Three kinds of thing a comment names must actually exist.
+//
+// Not "every file, symbol and test", which is what this said and could not
+// deliver: TypeScript symbols are never checked at all, and TS symbol
+// references are most of what this codebase's comments are made of. The three
+// rules below are the whole of it, and the headline should not promise past
+// them — a gate against overclaiming that overclaims is not a good look.
 //
 // This repository's most persistent defect is not a bug in the code. Across
 // eight review rounds the single recurring finding has been *comments and docs
@@ -30,16 +36,34 @@
 // "this is a code reference" from the author — and anything ambiguous is
 // skipped rather than guessed at.
 
+import { execFileSync } from "node:child_process";
 import { globSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+/**
+ * Everything whose comments make claims about this repository.
+ *
+ * The config files were missing and are among the worst offenders:
+ * `playwright.config.ts` names `tests/harness/tauri-mock.ts`, `tauri.conf.json`
+ * and `window.rs` in backticks and makes exactly the cross-file claims this
+ * gate exists to check, and `Cargo.toml` cited a research note in a directory
+ * no clone has. A gate that reads only the files most likely to be careful is
+ * a gate aimed away from the problem.
+ */
 const SOURCE_GLOBS = [
   "src/**/*.ts",
+  "src/**/*.css",
   "src-tauri/src/**/*.rs",
+  "src-tauri/build.rs",
+  "src-tauri/*.toml",
   "tests/**/*.ts",
   "scripts/*.mjs",
   "*.md",
   "docs/**/*.md",
+  "*.config.ts",
+  "*.config.js",
+  ".github/workflows/*.yml",
+  "index.html",
 ];
 
 /**
@@ -91,30 +115,118 @@ const RUST_ITEM = (item) =>
  * throughout, so it is taken whole.
  */
 function commentsIn(file, source) {
-  if (file.endsWith(".md")) return source;
+  if (file.endsWith(".md")) return unwrap(source);
+  if (file.endsWith(".toml") || file.endsWith(".yml") || file.endsWith(".yaml")) {
+    return unwrap(
+      [...source.matchAll(/(?:^|\s)(#[^\n]*)/g)].map((match) => match[1]).join("\n"),
+    );
+  }
+  if (file.endsWith(".html")) {
+    return unwrap([...source.matchAll(/<!--[\s\S]*?-->/g)].map((match) => match[0]).join("\n"));
+  }
+  if (file.endsWith(".css")) {
+    return unwrap([...source.matchAll(/\/\*[\s\S]*?\*\//g)].map((match) => match[0]).join("\n"));
+  }
 
   const comments = [];
   // Block comments, including Rust's and JSDoc.
   for (const match of source.matchAll(/\/\*[\s\S]*?\*\//g)) comments.push(match[0]);
-  // Line comments. The `[^:]` guard keeps `https://…` inside code out of it.
-  for (const match of source.matchAll(/(?:^|[^:])(\/\/[^\n]*)/g)) comments.push(match[1]);
-  return comments.join("\n");
+  // Line comments, gathered into *runs* of consecutive lines.
+  //
+  // One run is one comment. Collecting each `//` line separately was the
+  // second half of why Rule C matched nothing: unwrapping a single line
+  // returns that line, so a paragraph written as six `//` lines stayed six
+  // lines however well the unwrapper worked. Rust and TypeScript here write
+  // nearly every explanation this way.
+  comments.push(...lineCommentRuns(source));
+  // Unwrapped individually, so a title can never pair with a spec name from a
+  // different comment.
+  return comments.map(unwrap).join("\n");
 }
 
-/** Every file in the repo, by basename, for resolving a bare mention. */
+/**
+ * Consecutive `//` lines, joined into one comment each.
+ *
+ * A blank line or any line of code ends the run, which is the same boundary a
+ * reader sees: two paragraphs separated by code are two claims, and a title
+ * from one must not pair with a filename from the other.
+ */
+function lineCommentRuns(source) {
+  const runs = [];
+  let current = [];
+
+  for (const raw of source.split("\n")) {
+    // The `[^:]` guard keeps `https://…` inside code out of it.
+    const found = /(?:^|[^:])(\/\/.*)$/.exec(raw);
+    if (found?.[1]) {
+      current.push(found[1]);
+    } else if (current.length > 0) {
+      runs.push(current.join("\n"));
+      current = [];
+    }
+  }
+
+  if (current.length > 0) runs.push(current.join("\n"));
+  return runs;
+}
+
+/**
+ * Put a wrapped comment back onto one line per paragraph.
+ *
+ * This is the difference between a rule that fires and a rule that does not,
+ * and it was missing. Rule C matched a spec name and a quoted title only on
+ * the *same line*; this repo wraps comments at about 76 columns, so the one
+ * comment in the tree written in that shape — the "Gated by" note in
+ * `src/editor/index.ts`, naming the second-crop spec — spanned two lines and
+ * matched nothing. The rule fired on a planted one-line probe, which is how it
+ * came to be believed: it worked in the only shape the codebase never uses. A
+ * gate that reports green because its input is the wrong shape is the exact
+ * failure this gate exists to catch, so it is fixed where the shape is decided
+ * rather than by loosening the pattern.
+ *
+ * Blank lines stay blank, so paragraphs remain separate: a title in one
+ * paragraph must not pair with a filename in another.
+ */
+function unwrap(block) {
+  const paragraphs = [];
+  let current = [];
+
+  for (const raw of block.split("\n")) {
+    const line = raw
+      // Leaders: `//`, `///`, `//!`, `/*`, `*`, `*/`, `#`, `<!--`, `-->`.
+      .replace(/^\s*(?:\/\/[!/]?|\/\*+|\*+\/?|#+|<!--|-->)\s?/, "")
+      .replace(/(?:\*\/|-->)\s*$/, "")
+      .trim();
+
+    if (line === "") {
+      if (current.length > 0) paragraphs.push(current.join(" "));
+      current = [];
+    } else {
+      current.push(line);
+    }
+  }
+
+  if (current.length > 0) paragraphs.push(current.join(" "));
+  return paragraphs.join("\n");
+}
+
+/**
+ * Every **tracked** file, by basename.
+ *
+ * `git ls-files`, not a glob of the working tree, and the difference is the
+ * whole point. Globbing resolved references against files git does not
+ * track — `prompts/` and `reference/` are git-ignored and present on the
+ * author's machine, `src-tauri/binaries/` holds an 82 MB local ffmpeg — so a
+ * comment pointing into one of them passed here and would fail on any other
+ * clone and in CI. A gate whose verdict depends on untracked files is a gate
+ * that answers a different question on every machine.
+ */
 function repoFiles() {
   const byName = new Map();
-  const all = globSync("**/*", {
-    exclude: (entry) =>
-      entry.includes("node_modules") ||
-      entry.includes(`${path.sep}target${path.sep}`) ||
-      entry.startsWith("target") ||
-      entry.includes(".git") ||
-      entry.includes("test-results") ||
-      entry.includes("dist"),
-  });
+  const listed = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" });
 
-  for (const entry of all) {
+  for (const entry of listed.split("\0")) {
+    if (entry === "") continue;
     const name = path.basename(entry);
     if (!byName.has(name)) byName.set(name, []);
     byName.get(name).push(entry);

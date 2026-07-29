@@ -616,12 +616,17 @@ export class Shelf {
   #armDrag(node: HTMLElement, item: ShelfItem, event: PointerEvent): void {
     armDrag(node, item, event, (target, capture) => {
       this.#dragging = true;
-      void beginDrag(target, this.#dragSet(capture), () => {
-        this.#dragging = false;
-        // The OS had the pointer for the length of the drag, so the webview
-        // saw no `pointerleave` and the hover hold is still armed.
-        this.#column.hold("pointer", false);
-      });
+      void beginDrag(
+        target,
+        this.#dragSet(capture),
+        () => {
+          this.#dragging = false;
+          // The OS had the pointer for the length of the drag, so the webview
+          // saw no `pointerleave` and the hover hold is still armed.
+          this.#column.hold("pointer", false);
+        },
+        (message) => this.#options.onProblem(message),
+      );
     });
   }
 

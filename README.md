@@ -91,9 +91,10 @@ nobody has run Shotshelf on a Linux desktop, so the tray, the capture paths and 
 all unproven there.
 
 ```bash
-npm install            # also fetches the ffmpeg sidecar (~80 MB, one platform)
-npm run tauri dev      # dev build, frontend hot-reloads
-npm run tauri build    # release bundle (.msi/.exe on Windows, .dmg/.app on macOS)
+npm install                     # also fetches the ffmpeg sidecar (~80 MB, one platform)
+npx playwright install chromium # once per clone; the browser gates need it
+npm run tauri dev               # dev build, frontend hot-reloads
+npm run tauri build             # release bundle (.msi/.exe on Windows, .dmg/.app on macOS)
 ```
 
 Identical commands on every OS. The shelf is a popover that rests in the bottom-right corner of
@@ -105,9 +106,10 @@ the only ways in. Building the Rust side on its own
 
 ```
 src/            frontend — vanilla TS + Vite, deliberately dependency-light
-src-tauri/      Rust — window docking, tray icon, plugin registration
-  catch/        the catch engine: folder watchers + clipboard watch
-  capabilities/ Tauri v2 permissions for the webview (drag + window dragging — no clipboard, no filesystem, no network)
+src-tauri/
+  src/          Rust — window docking, tray icon, plugin registration
+    catch/      the catch engine: folder watchers + clipboard watch
+  capabilities/ what the webview itself may do (see below)
 app-icon.png    icon source; regenerate the set with `npm run tauri icon app-icon.png`
 .github/        CI — lints, tests and builds on Windows, macOS and Linux
 ```
@@ -125,9 +127,13 @@ builds all three. Every push and PR runs, on **windows-latest, macos-latest and 
 | `npm run test:visual` | geometry and computed style everywhere; pixel goldens on Linux |
 | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo build` | the Rust half |
 
-`npm run gate` runs the lot locally. The three-OS matrix is not ceremony: it has caught an
-unused parameter, two platform-only dead-code errors and an `unsafe` block that guarded
-nothing, none of which the other two hosts could see.
+`npm run gate` runs the lot locally — including the Rust row, which it did not until it was
+noticed that this sentence had been false since the table gained that row. One prerequisite,
+once per clone: `npx playwright install chromium`, which `npm install` does not do for you.
+
+The three-OS matrix is not ceremony: it has caught an unused parameter, two platform-only
+dead-code errors and an `unsafe` block that guarded nothing, none of which the other two hosts
+could see.
 
 Pixel goldens are taken on Linux and compared on Linux — font rasterisation differs between
 operating systems, so the appearance specs skip themselves elsewhere. Regenerate them with the
@@ -244,9 +250,20 @@ Each tile also has a **copy** button for the apps that take a paste but refuse a
 images go on the clipboard as pixels, recordings as a file reference. Shotshelf flags its own
 clipboard writes so copying a capture doesn't shelve a second copy of it.
 
+The webview holds four permissions and no more: listen and unlisten for events, window
+drag-start for the title strip, and the drag plugin. Notably **not** `core:default`, which is
+what this granted until it was audited — nine permission sets including `core:image`, whose
+`from-path` and `rgba` together are a file-read primitive that bypasses both the asset-protocol
+scope and `webview_path`, and `core:tray`/`core:menu`, which let the page rewrite the tray icon
+and the app menu. No filesystem, no clipboard, no shell, no network.
+
 Thumbnails are rendered straight from disk over Tauri's asset protocol, never inlined as
 base64. That protocol is scoped shut by default, and the scope is granted at **runtime** from
-the same resolved watch list the engine uses, non-recursively, plus the clipboard folder, the edits directory and the poster cache — four grants, and `webview_path::existing_file` consults exactly this scope before Rust reads any capture
+the same resolved watch list the engine uses, non-recursively, plus the clipboard folder, the
+edits directory and the poster cache. Three call sites, one of them a loop over the resolved
+watch list, so the number of directories granted depends on how many the OS turns out to have —
+this said "four grants", which was a count of neither. `webview_path::existing_file` consults
+exactly this scope before Rust reads any capture.
 A static scope in `tauri.conf.json` could not express the macOS location, which is only known
 after `defaults read` has run, nor a `SHOTSHELF_WATCH_DIRS` override. The asset URL differs by
 platform (`http://asset.localhost/…` on Windows, `asset://localhost/…` on macOS);

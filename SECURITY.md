@@ -16,8 +16,20 @@ tokens visible on screen, private messages. Shotshelf's core privacy guarantee:
 
 - **No cloud, no telemetry, no uploads.** Nothing a capture touches leaves the machine. Shotshelf
   makes exactly one network request in its life: on launch it asks an internal release feed whether
-  a newer version exists, sending nothing but its own version number. It does not download or
-  install anything — it says an update is available and stops there.
+  a newer version exists. It does not download or install anything — it says an update is available
+  and stops there.
+
+  Precisely what that request discloses, because "nothing but its own version number" was written
+  here and is not true. The endpoint is
+  `https://releases.mogginglabs.internal/shotshelf/{{target}}/{{arch}}/{{current_version}}`, and the
+  updater plugin substitutes the **operating system** and **CPU architecture** into the path
+  alongside the version. It also sends a `tauri-plugin-updater/<version>` User-Agent, and — as any
+  request does — reveals the machine's IP address to whatever serves that host. No capture, no
+  filename, no path, no identifier of the machine or the person: those really are absent, and that
+  is the guarantee worth stating. The rest is what an HTTP request costs, and this document is the
+  wrong place to round it down.
+
+  Turning the check off in Settings sends nothing at all, and opens no socket.
 - Thumbnails, the capture index, and settings live **only** on the local device.
 - Any change that would introduce a network call touching captures is a privacy regression and will
   be rejected.
@@ -38,7 +50,7 @@ real capture.
 Stated plainly, because a security document that overstates its evidence is worse than one that
 admits a gap.
 
-Every claim above is established by reading and testing the code: 80-odd Rust unit tests, a
+Every claim above is established by reading and testing the code: over a hundred Rust unit tests, a
 front-end suite that drives the real UI in a real browser, and static analysis. **The packaged
 application has never been launched.** The development build is unsigned, and Windows Smart App
 Control refuses to execute it on the machine Shotshelf was written on; disabling that setting is
@@ -65,6 +77,34 @@ What that leaves unverified, specifically:
   would have made every annotated save fail, and it was caught by reading Tauri's source rather
   than by anything that runs. The `postMessage` fallback path, which encodes the source path in a
   request header, has never carried a byte at runtime.
+
+Four more, named because the list above reads as though only Windows chrome is untested:
+
+- **No installer has ever been built, on any machine.** The release workflow triggers on `v*` tags
+  and there are none; CI runs `cargo build`, never `tauri build`. So the whole bundling path —
+  `scripts/build-release.mjs`, sidecar packaging, NSIS/MSI/DMG generation, updater artifacts — has
+  never executed anywhere. "The bundled ffmpeg sidecar *as packaged*" above implies a package
+  exists; none does.
+- **Window placement and sizing.** `window::place` reads the work area and scale factor off the
+  primary monitor, and every resize is measured against it. Chrome is on the list above; the
+  geometry deciding whether the shelf lands on screen at all was not.
+- **The clipboard *write* path.** The watcher is listed; `copy_capture` writing image bytes or a
+  file URI — the documented fallback for apps that refuse a drop — is equally unexercised.
+- **Canvas CORS on the asset protocol.** The editor sets `crossOrigin = "anonymous"` so `toBlob`
+  does not throw on a tainted canvas, which depends on Tauri's asset protocol sending an
+  `Access-Control-Allow-Origin` header. If that ever fails the image does not merely taint the
+  canvas, it fails to load — and the user is told the capture's file is gone when it is not.
+
+And plainly, because the list is otherwise easy to read as Windows-specific: **no platform has run
+this**. macOS's `defaults read` subprocess, the Accessory activation policy and the private-API
+transparency are unverified, and the entire Linux target is compile-checked only.
+
+One local-environment limit worth recording, because it shapes what can be checked here at all:
+**editing `src-tauri/Cargo.toml` breaks the Rust build on the development machine.** Any manifest
+change forces Cargo to relink its build script, and Smart App Control refuses the freshly-linked
+binary (`os error 4551`) exactly as it refuses the app. Reverting the manifest restores the cached
+artifact and the build succeeds. So dependency changes — including the advisory below — cannot be
+validated locally; they can only be validated in CI.
 
 None of these can leak a capture off the machine — the network surface is one URL, and the CSP
 that seals the webview is written to allow nothing else. But that policy is itself on the list

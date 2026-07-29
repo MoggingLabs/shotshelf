@@ -9,7 +9,7 @@
  * exists to save.
  */
 
-import { bootShelf, expect, FIXTURE, land, openBrowse, test } from "../harness/app.ts";
+import { bootShelf, BOUNDS, expect, FIXTURE, land, openBrowse, test } from "../harness/app.ts";
 
 async function threeOpen(page: import("@playwright/test").Page): Promise<void> {
   await bootShelf(page);
@@ -208,4 +208,23 @@ test("a settings save that fails says so in the panel", async ({ page }) => {
   await page.locator("#setting-max").dispatchEvent("change");
 
   await expect(page.locator("#settings-note")).not.toBeEmpty();
+});
+
+test("the item-cap control offers exactly the range Rust will accept", async ({ page }) => {
+  // The fifth and sixth declarations of the same rule: `settings.rs` clamps to
+  // `MIN_ITEMS..=MAX_ITEMS`, and `index.html` writes `min`/`max` on the number
+  // input. Two hand-maintained copies in two languages with nothing checking
+  // they agreed — raise the clamp and the control still refuses the new
+  // values; lower it and it offers values that are silently clamped with no
+  // explanation.
+  //
+  // Joined through `tests/fixtures/settings-bounds.json`, which a Rust test
+  // asserts the constants against. The pattern is already used for the default
+  // settings and the secret kinds; it just had not been extended here.
+  await bootShelf(page);
+  await page.locator("#shelf-settings").click();
+
+  const input = page.locator("#setting-max");
+  await expect(input).toHaveAttribute("min", String(BOUNDS.maxItems.min));
+  await expect(input).toHaveAttribute("max", String(BOUNDS.maxItems.max));
 });

@@ -7,6 +7,9 @@ function session(): EditSession {
   return new EditSession(100, 80);
 }
 
+/** The export region when nothing is cropped — the whole capture. */
+const WHOLE = { x: 0, y: 0, width: 100, height: 80 };
+
 test("a mark is kept in image pixels, clipped to the capture", () => {
   const edit = session();
   assert.ok(edit.add({ kind: "box", x: 90, y: 70, width: 50, height: 50 }));
@@ -86,10 +89,14 @@ test("undo takes back marks newest first, then the crop", () => {
 
   assert.equal(edit.undo(), true);
   assert.equal(edit.marks().length, 0);
-  assert.ok(edit.crop(), "the crop is still there");
+  // Through `exportRect`, which is how everything that draws or exports reads
+  // the crop. `crop()` existed only so these four assertions could be written,
+  // and a getter with no caller outside its own tests is a second way to ask
+  // the same question that nothing keeps in step with the first.
+  assert.notDeepEqual(edit.exportRect(), WHOLE, "the crop is still there");
 
   assert.equal(edit.undo(), true);
-  assert.equal(edit.crop(), undefined, "undoing a crop gives the whole capture back");
+  assert.deepEqual(edit.exportRect(), WHOLE, "undoing a crop gives the whole capture back");
 
   assert.equal(edit.undo(), false, "nothing left to undo");
 });
@@ -101,7 +108,7 @@ test("a second crop replaces the first", () => {
   edit.setCrop({ x: 0, y: 0, width: 60, height: 60 });
   edit.setCrop({ x: 10, y: 10, width: 20, height: 20 });
 
-  assert.deepEqual(edit.crop(), { x: 10, y: 10, width: 20, height: 20 });
+  assert.deepEqual(edit.exportRect(), { x: 10, y: 10, width: 20, height: 20 });
 });
 
 test("the exported region is the crop, or the whole capture", () => {
@@ -116,7 +123,7 @@ test("a crop is clipped to the capture", () => {
   const edit = session();
   edit.setCrop({ x: 80, y: 60, width: 999, height: 999 });
 
-  assert.deepEqual(edit.crop(), { x: 80, y: 60, width: 20, height: 20 });
+  assert.deepEqual(edit.exportRect(), { x: 80, y: 60, width: 20, height: 20 });
 });
 
 test("clipRect refuses a rectangle with no area", () => {

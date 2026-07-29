@@ -75,17 +75,14 @@ pub async fn compare_captures<R: Runtime>(
 
     // Rate-limited from the same pool the sizing uses — two at once, not one:
     // the single-comparison guarantee is `Shelf.#comparing` in the front end.
-    // This decodes
-    // two capped images and allocates a composite larger than both, so several
-    // at once is gigabytes.
-    let permit = crate::share::sizing_limit()
-        .clone()
-        .acquire_owned()
-        .await
-        .map_err(|err| err.to_string())?;
-
-    let bytes = tauri::async_runtime::spawn_blocking(move || {
-        let _permit = permit;
+    // This decodes two capped images and allocates a composite larger than
+    // both, so several at once is gigabytes.
+    //
+    // Through `share::under_sizing_limit`, which holds the permit outside the
+    // worker and puts a deadline on it. This used to move the permit in as
+    // `let _permit = permit;`, so a decode that never returned kept its permit
+    // for the life of the process.
+    let bytes = crate::share::under_sizing_limit("that comparison", move || {
         let before = imaging::load(&before_path)?;
         let after = imaging::load(&after_path)?;
         let changes = compare::changed_regions(&before, &after, compare::Sensitivity::default());
@@ -96,8 +93,7 @@ pub async fn compare_captures<R: Runtime>(
         })?;
         imaging::to_png(&composite)
     })
-    .await
-    .map_err(|err| err.to_string())?
+    .await?
     .map_err(String::from)?;
 
     // On a blocking worker like the decode above it: `write_edit` does
@@ -291,8 +287,14 @@ fn safe_stem(source: &Path) -> String {
 /// Headers must be ASCII, and a capture path is not — accented folder names
 /// and non-Latin scripts are ordinary. Hand-written rather than taking a
 /// dependency for fifteen lines: this decodes exactly what `bridge.ts`
-/// encodes, and anything malformed is left as written rather than guessed at,
+/// encodes, and malformed input is left as written rather than guessed at,
 /// because the result is used only as a *name*.
+///
+/// "Left as written" is the intent, not a guarantee for every byte sequence:
+/// `from_str_radix` accepts a leading `+`, so `%+1` decodes rather than
+/// surviving. Nothing `encodeURIComponent` produces looks like that, and the
+/// result is a filename either way — but the rule is "survives", and this is
+/// where it does not, said here rather than left for a reader to discover.
 fn percent_decode(raw: &str) -> String {
     let bytes = raw.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());

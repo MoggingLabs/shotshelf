@@ -18,9 +18,15 @@ export type CaptureKind = "image" | "video";
  * permission the app promises not to need.
  */
 interface CaptureContext {
-  app?: string;
-  title?: string;
-  /** The two as one line, composed in Rust so there is only one answer. */
+  /**
+   * The app and the window title as one line, composed in Rust so there is
+   * only one answer.
+   *
+   * The only field. `app` and `title` were declared here too, mirroring two
+   * Rust fields that nothing read on either side — so every capture carried
+   * two extra strings of whatever was on screen across the IPC boundary for
+   * no reader at all.
+   */
   label?: string;
 }
 

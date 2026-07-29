@@ -98,6 +98,17 @@ export const DEFAULT_SETTINGS = JSON.parse(
   readFileSync(path.join(FIXTURES, "default-settings.json"), "utf8"),
 ) as Record<string, unknown>;
 
+/**
+ * What the item cap may be set to, shared with Rust.
+ *
+ * The same joining trick as `DEFAULT_SETTINGS`: `settings.rs` asserts its
+ * constants against this file, and a spec asserts the HTML input against it,
+ * so neither side can move without the other.
+ */
+export const BOUNDS = JSON.parse(
+  readFileSync(path.join(FIXTURES, "settings-bounds.json"), "utf8"),
+) as { maxItems: { min: number; max: number } };
+
 export async function bootShelf(page: Page, options: BootOptions = {}): Promise<void> {
   await page.addInitScript((seed) => {
     // Merged, not assigned. A spec that seeds its own start-up stubs runs its

@@ -21,6 +21,7 @@
 //   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password, if it has one
 
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 
 // Every variable that makes Tauri try to sign something.
 const SIGNING_VARS = [
@@ -49,7 +50,7 @@ for (const name of SIGNING_VARS) {
   if (env[name] === "" || (unsigned && env[name] !== undefined)) delete env[name];
 }
 
-const args = ["tauri", "build"];
+const args = ["build"];
 const notes = [];
 /** Merged into tauri.conf.json at build time so nothing sensitive is committed. */
 const configOverride = {};
@@ -99,7 +100,51 @@ if (Object.keys(configOverride).length > 0) {
   args.push("--config", JSON.stringify(configOverride));
 }
 
+// The Tauri CLI is run directly — not `npm run tauri`, and not through a shell.
+//
+// Both of those silently destroyed `--config`, and with it every signed build
+// this script claims to produce:
+//
+//   * `npm run tauri build --config <json>` — npm parses `--config` as one of
+//     *its own* CLI configs, strips it, and forwards the bare JSON as a
+//     positional argument. Tauri's positional slot is "arguments passed to the
+//     runner", so the JSON went to `cargo`, which rejected it. The certificate
+//     was never applied, `createUpdaterArtifacts` was never set, and the script
+//     had already printed "signing with WINDOWS_CERT_THUMBPRINT". `npm run
+//     tauri -- build …` fixes the stripping and not the next problem.
+//   * `shell: true` — cmd.exe re-parses the argument, and JSON is nothing but
+//     quotes and braces. Even correctly forwarded it would arrive mangled.
+//
+// Spawning `node tauri.js` with an argv array has neither failure: no parser
+// between here and the CLI, and the JSON crosses as one argument whatever it
+// contains. It is also why this went nine rounds undetected — the only path
+// that works is the one with no signing material set, which is every run
+// anybody has made.
+const cli = createRequire(import.meta.url).resolve("@tauri-apps/cli/tauri.js");
+
+// `--dry-run` prints the command instead of running it, and exists so this
+// file can be gated at all.
+//
+// Building an installer takes minutes, needs a Rust toolchain and real signing
+// material, and produces artifacts nothing here can inspect — so no test was
+// ever going to run it, and none did. That is exactly how a `--config` that
+// never reached Tauri survived nine review rounds: the argument list is the
+// part that was wrong, and the argument list is cheap to assert.
+// One description of the command, used by both the dry run and the spawn.
+//
+// Not two: a dry run that reports a plan the spawn does not follow is a gate
+// that cannot see the thing it was written for. Reverting the line below to
+// `npm`/`shell: true` has to change what the test reads.
+const command = process.execPath;
+const commandArgs = [cli, ...args];
+
+if (process.argv.includes("--dry-run")) {
+  // The plan alone on stdout, so it can be parsed. The notes travel inside it.
+  console.log(JSON.stringify({ command, args: commandArgs, notes }));
+  process.exit(0);
+}
+
 for (const note of notes) console.log(`[release] ${note}`);
 
-const result = spawnSync("npm", ["run", ...args], { stdio: "inherit", shell: true, env });
+const result = spawnSync(command, commandArgs, { stdio: "inherit", env });
 process.exit(result.status ?? 1);

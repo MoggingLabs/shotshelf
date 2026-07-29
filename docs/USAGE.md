@@ -4,9 +4,11 @@ Shotshelf catches every screenshot and screen recording you take and keeps it on
 an always-on-top shelf. This guide takes you from download to first drag-out.
 
 > **Your captures never leave your machine.** Shotshelf makes exactly one network request: on
-> launch it asks the internal release feed whether a newer version exists, sending nothing but
-> its own version number. No capture, no filename, no metadata, no telemetry, no analytics —
-> not now and not later. Everything else it does happens on local disk.
+> launch it asks the internal release feed whether a newer version exists. That request carries the
+> running version, the operating system and the CPU architecture — they are part of the feed's URL —
+> plus the updater's User-Agent. No capture, no filename, no metadata, no telemetry, no analytics,
+> and nothing identifying you or the machine. Not now and not later. Everything else it does happens
+> on local disk, and switching the check off in Settings sends nothing at all.
 
 ---
 

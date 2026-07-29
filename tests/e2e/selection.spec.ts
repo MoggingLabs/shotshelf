@@ -243,3 +243,25 @@ test("a drag hands the OS a copy, never a move", async ({ page }) => {
 
   await page.mouse.up();
 });
+
+test("a drag that cannot start says so instead of doing nothing", async ({ page }) => {
+  // Dragging out is what this app is for, and it was the only failure path
+  // with no report anywhere the user could see. The common real cause is a
+  // capture deleted after its tile was built: the thumbnail is already loaded,
+  // so no `error` event fires and the card shows no warning either. Press,
+  // drag, drop — and nothing happens, with the reason only in the console.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.evaluate(() =>
+    window.__shotshelf__.reject("prepare_drag", "that capture is no longer on disk"),
+  );
+
+  const tile = page.locator(".tile");
+  await tile.hover();
+  await page.mouse.down();
+  await page.mouse.move(140, 240, { steps: 4 });
+  await page.mouse.up();
+
+  await expect(page.locator("#shelf-alert")).toContainText(/could not be dragged out/i);
+});

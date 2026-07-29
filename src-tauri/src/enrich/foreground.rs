@@ -29,11 +29,15 @@ use serde::Serialize;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Context {
-    /// The application, in the form a person would recognise: "Code", "Firefox".
-    pub app: Option<String>,
-    /// The window's title, where it can be had without a new permission.
-    pub title: Option<String>,
-    /// The two of them as one line, ready to show.
+    /// The application and the window title, as one line, ready to show.
+    ///
+    /// Only the composed line. `app` and `title` were separate `pub` fields
+    /// too, serialised onto every `capture://new` event — and read by nothing,
+    /// in either language: the Rust tests assert on `label`, and the front end
+    /// renders `item.context?.label`. Two `Option<String>`s of window titles
+    /// crossing the IPC boundary per capture, for nobody. They are titles of
+    /// whatever was on screen, which is the one category of string this app
+    /// takes care not to move around without a reason.
     ///
     /// Composed here rather than in the front-end so there is one answer to
     /// "how does this read", instead of one in Rust for the log and another in
@@ -63,7 +67,7 @@ impl Context {
             (None, Some(title)) => Some(title.to_owned()),
             (None, None) => None,
         };
-        Self { app, title, label }
+        Self { label }
     }
 
     /// Whether there is anything here worth putting on a card.

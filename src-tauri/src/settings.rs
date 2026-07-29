@@ -211,8 +211,18 @@ fn write(path: &PathBuf, settings: &Settings) -> std::io::Result<()> {
 /// pins on purpose.
 const MAX_PINNED: usize = 500;
 
-/// Keep hand-edited files, and the webview, from producing a shelf that holds
-/// nothing, never forgets anything, or remembers a path it cannot use.
+/// What the item cap may be set to.
+///
+/// Written here, in `index.html` as the number input's `min`/`max`, and — from
+/// this round — in `tests/fixtures/settings-bounds.json`, which is what joins
+/// the two. Two hand-maintained copies of one rule in two languages had
+/// nothing checking they agreed: raise the clamp and the input still refuses
+/// the new values; lower it and the input offers values that are silently
+/// clamped with no explanation. The repo already solved this class twice, for
+/// the default settings and the secret kinds, and did not extend it here.
+const MIN_ITEMS: usize = 1;
+const MAX_ITEMS: usize = 200;
+
 /// The pinned list as it is allowed to reach the disk.
 ///
 /// One function because there are two write paths into the same file —
@@ -231,8 +241,10 @@ fn allowed_pins(mut pinned: Vec<PinnedItem>) -> Vec<PinnedItem> {
     pinned
 }
 
+/// Keep hand-edited files, and the webview, from producing a shelf that holds
+/// nothing, never forgets anything, or remembers a path it cannot use.
 fn sanitise(mut settings: Settings) -> Settings {
-    settings.max_items = settings.max_items.clamp(1, 200);
+    settings.max_items = settings.max_items.clamp(MIN_ITEMS, MAX_ITEMS);
     settings.pinned = allowed_pins(std::mem::take(&mut settings.pinned));
     settings.retention_hours = settings
         .retention_hours
@@ -262,6 +274,41 @@ mod tests {
         } else {
             format!("/home/someone/Pictures/{name}")
         }
+    }
+
+    #[test]
+    fn the_item_cap_bounds_match_the_control_that_offers_them() {
+        // Against the shared fixture, which `keyboard.spec.ts` asserts the
+        // HTML input against. Neither side can move alone.
+        #[derive(serde::Deserialize)]
+        struct Bound {
+            min: usize,
+            max: usize,
+        }
+        #[derive(serde::Deserialize)]
+        struct Bounds {
+            #[serde(rename = "maxItems")]
+            max_items: Bound,
+        }
+
+        let bounds: Bounds =
+            serde_json::from_str(include_str!("../../tests/fixtures/settings-bounds.json"))
+                .expect("the bounds fixture parses");
+
+        assert_eq!(MIN_ITEMS, bounds.max_items.min);
+        assert_eq!(MAX_ITEMS, bounds.max_items.max);
+
+        // And the clamp really uses them.
+        let low = sanitise(Settings {
+            max_items: 0,
+            ..Settings::default()
+        });
+        assert_eq!(low.max_items, MIN_ITEMS);
+        let high = sanitise(Settings {
+            max_items: 100_000,
+            ..Settings::default()
+        });
+        assert_eq!(high.max_items, MAX_ITEMS);
     }
 
     #[test]

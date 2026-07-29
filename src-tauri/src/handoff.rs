@@ -118,14 +118,32 @@ fn sized_copy<R: Runtime>(app: &AppHandle<R>, source: &Path) -> Result<Option<Pa
 /// UTF-8 keeps its bytes instead of being replaced or dropped.
 fn handoff_name(source: &Path) -> std::ffi::OsString {
     let stem = source.file_stem().unwrap_or_default();
-    // Only for a path with no file name at all — a bare root. Not reachable
-    // from a watched capture folder, but joining an empty name onto the cache
-    // directory would target the directory itself, and `write` failing on a
-    // directory is a worse way to find that out.
-    let mut name = if stem.is_empty() {
+
+    // Separators and colons out, the same rule `edit.rs::safe_stem` applies and
+    // for the same reason: `PathBuf::join` **truncates its base** when the
+    // pushed component carries a Windows prefix. A capture named
+    // `D:evil.png` — reachable from a synced or network volume, where a
+    // filename may contain a colon Windows itself forbids — gave a stem of
+    // `D:evil`, and joining that onto the cache directory produced a
+    // drive-relative path outside it.
+    //
+    // `edit.rs` documented that mechanism in full and asserted containment; one
+    // module away, this did neither. The two names are not merged because they
+    // differ deliberately — this stays `OsString` so a capture whose name is
+    // not valid UTF-8 keeps its bytes — so what is shared is the rule, stated
+    // here, and the containment assertion, stated in both test modules.
+    let cleaned: std::ffi::OsString = stem.to_string_lossy().replace([':', '/', '\\'], "_").into();
+
+    // A name that is nothing, or nothing but dots, is a relative path in
+    // disguise or no name at all. Either would target the cache directory
+    // itself.
+    let bare = cleaned.to_string_lossy().trim().is_empty()
+        || cleaned.to_string_lossy().chars().all(|c| c == '.');
+
+    let mut name = if bare {
         std::ffi::OsString::from("capture")
     } else {
-        stem.to_os_string()
+        cleaned
     };
     name.push(".png");
     name
@@ -190,37 +208,20 @@ fn fingerprint(path: &str, modified: Option<std::time::Duration>) -> String {
     format!("{hash:016x}")
 }
 
-/// Drop the oldest sized copies. Called on a timer from `lib.rs`, like the poster cache:
-/// this is a cache, and a cache that only grows is a leak with a nicer name.
+/// Drop the oldest sized copies. Called on a timer from `lib.rs`, like the
+/// poster cache: this is a cache, and a cache that only grows is a leak with a
+/// nicer name.
+///
+/// Through `cache::prune`, which the poster cache also uses. The two had
+/// separate copies of the same five steps written in different shapes, and
+/// neither was tested.
 pub fn prune<R: Runtime>(app: &AppHandle<R>) {
     let Ok(dir) = cache_dir(app) else {
         return;
     };
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return;
-    };
-
-    let mut folders: Vec<(std::time::SystemTime, PathBuf)> = entries
-        .flatten()
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| {
-            let modified = entry.metadata().and_then(|meta| meta.modified()).ok()?;
-            Some((modified, entry.path()))
-        })
-        .collect();
-
-    if folders.len() <= CACHE_LIMIT {
-        return;
-    }
-
-    // Oldest *created* first. Not true LRU: a cache hit returns before this
-    // directory is touched, so a capture dragged daily still ages out on the
-    // timestamp it was written with. Acceptable for a cache whose miss costs a
-    // re-encode, and stated rather than implied.
-    folders.sort_unstable_by_key(|(modified, _)| *modified);
-    for (_, path) in folders.iter().take(folders.len() - CACHE_LIMIT) {
-        let _ = std::fs::remove_dir_all(path);
-    }
+    // A directory per capture version: the copy inside keeps the original's
+    // filename, so the version has to be the folder.
+    crate::cache::prune(&dir, CACHE_LIMIT, crate::cache::Entry::Directory);
 }
 
 #[cfg(test)]
@@ -295,6 +296,45 @@ mod tests {
                     .extension()
                     .is_some_and(|ext| ext == "png"),
                 "{source} became {named:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn a_sized_copy_cannot_be_named_out_of_its_cache_directory() {
+        // The same property `edit.rs` states for `safe_stem`, and the same
+        // mechanism: `PathBuf::join` *truncates its base* when the pushed
+        // component carries a Windows prefix, so a source named `D:evil.png`
+        // has the stem `D:evil` and joining it lands outside the cache.
+        //
+        // `edit.rs` documents this in full, names its sanitiser so a test can
+        // reach the shipping code, and asserts containment. One module away,
+        // `handoff_name` did none of that and nothing checked it — the write-up
+        // of the bug did not check its neighbour.
+        //
+        // The reach is narrow: a Windows filename cannot contain `:`, so this
+        // needs a path from a synced or network volume. Narrow is not a reason
+        // to leave the assertion unwritten, and it is why the containment is
+        // asserted here rather than the two names being merged — `handoff_name`
+        // stays `OsString` for captures whose names are not valid UTF-8, which
+        // `safe_stem` does not.
+        let dir = Path::new(if cfg!(windows) {
+            r"C:\cache\handoffbc"
+        } else {
+            "/cache/handoff/abc"
+        });
+
+        for hostile in [
+            r"C:\dir\D:evil.png",
+            r"C:\dir\..\..\evil.png",
+            "/dir/../../evil.png",
+            r"\server\share\evil.png",
+        ] {
+            let target = dir.join(handoff_name(Path::new(hostile)));
+            assert!(
+                target.starts_with(dir),
+                "{hostile} escaped the cache as {}",
+                target.display(),
             );
         }
     }

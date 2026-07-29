@@ -216,29 +216,44 @@ test("a discarded open does not collapse the window under a later one", async ()
  * and the picture's listeners — which is what makes it testable here at all,
  * without a browser or a real fifteen-second wait.
  */
+interface FakeTimer {
+  id: number;
+  delay: number;
+  /** Run the callback, as the real clock would when the delay elapses. */
+  fire: () => void;
+}
+
 function fakeClock(): {
-  pending: { fire: () => void; delay: number }[];
+  pending: FakeTimer[];
+  /** Ids passed to `clearTimeout`, which is the only way to see a cancel. */
+  cancelled: Set<number>;
   restore: () => void;
 } {
-  const pending: { fire: () => void; delay: number }[] = [];
-  const cleared = new Set<number>();
+  const pending: FakeTimer[] = [];
+  const cancelled = new Set<number>();
   const previous = (globalThis as { window?: unknown }).window;
 
   (globalThis as { window?: unknown }).window = {
     setTimeout: (fn: () => void, delay: number): number => {
+      // Captured now, not read at fire time: `pending.length` moves as more
+      // timers are armed, so the guard was checking a different timer's id
+      // the moment there was more than one.
+      const id = pending.length + 1;
       pending.push({
-        fire: () => {
-          if (!cleared.has(pending.length)) fn();
-        },
+        id,
         delay,
+        fire: () => {
+          if (!cancelled.has(id)) fn();
+        },
       });
-      return pending.length;
+      return id;
     },
-    clearTimeout: (id: number): void => void cleared.add(id),
+    clearTimeout: (id: number): void => void cancelled.add(id),
   };
 
   return {
     pending,
+    cancelled,
     restore: () => {
       (globalThis as { window?: unknown }).window = previous;
     },
@@ -300,14 +315,22 @@ test("a picture that loads settles with the picture and drops its deadline", asy
     const picture = fakePicture();
     const waiting = readable(picture.node);
 
+    const deadline = clock.pending[0];
+    assert.ok(deadline, "a deadline was armed");
+
     picture.fire("load");
     assert.equal(await waiting, picture.node);
 
-    // The deadline must not still be able to fire: it resolves `undefined`,
-    // and a promise already settled ignores it — but an armed timer that
-    // outlives its promise is a leak per quick look.
-    clock.pending[0]?.fire();
-    assert.equal(await waiting, picture.node, "still the picture");
+    // Asserted against the *clock*, not against the promise.
+    //
+    // Re-reading the promise after firing the timer proves nothing: it has
+    // already settled, so a later `resolve(undefined)` is ignored whether or
+    // not the timer was ever cancelled. That version of this test passed with
+    // `clearTimeout` deleted outright — a test named for dropping the deadline
+    // that could not tell whether the deadline was dropped. An armed timer
+    // that outlives its promise is a leak per quick look, and the only place
+    // that is visible is the cancel itself.
+    assert.ok(clock.cancelled.has(deadline.id), "the deadline was cancelled");
   } finally {
     clock.restore();
   }

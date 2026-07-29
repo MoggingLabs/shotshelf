@@ -60,6 +60,7 @@ export async function beginDrag(
   node: HTMLElement,
   items: readonly ShelfItem[],
   onSettled: () => void,
+  onProblem: (message: string) => void,
 ): Promise<void> {
   const [first] = items;
   if (!first) {
@@ -101,6 +102,20 @@ export async function beginDrag(
     await startDrag({ item: paths, icon, mode: "copy" }, done);
   } catch (error) {
     console.error("[shotshelf] could not drag that capture out", error);
+    // Said out loud, not only to the console.
+    //
+    // Dragging out is what this app is for, and it was the one failure path
+    // with no report anywhere the user could see it. Every sibling — copy,
+    // preview, opening the editor, saving an edit — routes its failure to the
+    // alert strip; this swallowed the most common real cause, `prepare_drag`
+    // answering "no longer on disk" for a capture deleted after its tile was
+    // built. The thumbnail is already loaded, so the tile shows no warning
+    // either: the user presses, drags, drops, and nothing happens at all.
+    onProblem(
+      items.length > 1
+        ? "Those captures could not be dragged out."
+        : "That capture could not be dragged out.",
+    );
     // Only a failure to *start* settles here — there is no drag to wait for.
     done();
   }

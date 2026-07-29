@@ -13,8 +13,10 @@ Thanks for taking the time to contribute!
    flagged as platform-specific. Catch + drag-out are the two features that must never regress on
    either OS.
 4. **Local-only, always.** No telemetry, no cloud, and exactly one network call: the launch-time
-   update *check*, which sends nothing but the running version number and installs nothing. If a
-   change would send a capture anywhere off the device, it doesn't belong here.
+   update *check*, which installs nothing. It carries the running version, the OS and the CPU
+   architecture — the feed URL is built from all three — and nothing else. See `SECURITY.md` for the
+   exact wording; if you change what that request contains, change that section in the same commit.
+   If a change would send a capture anywhere off the device, it doesn't belong here.
 5. **Be kind.** See the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
 ## Workflow
@@ -27,13 +29,25 @@ cd shotshelf
 # 2. Branch from main
 git checkout -b feat/<short-description>
 
-# 3. Make your change, test on BOTH platforms where possible
+# 3. Install dependencies, including the browser the gates drive
+npm install
+npx playwright install chromium
 
-# 4. Commit with a clear message
+# 4. Make your change, test on BOTH platforms where possible
+
+# 5. Run every gate CI runs, before you push
+npm run gate
+
+# 6. Commit with a clear message
 git commit -m "add clipboard-image capture on Windows"
 
-# 5. Push and open a PR against main
+# 7. Push and open a PR against main
 ```
+
+`npm run gate` is the same set CI runs: lint, dead code, type-check and bundle, the unit and
+browser suites, then `cargo fmt --check`, `clippy -D warnings`, `cargo test` and `cargo build`.
+It needs a Rust toolchain and the Playwright browser above; without them it stops rather than
+skipping quietly.
 
 ### Pull requests
 

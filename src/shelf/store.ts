@@ -33,7 +33,14 @@ export class ShelfStore {
     return this.#items.find((item) => item.id === id);
   }
 
-  has(id: string): boolean {
+  /**
+   * Private: the only thing that ever asked was `add`, one line below.
+   *
+   * It was `pub`-equivalent surface with no consumer anywhere in the repo —
+   * not even a test — and public surface on a store is an invitation to check
+   * membership somewhere other than where the deduplication rule lives.
+   */
+  #holds(id: string): boolean {
     return this.#items.some((item) => item.id === id);
   }
 
@@ -47,7 +54,7 @@ export class ShelfStore {
    */
   add(capture: Capture, options: { pinned?: boolean } = {}): ShelfItem | undefined {
     const id = captureId(capture);
-    if (this.has(id)) return undefined;
+    if (this.#holds(id)) return undefined;
 
     const item: ShelfItem = { ...capture, id, pinned: options.pinned ?? false };
     this.#items.unshift(item);

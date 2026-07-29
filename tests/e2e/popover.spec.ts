@@ -121,6 +121,34 @@ test("the launch appearance puts itself away", async ({ page }) => {
     .toBeGreaterThan(0);
 });
 
+test("a shelf you opened on purpose survives the launch window", async ({ page }) => {
+  // The launch timer was cleared by `adoptHidden` and by focus arriving, but
+  // not by `adoptBrowse` — the one route that knows the user asked for this.
+  //
+  // Focus normally covers it, because `window::open` focuses as well as
+  // emitting. It does not when focus never *changes*: a window manager that
+  // refuses focus-stealing, or a window that already had focus. So this drives
+  // the open without any focus event at all, which is the state the fix is for.
+  //
+  // What made it worse than a stray hide: `dismiss` runs `setMode("column")`,
+  // and `setMode("browse")` has already emptied the column queue — so every
+  // tile vanished a moment before the window did.
+  await page.clock.install();
+  await bootShelf(page);
+  await land(page, FIXTURE.wide, { ts: 1 });
+  await land(page, FIXTURE.tall, { ts: 2 });
+
+  await openBrowse(page);
+  await expect(page.locator(".tile")).toHaveCount(2);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.clock.runFor(10_000);
+
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "browse");
+  await expect(page.locator(".tile")).toHaveCount(2);
+});
+
 test("the launch appearance stays put while a drag is in flight", async ({ page }) => {
   await page.clock.install();
   await bootShelf(page);

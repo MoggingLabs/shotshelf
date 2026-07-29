@@ -154,7 +154,7 @@ test("pinning is persisted so it survives a restart", async ({ page }) => {
   await openBrowse(page);
 
   await page.locator(".tile").hover();
-  await page.locator(".tile__action").first().click();
+  await page.locator(".tile__action--pin").click();
 
   await expect(page.locator(".tile")).toHaveClass(/tile--pinned/);
   await expect
@@ -165,13 +165,53 @@ test("pinning is persisted so it survives a restart", async ({ page }) => {
     .toBe(1);
 });
 
+test("the pin control shows its own state, not whichever button came first", async ({ page }) => {
+  // Live pin reflection had no test at all. `reflectPin` found its button with
+  // `querySelector(".tile__action")` — the first of three controls that all
+  // carry that class — so it was the pin button only because `actions()`
+  // appends it first. Reordering them, an ordinary edit, would have left the
+  // star dark when you pinned and relabelled the *copy* button "Pinned".
+  //
+  // Asserted by name and against the other two, which is what a positional
+  // bug looks like from outside: the right control changes and the others do
+  // not.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+
+  const pin = page.locator(".tile__action--pin");
+  const others = page.locator(".tile__action:not(.tile__action--pin)");
+  await expect(pin).toHaveCount(1);
+  await expect(others).toHaveCount(2);
+  await expect(pin).not.toHaveClass(/tile__action--on/);
+
+  await page.locator(".tile").hover();
+  await pin.click();
+
+  await expect(pin).toHaveClass(/tile__action--on/);
+  await expect(pin).toHaveAttribute("title", /unpin/i);
+  // And nothing else was relabelled or lit.
+  await expect(others.filter({ has: page.locator(".tile__action--on") })).toHaveCount(0);
+  const labels = await others.evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute("title") ?? ""),
+  );
+  for (const label of labels) {
+    expect(label).not.toMatch(/pinned/i);
+  }
+
+  // Unpinning goes back, on the same control.
+  await pin.click();
+  await expect(pin).not.toHaveClass(/tile__action--on/);
+  await expect(pin).toHaveAttribute("title", /pin/i);
+});
+
 test("copying a capture asks Rust for the clipboard, not the DOM", async ({ page }) => {
   await bootShelf(page);
   await land(page, FIXTURE.wide);
   await openBrowse(page);
 
   await page.locator(".tile").hover();
-  await page.locator(".tile__action").nth(1).click();
+  await page.locator(".tile__action--copy").click();
 
   await expect
     .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("copy_capture").length))
@@ -254,7 +294,7 @@ test("a pin is not saved when the stored settings could never be read", async ({
   await expect(page.locator("#shelf-alert")).toHaveText(/Settings could not be loaded/);
   await page.evaluate(() => window.__shotshelf__.clearCalls());
 
-  await page.locator(".tile__action").first().click();
+  await page.locator(".tile__action--pin").click();
 
   // The pin is applied on screen; it is simply not written over the file we
   // could not read.
@@ -295,7 +335,7 @@ test("pins come back when the settings read loses a start-up race and wins the r
   await page.evaluate(() => window.__shotshelf__.clearCalls());
   await land(page, FIXTURE.wide, { ts: 2 });
   await openBrowse(page);
-  await page.locator(".tile").first().locator(".tile__action").first().click();
+  await page.locator(".tile").first().locator(".tile__action--pin").click();
   await expect
     .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("set_pinned").length))
     .toBeGreaterThan(0);

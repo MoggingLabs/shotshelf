@@ -67,9 +67,6 @@ export class EditSession {
     return this.#marks;
   }
 
-  crop(): Rect | undefined {
-    return this.#crop;
-  }
 
   /**
    * The number the next callout will carry.

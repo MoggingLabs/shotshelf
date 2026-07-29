@@ -68,7 +68,7 @@ test("the warning never blocks the drag or the copy", async ({ page }) => {
 
   // Copy still works.
   await page.locator(".tile").hover();
-  await page.locator(".tile__action").nth(1).click();
+  await page.locator(".tile__action--copy").click();
   await expect
     .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("copy_capture").length))
     .toBe(1);

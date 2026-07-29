@@ -1,7 +1,13 @@
 import { defineConfig } from "vite";
 
-// Shotshelf is desktop-only (Tauri v2). Keep this config free of Node globals so
-// no `@types/node` dev-dependency is needed — footprint matters for a 24/7 app.
+// Shotshelf is desktop-only (Tauri v2), and this config stays free of Node
+// globals so the bundle it produces has none.
+//
+// It used to say that was to avoid needing `@types/node`, which was never true
+// and got less true: `@types/node` is a devDependency, `tsconfig.json` loads
+// it, and `playwright.config.ts` imports `node:fs`. The reason that survives is
+// the simpler one — what is written here ends up shipped, and the tooling
+// around it does not.
 export default defineConfig({
   // Tauri's CLI owns the terminal output; don't let Vite wipe it.
   clearScreen: false,

@@ -99,10 +99,24 @@ mod platform {
         writer.FlushAsync()?.get()?;
         stream.Seek(0)?;
 
-        let decoder = BitmapDecoder::CreateWithIdAsync(BitmapDecoder::PngDecoderId()?, &stream);
-        // The id is a hint; the decoder sniffs the real format, so a capture
-        // written as JPEG under a .png name still decodes.
-        let bitmap = decoder?.get()?.GetSoftwareBitmapAsync()?.get()?;
+        // `CreateAsync`, which picks the codec by looking at the bytes.
+        //
+        // This was `CreateWithIdAsync(PngDecoderId(), …)` under a comment
+        // claiming the id was only a hint and the decoder sniffed the real
+        // format. It does not: that overload creates a decoder for the codec
+        // you name, so WIC's PNG decoder was handed JPEG bytes and failed.
+        // `recognise` swallows the error to `None`, so the capture came back
+        // unscanned with no indication why.
+        //
+        // The blast radius was every non-PNG capture: `catch::kind_of` accepts
+        // jpg, jpeg, gif, bmp and webp, and ShareX — which this app watches for
+        // on purpose — writes JPEG by default. A credential warning that
+        // quietly does not run on four of five accepted formats is worse than
+        // one that is switched off, because the card still looks checked.
+        let bitmap = BitmapDecoder::CreateAsync(&stream)?
+            .get()?
+            .GetSoftwareBitmapAsync()?
+            .get()?;
 
         // The engine follows the user's own language list, which is what makes
         // this work for someone whose screenshots are not in English.
