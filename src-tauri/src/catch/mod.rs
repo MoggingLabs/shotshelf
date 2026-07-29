@@ -350,7 +350,7 @@ pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Capture
     // yesterday's after today's have already landed") for a call that did not
     // exist.
     if let Some(store) = app.try_state::<crate::settings::SettingsStore>() {
-        if let Some(newest) = chosen.iter().map(|capture| capture.ts).max() {
+        if let Some(newest) = newest_of(&chosen) {
             store.note_capture(newest);
         }
     }
@@ -451,6 +451,17 @@ fn to_backfill(
             context: crate::enrich::foreground::Context::default(),
         })
         .collect()
+}
+
+/// The newest timestamp among the captures being handed over, if any.
+///
+/// Split out so the round's blocker fix is reachable by a test. Deleting the
+/// whole `note_capture` block left every gate green — no Rust test calls
+/// `catch_backfill` (it needs an `AppHandle`) and the front-end stubs answer
+/// with canned arrays — so the one line that makes `Remove` survive a restart
+/// was one deletion from silently going away again.
+fn newest_of(chosen: &[Capture]) -> Option<u64> {
+    chosen.iter().map(|capture| capture.ts).max()
 }
 
 fn as_ms(at: SystemTime) -> u64 {
@@ -682,6 +693,39 @@ mod tests {
             !names(&capped).contains(&"shot99.png"),
             "the oldest did not"
         );
+    }
+
+    #[test]
+    fn a_backfill_moves_the_watermark_past_everything_it_hands_over() {
+        // Otherwise `Remove` does not survive a restart for anything the
+        // backfill delivered — which is the entire reason the watermark exists,
+        // and it went a round with the call missing while the docstring in
+        // `settings.rs` described the caller.
+        //
+        // The *newest*, not the last: the list is handed over oldest-first so
+        // the shelf's newest-on-top order matches when they were taken, so
+        // taking the final element would leave the watermark behind the newest
+        // capture and re-offer it forever.
+        let chosen = to_backfill(
+            vec![
+                ordinary(600, "older.png"),
+                ordinary(60, "newest.png"),
+                ordinary(300, "middle.png"),
+            ],
+            now(),
+            0,
+        );
+        let newest = newest_of(&chosen).expect("something was chosen");
+
+        assert_eq!(newest, chosen.iter().map(|c| c.ts).max().unwrap());
+        assert!(
+            chosen.iter().all(|capture| capture.ts <= newest),
+            "the watermark must cover every capture handed over",
+        );
+        // And a launch with nothing to bring back must not move it at all —
+        // moving it forward on an empty answer would skip captures taken
+        // between now and the next launch.
+        assert_eq!(newest_of(&[]), None);
     }
 
     #[test]

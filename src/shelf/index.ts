@@ -31,6 +31,7 @@ import {
 import { ColumnQueue, type HoldReason } from "./column.ts";
 import { armDrag, beginDrag } from "./drag.ts";
 import { columnHeight } from "./geometry.ts";
+import { groupByDay } from "./view/groups.ts";
 import { Selection } from "./selection.ts";
 import { ShelfStore } from "./store.ts";
 import { type Capture, captureId, isEditable, type ShelfItem } from "./types.ts";
@@ -338,10 +339,34 @@ export class Shelf {
   }
 
   /** What the shelf is showing, in the order it is showing it. */
+  /**
+   * The captures in the order they are **on screen**, which is what the arrows
+   * and shift-ranges walk.
+   *
+   * Browse mode renders day groups, newest day first — so the DOM order is
+   * `groupByDay(items)` flattened, not `items`. This returned the raw store
+   * order, and the two only agree when captures happen to be added in the same
+   * order they were taken.
+   *
+   * They routinely are not, and `groupByDay`'s own docstring says why: "the
+   * shelf is ordered by when captures were *added*, not by when they were
+   * taken: a pin restored at startup can be a week older than the capture
+   * after it." Restoring a pin does exactly that, and it races the backfill at
+   * launch — so with no user action at all, the first ArrowDown could land on
+   * the second card on screen, and a shift-range could select a set that is
+   * not contiguous in the list the user is looking at.
+   *
+   * Both callers document the behaviour this now has: `moveSelection` says
+   * "follow the order you can see", and `#pick` passes this to `extendTo`,
+   * whose parameter is named for "the order the shelf is showing".
+   */
   #visibleIds(): string[] {
-    return this.#mode === "column"
-      ? this.#columnItems().map((item) => item.id)
-      : this.#store.items().map((item) => item.id);
+    if (this.#mode === "column") return this.#columnItems().map((item) => item.id);
+    // The same grouping the view renders, flattened. One function decides the
+    // order; this asks it rather than guessing.
+    return groupByDay(this.#store.items()).flatMap((group) =>
+      group.items.map((item) => item.id),
+    );
   }
 
   /**

@@ -631,9 +631,14 @@ test("a failed save is visible when the editor was opened from the column", asyn
 });
 
 test("the column's timer does not tear down an open editor", async ({ page }) => {
-  // `#ageColumn` vetoed on a drag in flight but not on an open overlay. When
-  // the last card aged out it dismissed the window, which discarded the editor
-  // and every unsaved mark in it — on a timer, with no message.
+  // Note what this actually covers: the **mode** guard, not the overlay veto.
+  //
+  // `openEditorFromColumn` stubs `preview_shelf`, a successful `preview_shelf`
+  // emits `shelf://opened`, and that puts the shelf in the browse shape — so
+  // `#ageColumn` returns on `this.#mode !== "column"` before it ever reaches
+  // `if (this.overlayOpen) return;`. Deleting the overlay veto leaves this
+  // test green. The veto is belt to that brace, and the test below is the one
+  // that holds it.
   await openEditorFromColumn(page, { fakeClock: true });
   await drag(page, [30, 25], [170, 95]);
   await page.evaluate(() => window.__shotshelf__.clearCalls());
@@ -886,4 +891,35 @@ test("the mark under the pointer looks like the mark that lands", async ({ page 
   const committed = await inkAt(page, ...atCorner);
 
   expect(previewed).toEqual(committed);
+});
+
+test("the column's timer does not tear down an editor that is still opening", async ({ page }) => {
+  // The overlay veto in `#ageColumn`, on its own — the only state where it is
+  // the thing standing between a timer and someone's unsaved work.
+  //
+  // Reaching it takes a shelf still in the *column* shape with an overlay up,
+  // and a successful `preview_shelf` leaves the browse shape behind. So this
+  // hangs `preview_shelf`: no answer means no `shelf://opened`, the mode stays
+  // "column", and `Overlay.isOpen` is true for the whole in-flight span — which
+  // is exactly what that getter exists to express. The editor is *opening*, and
+  // the column's minute is up.
+  await page.clock.install();
+  await bootShelf(page);
+  await page.evaluate(() => window.__shotshelf__.hang("preview_shelf"));
+  await land(page, FIXTURE.wide);
+  await expect(page.locator(".tile")).toHaveCount(1);
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
+
+  // Through the keyboard, not the button: the column shape hides the title
+  // strip, so `#shelf-edit` is present and unclickable there.
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("e");
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.mouse.move(0, 0);
+  await page.clock.runFor(70_000);
+
+  // The shelf must not put itself away underneath an overlay that is coming.
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
 });

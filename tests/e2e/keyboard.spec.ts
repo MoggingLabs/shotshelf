@@ -228,3 +228,35 @@ test("the item-cap control offers exactly the range Rust will accept", async ({ 
   await expect(input).toHaveAttribute("min", String(BOUNDS.maxItems.min));
   await expect(input).toHaveAttribute("max", String(BOUNDS.maxItems.max));
 });
+
+test("the arrows walk the order on screen, not the order captures arrived", async ({ page }) => {
+  // Browse mode renders day groups, newest day first; the arrows walked the
+  // raw store order instead, and the two agree only when captures happen to be
+  // added in the same order they were taken.
+  //
+  // They routinely are not — `groupByDay`'s own docstring says a pin restored
+  // at startup can be a week older than the capture after it, and that restore
+  // races the backfill at launch. So this lands a capture from *today* and then
+  // one from *yesterday*, which is the shape a restored pin produces: the store
+  // holds [yesterday, today] and the screen shows today's group first.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide, { ts: Date.UTC(2026, 6, 28, 12) });
+  await land(page, FIXTURE.tall, { ts: Date.UTC(2026, 6, 27, 12) });
+  await openBrowse(page);
+  await expect(page.locator(".group")).toHaveCount(2);
+
+  // The first card on screen is today's.
+  const first = page.locator(".tile").first();
+  await expect(first).toHaveAttribute("title", /wide\.png/);
+
+  await page.keyboard.press("ArrowDown");
+
+  // ...and the first press must pick it, not the one the store happens to
+  // hold first.
+  await expect(first).toHaveClass(/tile--picked/);
+  await expect(page.locator(".tile--picked")).toHaveCount(1);
+
+  // Walking on stays in screen order.
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator(".tile").nth(1)).toHaveClass(/tile--picked/);
+});

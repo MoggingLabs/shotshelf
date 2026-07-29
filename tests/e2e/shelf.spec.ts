@@ -421,3 +421,42 @@ test("an unreachable catch engine is not shown as healthy either", async ({ page
   await expect(page.locator("#shelf-mark")).not.toHaveClass(/shelf__mark--live/);
   await expect(page.locator("#shelf-mark")).toHaveAttribute("title", /could not reach/i);
 });
+
+test("a shelf that asks before the catch engine is up waits rather than reporting failure", async ({
+  page,
+}) => {
+  // The engine starts on a worker — resolving watch folders can take SMB round
+  // trips on a redirected profile — while the webview is created before Rust's
+  // `setup` runs and asks within milliseconds. Both catch commands answer
+  // "still starting" for that window, and the difference between retrying and
+  // believing them is the difference between a working launch and being told
+  // your captures are not being watched, permanently, on a healthy machine.
+  //
+  // The retry had no test at all: replacing it with a bare throw left every
+  // spec green, because nothing anywhere rejected with that message — the
+  // harness could only reject with `get_settings`'s wording.
+  await page.addInitScript(() => {
+    window.__shotshelfStubs__ = {
+      catch_watch_dirs: {
+        __rejectsTimes__: 3,
+        because: "the catch engine is still starting",
+        then: ["/home/someone/Pictures"],
+      },
+      catch_backfill: {
+        __rejectsTimes__: 3,
+        because: "the catch engine is still starting",
+        then: [{ path: "/captures/wide.png", kind: "image", ts: 1 }],
+      },
+    };
+  });
+  await bootShelf(page);
+  await openBrowse(page);
+
+  // Both waited and both got their real answer: the indicator is live and the
+  // capture the launch missed is on the shelf.
+  await expect(page.locator("#shelf-mark")).toHaveClass(/shelf__mark--live/);
+  await expect(page.locator("#shelf-mark")).toHaveAttribute("title", /Pictures/);
+  await expect(page.locator(".tile")).toHaveCount(1);
+  // And nothing was reported as broken along the way.
+  await expect(page.locator("#shelf-alert")).not.toContainText(/could not reach/i);
+});

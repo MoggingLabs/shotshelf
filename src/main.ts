@@ -231,9 +231,17 @@ async function whenEngineIsUp<T>(what: string, ask: () => Promise<T>): Promise<T
   throw new Error(`${what} never became available`);
 }
 
-/** Roughly six seconds, which is a slow network share rather than a local disk. */
-const ENGINE_ATTEMPTS = 20;
-const ENGINE_RETRY_MS = 300;
+/**
+ * Roughly a minute, which is what a disconnected network share actually costs.
+ *
+ * `lib.rs` says resolving the watch folders can be "an SMB round trip with a
+ * multi-second timeout" — per candidate, and there are up to four of them, each
+ * doing several such calls. Six seconds was under the delay this exists for, so
+ * on the machine it was written for it would have given up and reported a
+ * failure that had not happened.
+ */
+const ENGINE_ATTEMPTS = 120;
+const ENGINE_RETRY_MS = 500;
 
 // Captures taken while Shotshelf was not running are *pulled*, not pushed.
 //
@@ -297,7 +305,12 @@ void whenEngineIsUp("the watch folders", () => invoke<string[]>("catch_watch_dir
     // total failure left the dot with no state at all and the sole signal was
     // an alert that erases itself after twelve seconds.
     noteWatchUnavailable();
-    say("The catch engine is unavailable — no captures will be picked up. Restarting should fix it.");
+    // Not "no captures will be picked up": the clipboard watcher is started
+    // unconditionally and is independent of the folder watchers, so
+    // Win+Shift+S and ⌘⌃⇧4 are still caught. `status.ts` had this exact
+    // sentence corrected this round; the correction landed in one file and not
+    // the other.
+    say("Shotshelf could not reach its catch engine — folder watching is off. See the log.");
   })
   // Its own chain, deliberately. Asking whether captures can be checked for
   // credentials is advisory, and hanging it off the watch-folder call meant a

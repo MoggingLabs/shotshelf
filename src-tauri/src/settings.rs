@@ -690,18 +690,47 @@ mod tests {
         let before = std::fs::read_to_string(&roaming).expect("preferences were written");
         assert!(before.contains("hotkey"));
 
+        // **Not written at all**, which is stronger than "written identically".
+        //
+        // Comparing the bytes could not fail: `persist` blanks `pinned` before
+        // serialising, so the buggy write produced a byte-identical file. Both
+        // mutations — `set_pinned` and `note_capture` calling the full
+        // `persist` — passed the content assertion. The modification time is
+        // the only thing that can tell "did not write" from "wrote the same".
+        let stamp = |path: &std::path::Path| {
+            std::fs::metadata(path)
+                .and_then(|meta| meta.modified())
+                .expect("a modified time")
+        };
+        let before_write = stamp(&roaming);
+        // Coarse filesystem timestamps would make an immediate rewrite look
+        // like no write at all, so put a gap either side of the call.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
         store.set_pinned(vec![pin(&secret)]);
+
+        assert_eq!(
+            stamp(&roaming),
+            before_write,
+            "a pin toggle rewrote the preferences file",
+        );
 
         let roamed = std::fs::read_to_string(&roaming).expect("preferences still there");
         assert!(
             !roamed.contains("acme-migration-plan"),
             "a capture path reached the roaming file: {roamed}",
         );
-        // Byte-for-byte untouched: a pin toggle changes nothing in the
-        // preferences, so it must not rewrite them. It used to — and so did
-        // every single capture, through `note_capture`, synchronously on the
-        // folder-watcher thread.
-        assert_eq!(before, roamed, "a pin toggle rewrote the preferences file");
+
+        // And a capture must not rewrite them either — `note_capture` runs on
+        // the folder-watcher thread, once per screenshot.
+        let before_capture = stamp(&roaming);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        store.note_capture(1_700_000_000_000);
+        assert_eq!(
+            stamp(&roaming),
+            before_capture,
+            "a capture rewrote the preferences file",
+        );
 
         let kept = std::fs::read_to_string(&local).expect("pins were written");
         assert!(kept.contains("acme-migration-plan"), "the pin was not kept");

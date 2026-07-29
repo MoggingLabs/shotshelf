@@ -105,7 +105,8 @@ declare global {
      * resolve, which is the whole reason a start-up failure is expressible at
      * all from out here. `{ __rejectsTimes__: n, then: value }` fails n times
      * and then succeeds — a transient race rather than a permanent one, which
-     * is what the settings retry exists for.
+     * is what the settings retry exists for. `because` sets the rejection
+     * message, which the catch commands' retry matches on.
      */
     __shotshelfStubs__?: Record<string, unknown>;
   }
@@ -230,10 +231,17 @@ export function installTauriMock(): void {
         // and winning on the retry. Without this the retry could only be tested
         // by its absence, so shortening it to a single attempt changed nothing.
         if (typeof seeded === "object" && seeded !== null && "__rejectsTimes__" in seeded) {
-          const flaky = seeded as { __rejectsTimes__: number; then: unknown };
+          const flaky = seeded as { __rejectsTimes__: number; then: unknown; because?: string };
           if (flaky.__rejectsTimes__ > 0) {
             flaky.__rejectsTimes__ -= 1;
-            return { succeeded: false, result: Promise.reject(new Error("state not managed")) };
+            // The message is the stub's to choose. It was hard-coded to
+            // "state not managed", which is `get_settings`'s failure — so this
+            // affordance could not drive the catch commands' retry, which
+            // matches on "still starting". A retry that no test can reach is a
+            // retry that can be deleted with every gate green.
+            const because =
+              typeof flaky.because === "string" ? flaky.because : "state not managed";
+            return { succeeded: false, result: Promise.reject(new Error(because)) };
           }
           return { succeeded: true, result: Promise.resolve(flaky.then) };
         }
