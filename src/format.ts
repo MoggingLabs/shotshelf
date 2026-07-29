@@ -82,7 +82,19 @@ export function dayLabel(ts: number, now: number = Date.now()): string {
 
   if (ts >= midnight) return "Today";
   if (ts >= yesterday) return "Yesterday";
-  return new Date(ts).toLocaleDateString([], { day: "numeric", month: "long" });
+  // The year appears only when it is not this one.
+  //
+  // Without it, a pin from 26 July last year and one from 26 July this year both
+  // headed a section "26 July" — two correct groups (`dayKey` carries the year)
+  // under one heading. Pinned captures ignore retention and the item cap and
+  // survive restarts, so that pair is ordinary rather than exotic.
+  const when = new Date(ts);
+  const sameYear = when.getFullYear() === today.getFullYear();
+  return when.toLocaleDateString([], {
+    day: "numeric",
+    month: "long",
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
 }
 
 /**

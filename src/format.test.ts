@@ -120,3 +120,18 @@ test("a size never renders in the unit below the one it belongs to", () => {
   assert.equal(formatBytes(1023), "1023 B");
   assert.equal(formatBytes(1024), "1.0 kB");
 });
+
+test("a day heading carries the year only when it is not this one", () => {
+  // `dayKey` carries the year, so a pin from last July and one from this July
+  // are correctly two groups — and both headed "26 July", which reads as one
+  // group split for no reason. Pinned captures ignore retention and the item
+  // cap and survive restarts, so that pair is ordinary.
+  const now = new Date(2026, 6, 30, 12, 0, 0).getTime();
+
+  const thisYear = dayLabel(new Date(2026, 6, 26, 9, 0, 0).getTime(), now);
+  const lastYear = dayLabel(new Date(2025, 6, 26, 9, 0, 0).getTime(), now);
+
+  assert.notEqual(thisYear, lastYear, "two years cannot share one heading");
+  assert.match(lastYear, /2025/);
+  assert.doesNotMatch(thisYear, /2026/, "this year is the default and stays unsaid");
+});

@@ -117,11 +117,24 @@ static PATTERNS: LazyLock<Vec<Pattern>> = LazyLock::new(|| {
             "-----BEGIN".len(),
             r"-----BEGIN[ A-Z]*PRIVATE KEY-----",
         ),
+        // Split, because one `marker` cannot serve two prefixes of different
+        // lengths. `gh[pousr]_` is four characters and `github_pat_` is eleven,
+        // so the shared marker of four previewed a fine-grained PAT as `gith…`,
+        // naming nothing — in a feature whose entire job is "which one". Not a
+        // leak (fewer characters than the marker, never more), but the sample
+        // rule enforces one sample per *label*, so this alternation's own
+        // disclosure decision was never exercised. Two labels, two samples.
         compile(
             SecretKind::ServiceToken,
             "GitHub token",
             4,
-            r"\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,})\b",
+            r"\bgh[pousr]_[A-Za-z0-9]{16,}\b",
+        ),
+        compile(
+            SecretKind::ServiceToken,
+            "GitHub fine-grained token",
+            "github_pat_".len(),
+            r"\bgithub_pat_[A-Za-z0-9_]{20,}\b",
         ),
         compile(
             SecretKind::ServiceToken,
@@ -320,8 +333,11 @@ fn mask_prefix(value: &str, keep: usize) -> String {
 fn mask_assignment(value: &str) -> String {
     match value.find(['=', ':']) {
         Some(split) => format!("{}{}•••", &value[..split], &value[split..=split]),
-        // No separator means the pattern matched something unexpected; show
-        // nothing rather than guess which half was the secret.
+        // Unreachable today, and deliberately kept: the only `Assignment`
+        // pattern mandates `\s*[:=]\s*`, so a match always contains one. Left
+        // as a total function rather than an index that would panic if a future
+        // pattern relaxed that — the cost is one arm, the alternative is a
+        // crash in the credential scanner.
         None => "•••".to_owned(),
     }
 }
@@ -333,6 +349,8 @@ fn mask_assignment(value: &str) -> String {
 fn mask_email(value: &str) -> String {
     match value.rfind('@') {
         Some(at) => format!("•••{}", &value[at..]),
+        // Unreachable today for the same reason: the only `PersonalData`
+        // pattern mandates `@`. Kept for the same reason too.
         None => "•••".to_owned(),
     }
 }
@@ -610,6 +628,12 @@ and again: {token}
             "GitHub token",
             "ghp_A1b2C3d4E5f6G7h8I9j0",
             "ghp_\u{2026}",
+            "A1b2",
+        ),
+        (
+            "GitHub fine-grained token",
+            "github_pat_A1b2C3d4E5f6G7h8I9j0K",
+            "github_pat_\u{2026}",
             "A1b2",
         ),
         (

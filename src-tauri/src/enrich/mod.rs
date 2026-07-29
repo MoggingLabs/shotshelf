@@ -5,14 +5,21 @@
 //! from, whether it is safe to send — is knowable locally and is not written
 //! down anywhere. This module works it out.
 //!
-//! Two things follow from doing it here rather than anywhere else. Shotshelf
-//! is the last purely local step before a capture goes somewhere, which is the
-//! only place a credential warning can still help. And it is the only thing
-//! that sees the *stream* of captures rather than one file, which is what
-//! makes "these two are a before and an after" answerable at all.
+//! Why here rather than anywhere else: Shotshelf is the last purely local step
+//! before a capture goes somewhere, which is the only place a credential
+//! warning can still help.
 //!
-//! Nothing here is on the critical path. A capture appears on the shelf the
-//! moment it lands; enrichment catches up and fills it in.
+//! Two claims that used to head this paragraph were wrong. It does *not* see
+//! a stream of captures — `describe` takes one path — and before/after lives
+//! in `imaging/compare.rs`, driven from `edit.rs`.
+//!
+//! And *most* of this is off the critical path, not all of it. `describe` runs
+//! after the capture is on the shelf and fills the card in behind it. But
+//! `foreground::current` is called synchronously by `catch/mod.rs` while the
+//! `Capture` is built, ten lines before the event is emitted — deliberately,
+//! because the window in front is only knowable at that instant, and that file
+//! argues the point. On Windows that is `GetForegroundWindow` plus two process
+//! calls before the shelf sees anything.
 
 pub mod foreground;
 pub mod ocr;

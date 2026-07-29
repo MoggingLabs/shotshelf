@@ -10,7 +10,15 @@ edition = "2021"
 [lib]
 # Tauri v2 keeps the app in a library so the binary stays a one-line entry point.
 name = "shotshelf_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+#
+# `rlib` only. The Tauri template ships `["staticlib", "cdylib", "rlib"]` for
+# its mobile targets, and this project has none: no `gen/apple`, no
+# `gen/android`, no mobile entry point, and `main.rs` links the rlib. The
+# other two were built by every `cargo build` in the gate for nothing —
+# a 1.45 GB static archive and a DLL that nothing loads. They were also the
+# red herring `webview_path.rs` spent a paragraph retracting. Add them back
+# with the mobile target that needs them, not before.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
