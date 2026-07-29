@@ -51,9 +51,42 @@ fn is_opened() -> bool {
 /// Each one stands the launch dismissal down, so the four-second appearance had
 /// no way to put itself away and stayed on screen — an always-on-top window,
 /// until dismissed by hand — contradicting its own contract.
+/// The events the front end listens for, and what their payloads mean.
+///
+/// `tests/harness/tauri-mock.ts` has to emit what this module emits, and it
+/// carried a hand-written copy: first `null` where this sends a boolean — so
+/// every browser test modelled a deliberate open as the launch appearance —
+/// and then a hard-coded `true` under a comment asserting what Rust does.
+/// Nothing joined the two, so inverting the emit below passed clippy and every
+/// Rust test while making each tray, hotkey and editor-restore open dismiss
+/// itself after four seconds and the launch appearance stay up for good.
+///
+/// `tests/fixtures/window-events.json` is the join, the same shape as
+/// `engine-starting.json` and `secret-kinds.json`, and a test on each side
+/// reads it.
+///
+/// The honest limit: this pins the *names* and *which payload means what*.
+/// Neither side can observe the other's emit, so an inverted expression at the
+/// call site is still only caught by a person.
+const OPENED_EVENT: &str = "shelf://opened";
+/// …and the one for the window going down.
+const HIDDEN_EVENT: &str = "shelf://hidden";
+
+#[cfg(test)]
+const WINDOW_EVENTS: &str = include_str!("../../tests/fixtures/window-events.json");
+
+/// `deliberate` is false for the one appearance nobody asked for: the launch.
+///
+/// The front end owns the shape, and it cannot tell the two apart on its own —
+/// `open` is the same function for the tray, the hotkey and the launch. It used
+/// `shelf://opened` and the focus that comes with it as proof that "the user
+/// asked for this", and both of those are emitted *by the launch open itself*.
+/// Each one stood the launch dismissal down, so the four-second appearance had
+/// no way to put itself away and stayed on screen — an always-on-top window,
+/// until dismissed by hand — contradicting its own contract.
 fn mark_opened<R: Runtime>(shelf: &WebviewWindow<R>, deliberate: bool) {
     set_opened(true);
-    let _ = shelf.emit("shelf://opened", deliberate);
+    let _ = shelf.emit(OPENED_EVENT, deliberate);
 }
 
 /// How far the popover sits from the corner it rests in.
@@ -256,7 +289,7 @@ pub fn hide<R: Runtime>(app: &AppHandle<R>) {
     // from the tray icon, the tray menu or the hotkey never passes through it.
     // Without this it goes on believing the shelf is open and files every later
     // capture away silently instead of popping the column.
-    let _ = shelf.emit("shelf://hidden", ());
+    let _ = shelf.emit(HIDDEN_EVENT, ());
 
     // Hiding the window alone leaves macOS treating Shotshelf as the active
     // app, so the app you were actually using does not get its focus back.
@@ -389,6 +422,36 @@ pub fn preview_shelf<R: Runtime>(app: AppHandle<R>, aspect: f64) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_window_events_match_what_the_browser_harness_expects() {
+        // Both halves of the open event: the name, and which payload means
+        // "the user asked for this".
+        let shared: serde_json::Value =
+            serde_json::from_str(WINDOW_EVENTS).expect("the shared fixture parses");
+
+        assert_eq!(shared["opened"].as_str(), Some(OPENED_EVENT));
+        assert_eq!(shared["hidden"].as_str(), Some(HIDDEN_EVENT));
+
+        // `mark_opened` passes `deliberate` straight through, so these are the
+        // two values it can emit. Written as the booleans rather than derived,
+        // because deriving them from the same expression the code uses would be
+        // the tautology this repo keeps finding.
+        assert_eq!(shared["deliberate"].as_bool(), Some(true));
+        assert_eq!(shared["launch"].as_bool(), Some(false));
+
+        // The other two events cross the same boundary and had the same gap:
+        // a constant on the Rust side that only its own file reads, and a
+        // hard-coded string in `main.ts`. Renaming `capture://new` leaves the
+        // front end's `listen` *succeeding* — so `subscribe` reports nothing —
+        // and no capture ever reaches the shelf. Silent, total, every gate
+        // green, since no browser test can reach Rust.
+        assert_eq!(
+            shared["capture"].as_str(),
+            Some(crate::catch::CAPTURE_EVENT)
+        );
+        assert_eq!(shared["update"].as_str(), Some(crate::update::UPDATE_EVENT));
+    }
+
     use super::*;
 
     #[test]

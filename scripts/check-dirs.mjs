@@ -121,9 +121,25 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
   // definition, and it was briefly used for the parent of every **pinned**
   // capture. `pinned.json` is hand-editable and two commands let the webview
   // write it, so one edited path opened a whole directory for the session —
-  // `Scope` only ever adds. The fix was `allow_file`; this keeps it that way by
-  // holding `allow_directory` to the four modules whose grants are folders by
-  // design.
+  // `Scope` only ever adds. The fix was `allow_file`, and this keeps it that
+  // way by holding `allow_directory` to the modules whose grants are folders
+  // by design — the set below, no count here.
+  //
+  // Two limits, both real, and `clippy.toml` now carries this rule as a
+  // `disallowed-methods` entry because of the second one.
+  //
+  // First: this matches the *spelling* `.allow_directory(`, so
+  // `tauri::scope::fs::Scope::allow_directory(&scope, …)` walks past it — a
+  // reviewer did exactly that, and it is the third spelling-matched rule in
+  // this file to be bypassed that way. Clippy resolves the path instead, and
+  // the three legitimate granters carry a named `#[allow]` at the call.
+  //
+  // Second: the exemption here is per *file*, which is the reason
+  // `webview_path::allow_reading_pinned` lives where it does: while that
+  // function sat in `src-tauri/src/catch/mod.rs`, which is exempt for
+  // `allow_reading_captures`, this check could not see it and the escalation
+  // re-landed with every gate green. A reviewer proved exactly that. A module
+  // wanting a directory grant now has to join the set, in a diff.
   if (source.includes(".allow_directory(") && !DIRECTORY_GRANTERS.has(normalised)) {
     problems.push(
       `  ${normalised}: calls \`allow_directory\`, which opens every file beside ` +
@@ -152,5 +168,7 @@ if (problems.length > 0) {
 
 console.info(
   `Checked that only ${OWNER} resolves a data root, ` +
-    `and only ${ROAMING_CALLER} reaches the roaming one.`,
+    `only ${ROAMING_CALLER} reaches the roaming one, ` +
+    `and that no module outside ${[...DIRECTORY_GRANTERS].length} named ones ` +
+    `opens a directory to the webview.`,
 );

@@ -20,7 +20,8 @@
  * could only be reached by driving a browser.
  *
  * The one invariant worth stating out loud: `#release` is the single way a
- * capture leaves. Both routes out — the × and falling off the end of a limit —
+ * capture leaves. All three routes out — the ×, the item cap, and the retention
+ * sweep —
  * have to forget the card and clean up a recording's cached poster frame, and
  * when that cleanup lived in one caller instead of here, every recording that
  * aged out leaked its frame forever.
@@ -230,7 +231,12 @@ export class Shelf {
     void this.#savePins();
   }
 
-  /** The single way a capture leaves. Both routes out clean up identically. */
+  /**
+   * The single way a capture leaves. All three routes out clean up identically:
+   * the ×, the item cap, and the retention sweep — the last being the one the
+   * standing requirements care about most, and the one both of these sentences
+   * used to omit while saying "both".
+   */
   #release(item: ShelfItem): void {
     this.#view.release(item.id);
     // A capture leaving takes its quick look with it. Deleting the picked
@@ -656,9 +662,18 @@ export class Shelf {
     void this.#savePins();
   }
 
-  /** Pins are the only shelf state worth surviving a restart. */
+  /**
+   * Pins are the only shelf state worth surviving a restart, so a failed write
+   * is worth saying out loud.
+   *
+   * Silence here meant the star lit and the pin was gone at the next launch,
+   * with the reason only in a console the user cannot see.
+   */
   #savePins(): Promise<void> {
-    return persistPinned(this.#store.pinned());
+    return persistPinned(this.#store.pinned()).catch((error: unknown) => {
+      this.#options.onProblem("That pin could not be saved. It will not survive a restart.");
+      throw error instanceof Error ? error : new Error(String(error));
+    });
   }
 
   // ── Dragging out ───────────────────────────────────────────────────────

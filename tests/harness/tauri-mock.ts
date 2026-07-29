@@ -116,7 +116,24 @@ declare global {
  * Installed into the page. Kept as one self-contained function with no imports
  * so it can be serialised across to the browser.
  */
-export function installTauriMock(): void {
+/** The half of `window-events.json` this mock needs, passed in by the caller. */
+export interface WindowEvents {
+  opened: string;
+  hidden: string;
+  deliberate: boolean;
+}
+
+/**
+ * Taken as an argument rather than imported.
+ *
+ * This function is serialised into the page by `addInitScript`, so nothing it
+ * closes over survives — which is why the event names and the "deliberate"
+ * payload used to be written out here by hand. They drifted twice: `null` where
+ * Rust sends a boolean, then a hard-coded `true` under a comment asserting what
+ * Rust does, with nothing joining the two. The caller reads
+ * `tests/fixtures/window-events.json`, which a Rust test also reads.
+ */
+export function installTauriMock(EVENTS: WindowEvents): void {
   const calls: { cmd: string; args: Record<string, unknown> }[] = [];
   const callbacks = new Map<number, (payload: unknown) => void>();
   const listeners = new Map<string, number[]>();
@@ -287,12 +304,12 @@ export function installTauriMock(): void {
       // and nothing in the suite pinned the payload in either direction.
       if ((cmd === "show_shelf" && named["focus"] === true) || cmd === "preview_shelf") {
         queueMicrotask(() => {
-          emitTo("shelf://opened", true);
+          emitTo(EVENTS.opened, EVENTS.deliberate);
         });
       }
       if (cmd === "hide_shelf") {
         queueMicrotask(() => {
-          emitTo("shelf://hidden", null);
+          emitTo(EVENTS.hidden, null);
         });
       }
     }

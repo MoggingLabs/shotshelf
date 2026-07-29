@@ -72,6 +72,17 @@ async function describeVideo(tile: HTMLElement, item: ShelfItem): Promise<void> 
     details = await videoDetails(item.path);
   } catch (error) {
     console.error("[shotshelf] could not read that recording", error);
+    // A missing file gets the ⚠ an image already gets.
+    //
+    // Rust distinguishes the two: `webview_path::existing_file` answers
+    // "…is no longer on disk", while anything else is a recording that is there
+    // but unreadable — no ffmpeg, an unsupported container. Both used to end
+    // here and be discarded, so `docs/USAGE.md`'s "⚠ means the file has been
+    // moved or deleted" was true of images only, and a recording that had gone
+    // was distinguishable from a healthy one solely by an empty size badge.
+    if (String(error).includes("no longer on disk")) {
+      replaceThumb(tile, glyphThumb("alert", "missing"), null);
+    }
     return;
   }
 

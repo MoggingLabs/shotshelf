@@ -8,7 +8,7 @@
 //! and SECURITY.md's promise that nothing a capture touches leaves the machine
 //! rests on that.
 //!
-//! One module rather than seven call sites, because the rule was written out
+//! One module rather than a call site per consumer, because the rule was written out
 //! four times in four modules, each pointing at the others, and held by four
 //! people remembering four docstrings. It also lives here rather than in
 //! `cache.rs`, whose header says everything in it is re-derivable and safe to

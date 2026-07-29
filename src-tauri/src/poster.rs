@@ -60,6 +60,8 @@ pub fn prune_cache<R: Runtime>(app: &AppHandle<R>) {
 pub fn allow_reading_posters<R: Runtime>(app: &AppHandle<R>) {
     match poster_dir(app) {
         Ok(dir) => {
+            // A cache Shotshelf writes itself; the folder is the unit.
+            #[allow(clippy::disallowed_methods)]
             if let Err(err) = app.asset_protocol_scope().allow_directory(&dir, false) {
                 crate::diag::warn(&format!("poster frames will not display: {err}"));
             }

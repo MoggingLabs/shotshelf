@@ -495,56 +495,6 @@ fn as_ms(at: SystemTime) -> u64 {
     })
 }
 
-/// Let the webview read the captures a restart is about to put back.
-///
-/// Called synchronously from `setup`, before the engine starts on its worker,
-/// and that timing is the whole point. The webview is created *before* `setup`
-/// runs; `settings::load` and `app.manage` complete a few statements in, so
-/// `get_settings` can be answered and `restorePinned` builds tiles immediately.
-/// The grant those tiles need, however, is inside `catch::start` — which is on
-/// `spawn_blocking` precisely because resolving watch folders can take
-/// multi-second SMB round trips on a redirected profile.
-///
-/// Lose that race and the failure is permanent, not transient: `tile.ts` binds
-/// its `error` handler `{ once: true }` and swaps in the "file has gone"
-/// warning, and `ShelfView` reuses that node on every later render. The user
-/// sees ⚠ against files that are present, which `docs/USAGE.md` defines as
-/// "moved or deleted since it was caught". `describe_capture` fails the same
-/// scope check, so the card also reads as never scanned for credentials.
-///
-/// Each pinned file by name — `allow_file`, never `allow_directory`.
-///
-/// The distinction is the whole security of this function. `pinned.json` is
-/// hand-editable, and `set_pinned` and `set_settings` both let the webview
-/// write it; `allowed_pins` keeps any path that merely parses as absolute. So
-/// this list is *webview-supplied and persisted*, which is exactly the input
-/// `webview_path.rs` describes the scope as containing.
-///
-/// An earlier version granted each pin's **parent directory**, and
-/// `allow_directory(p, false)` admits `p/*` — every file beside it. One
-/// hand-edited path, or one session run with `SHOTSHELF_WATCH_DIRS` pointed at
-/// a client folder, would have opened that whole directory to `describe_capture`
-/// (OCR and credential scanning), `copy_capture`, `prepare_drag` and
-/// `convertFileSrc` — for the rest of the session, since `Scope` only ever
-/// adds. That is the escalation the scope exists to prevent, reintroduced by
-/// the fix for a rendering race.
-///
-/// `allow_file` grants the one path and nothing beside it, which is all a tile
-/// needs, and the engine's own directory grant follows for everything watched.
-pub fn allow_reading_pinned<R: Runtime>(app: &AppHandle<R>, pinned: &[PathBuf]) {
-    let scope = app.asset_protocol_scope();
-
-    for path in pinned {
-        if let Err(err) = scope.allow_file(path) {
-            // The path is not logged: `diag.rs` forbids a capture's directory,
-            // and a pinned capture's folder is not a watch folder.
-            crate::diag::warn(&format!(
-                "a pinned capture may not show until the catch engine is up: {err}"
-            ));
-        }
-    }
-}
-
 /// Let the webview render captures straight off disk.
 ///
 /// The asset protocol is scoped shut by default, and the scope has to be
@@ -558,10 +508,17 @@ fn allow_reading_captures<R: Runtime>(app: &AppHandle<R>, dirs: &[PathBuf]) {
 
     let clipboard = clipboard::capture_dir(app);
     for dir in dirs.iter().chain(clipboard.iter()) {
+        // The watch list and the clipboard folder: whole folders whose contents
+        // are captures by definition, which is the one shape this grant fits.
+        #[allow(clippy::disallowed_methods)]
         if let Err(err) = scope.allow_directory(dir, false) {
+            // Watch folders may be logged — `diag.rs` names them as one of the
+            // two permitted kinds — but this list also carries the clipboard
+            // capture directory, which is a capture's own folder and is not.
+            // Twenty lines up, `allow_reading_pinned` refuses to log its path
+            // citing that rule; this one printed it.
             crate::diag::warn(&format!(
-                "the shelf will not be able to show captures from {}: {err}",
-                dir.display()
+                "the shelf will not be able to show captures from one of its                  watch folders: {err}"
             ));
         }
     }
@@ -616,7 +573,7 @@ pub const STARTING: &str = "the catch engine is still starting";
 /// One string in three hand-maintained copies across two languages, with
 /// nothing joining them: this constant, `main.ts`'s `includes("still starting")`
 /// and the e2e harness's own copy of the message. Rewording this alone left
-/// every gate green — clippy, 129 Rust tests, 118 browser tests — while in the
+/// every gate green — clippy, the whole suite — while in the
 /// real app `main.ts`'s `transient` predicate would answer `false` on the first
 /// reply, so both catch commands fail immediately and every launch reports
 /// "Shotshelf could not reach its catch engine" on a healthy machine. That is
@@ -883,7 +840,7 @@ mod tests {
     fn a_scan_admits_only_what_the_watcher_would_admit() {
         // Against `scan` itself, not against `is_partial` in isolation.
         //
-        // Deleting both guards from `scan` left all 116 tests green: the rule
+        // Deleting both guards from `scan` left the whole suite green: the rule
         // was tested in `folders.rs` and nothing checked that `scan` still
         // called it. That is verbatim the criticism `edit.rs` levels at its own
         // former test — "splitting the sanitiser out and testing that was not

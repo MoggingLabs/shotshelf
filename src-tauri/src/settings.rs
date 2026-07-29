@@ -122,7 +122,7 @@ impl SettingsStore {
     }
 
     /// Narrower edit for the pin toggle, which the settings surface never touches.
-    pub fn set_pinned(&self, pinned: Vec<PinnedItem>) {
+    pub fn set_pinned(&self, pinned: Vec<PinnedItem>) -> Result<(), String> {
         // Through the same function `sanitise` uses. This path skips
         // `sanitise` entirely, which is how a rule applied on the settings
         // surface could miss the pin toggle — and did.
@@ -131,7 +131,7 @@ impl SettingsStore {
             current.pinned = allowed_pins(pinned);
         }
         // Only the local file: a pin toggle changes nothing in the preferences.
-        self.persist_local();
+        self.persist_local()
     }
 
     /// The newest capture the shelf has been told about, in Unix ms.
@@ -167,18 +167,30 @@ impl SettingsStore {
             }
             *newest = ts;
         }
-        self.persist_local();
+        // Discarded on purpose: this is the watermark being written after a
+        // capture landed, which nobody is watching. `persist_local` has already
+        // logged the reason, and the cost of a failure here is that a relaunch
+        // re-offers captures it has seen — an annoyance, not a loss.
+        let _ = self.persist_local();
     }
 
     /// Write the local file — pins and the watermark — and nothing else.
-    fn persist_local(&self) {
+    /// Returns whether the write happened.
+    ///
+    /// It used to only warn to the log, which is right for a background write
+    /// and wrong for one the user just asked for and is watching: on a full disk
+    /// or a read-only profile the star lit, nothing was said, and the pin was
+    /// gone at the next launch. The log line stays — it is the diagnosis — and
+    /// the caller now has something to act on.
+    fn persist_local(&self) -> Result<(), String> {
         let local = LocalState {
             pinned: self.lock().pinned.clone(),
             last_capture_ms: self.last_capture_ms(),
         };
-        if let Err(err) = write(&self.pins, &local) {
+        write(&self.pins, &local).map_err(|err| {
             crate::diag::warn(&format!("could not save pins: {err}"));
-        }
+            format!("Those pins could not be saved: {err}")
+        })
     }
 
     /// Write both files.
@@ -197,7 +209,9 @@ impl SettingsStore {
         if let Err(err) = write(&self.path, &preferences) {
             crate::diag::warn(&format!("could not save settings: {err}"));
         }
-        self.persist_local();
+        // Both files are written here; the pins half is the same background
+        // write as above and its failure is already logged.
+        let _ = self.persist_local();
     }
 
     fn lock(&self) -> MutexGuard<'_, Settings> {
@@ -807,7 +821,7 @@ mod tests {
 
     #[test]
     fn the_capture_watermark_only_ever_moves_forward() {
-        // Deleting the `ts <= *newest` guard left all 116 tests green, while
+        // Deleting the `ts <= *newest` guard left the whole suite green, while
         // the docstring calls it the thing that stops the shelf "re-offering
         // everything in between on the next launch".
         //
@@ -898,7 +912,9 @@ mod tests {
         // like no write at all, so put a gap either side of the call.
         std::thread::sleep(std::time::Duration::from_millis(20));
 
-        store.set_pinned(vec![pin(&secret)]);
+        store
+            .set_pinned(vec![pin(&secret)])
+            .expect("the pins write succeeds");
 
         assert_eq!(
             stamp(&roaming),
@@ -1152,6 +1168,14 @@ pub fn set_settings<R: Runtime>(
 }
 
 #[tauri::command]
-pub fn set_pinned(store: tauri::State<'_, SettingsStore>, pinned: Vec<PinnedItem>) {
-    store.set_pinned(pinned);
+/// Reports a failed write rather than swallowing it.
+///
+/// This returned `()`, so `invoke("set_pinned", …)` could not reject: on a full
+/// disk the star lit, the panel said nothing, and the pin was gone at the next
+/// launch — against `docs/USAGE.md`'s promise that pins survive a restart.
+pub fn set_pinned(
+    store: tauri::State<'_, SettingsStore>,
+    pinned: Vec<PinnedItem>,
+) -> Result<(), String> {
+    store.set_pinned(pinned)
 }

@@ -43,6 +43,20 @@ disallowed-methods = [
   # promises cannot happen. Clippy resolves the path, so the alias is the same
   # function.
   { path = "shotshelf_lib::dirs::preferences", reason = "the roaming profile: only `settings.rs` may, and only for settings" },
+  # Opening a folder to the webview, rather than a file.
+  #
+  # `allow_directory(p, false)` admits `p` *and* `p/*`. That is right for the
+  # watch list and the two caches Shotshelf writes, and wrong everywhere else —
+  # a pinned-capture grant that used it was a shipped escalation.
+  #
+  # `check-dirs.mjs` has the rule too, but matches the text `.allow_directory(`,
+  # and a reviewer walked past it with
+  # `tauri::scope::fs::Scope::allow_directory(&scope, &dir, false)` — the third
+  # time a spelling-matched rule in that script has been bypassed this way.
+  # Clippy resolves the path, so UFCS and aliases are the same call. The three
+  # legitimate granters carry a named `#[allow]`, which makes each one a
+  # decision in a diff rather than an entry in a list.
+  { path = "tauri::scope::fs::Scope::allow_directory", reason = "opens every file beside the one named; grant `allow_file` unless the folder itself is the unit" },
 ]
 
 disallowed-types = [

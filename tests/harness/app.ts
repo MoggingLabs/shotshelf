@@ -16,6 +16,20 @@ import { expect, type Page, test as base } from "@playwright/test";
 
 import type { Settings } from "../../src/settings.ts";
 import { installTauriMock } from "./tauri-mock.ts";
+import windowEvents from "../fixtures/window-events.json" with { type: "json" };
+
+/**
+ * The event names and payloads Rust emits, read rather than restated.
+ *
+ * `src-tauri/src/window.rs` asserts its own constants against this same file,
+ * so a rename on either side fails a test instead of silently detaching the
+ * front end from the events it listens for.
+ */
+const WINDOW_EVENTS = {
+  opened: windowEvents.opened,
+  hidden: windowEvents.hidden,
+  deliberate: windowEvents.deliberate,
+};
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 
@@ -119,7 +133,7 @@ export async function bootShelf(page: Page, options: BootOptions = {}): Promise<
     window.__shotshelfStubs__ = { get_settings: seed, ...existing };
   }, { ...DEFAULT_SETTINGS, ...options.settings });
 
-  await page.addInitScript(installTauriMock);
+  await page.addInitScript(installTauriMock, WINDOW_EVENTS);
   await serveFixtures(page);
   await page.goto("/");
   await expect(page.locator(".shelf")).toBeVisible();

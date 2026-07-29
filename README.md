@@ -133,7 +133,7 @@ macos-latest and ubuntu-latest**:
 | Gate | What it catches |
 | :-- | :-- |
 | `npm run lint` | ESLint with type-aware rules — floating promises, unchecked IPC |
-| `npm run deadcode` | knip; every registered Tauri command has a caller and every invoked one is registered; every backticked file and `module::item` in a comment resolves; only `dirs.rs` resolves a data root and only `settings.rs` reaches the roaming one |
+| `npm run deadcode` | knip; every registered Tauri command has a caller and every invoked one is registered; every backticked file and `module::item` in a comment resolves; only `dirs.rs` resolves a data root, only `settings.rs` reaches the roaming one, and only three named modules open a *directory* to the webview |
 | `npm run test:unit` | the pure rules, in Node with no browser |
 | `npm run build` | `tsc --noEmit` over `src` **and** `tests`, then the bundle |
 | `npm run test:e2e` | the real front-end in a browser with the Tauri runtime stubbed |
@@ -309,7 +309,9 @@ numbers that were wrong. `webview_path::existing_file` consults
 exactly this scope before Rust reads any capture.
 A static scope in `tauri.conf.json` could not express the macOS location, which is only known
 after `defaults read` has run, nor a `SHOTSHELF_WATCH_DIRS` override. The asset URL differs by
-platform (`http://asset.localhost/…` on Windows, `asset://localhost/…` on macOS);
+platform (`http://asset.localhost/…` on Windows, `asset://localhost/…` on macOS **and
+Linux** — Tauri's own helper branches on Windows and Android, so everything else takes the
+second form);
 `convertFileSrc` picks the right one and the CSP allows both.
 
 ## 📦 Releasing

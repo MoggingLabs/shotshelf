@@ -1,8 +1,15 @@
 /**
  * The settings surface.
  *
- * Deliberately small: where the shelf sits, how long captures stay, and the
- * shortcut that summons it. Everything lives in a local JSON file — no
+ * Deliberately small, and this is the whole list: how long captures stay, how
+ * many the shelf holds, whether copies are downscaled on the way out, and the
+ * shortcut that summons it.
+ *
+ * "Where the shelf sits" used to head that sentence. No field has held it
+ * since the shelf became a popover that parks itself in a corner —
+ * `settings.rs` retracted the identical phrase on the Rust side, and the
+ * correction did not reach the module that actually *is* the settings
+ * surface. Everything lives in a local JSON file — no
  * accounts, no sync, nothing leaves the device.
  */
 
@@ -160,10 +167,19 @@ export async function persistPinned(pinned: PinnedItem[]): Promise<void> {
   }
 
   current = { ...current, pinned };
+  // Rethrown, not only logged.
+  //
+  // `set_pinned` used to return `()` on the Rust side, so this could never
+  // reject and the `catch` was decoration: on a full disk or a read-only
+  // profile the star lit, nothing was said, and the pin was gone at the next
+  // launch — against the promise that pins are the one thing that survives a
+  // restart. The console line stays for the diagnosis; the caller decides what
+  // the user is told.
   try {
     await invoke("set_pinned", { pinned });
   } catch (error) {
     console.error("[shotshelf] could not save pinned captures", error);
+    throw error instanceof Error ? error : new Error(String(error));
   }
 }
 

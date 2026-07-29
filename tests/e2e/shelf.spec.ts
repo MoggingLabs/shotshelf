@@ -554,3 +554,23 @@ test("Escape in the settings panel closes the panel, not the shelf", async ({ pa
   await page.keyboard.press("Escape");
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(1);
 });
+
+test("a pin that could not be saved says so instead of lighting the star in silence", async ({
+  page,
+}) => {
+  // `set_pinned` returned `()` on the Rust side, so `invoke` could never
+  // reject: on a full disk or a read-only profile the star lit, the panel said
+  // nothing, and the pin was gone at the next launch — against the promise that
+  // pins are the one thing that survives a restart.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await page.evaluate(() =>
+    window.__shotshelf__.reject("set_pinned", "Those pins could not be saved: no space left"),
+  );
+
+  await page.locator(".tile").hover();
+  await page.locator(".tile__action--pin").click();
+
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+  await expect(page.locator("#shelf-alert")).toContainText(/could not be saved/i);
+});

@@ -1,0 +1,8 @@
+{
+  "opened": "shelf://opened",
+  "hidden": "shelf://hidden",
+  "capture": "capture://new",
+  "update": "update://available",
+  "deliberate": true,
+  "launch": false
+}

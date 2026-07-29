@@ -60,7 +60,8 @@ pub fn absolute(path: &str) -> Result<PathBuf, String> {
 /// those and nothing else. Rust had no such limit, which meant any file on the
 /// machine could be read and credential-scanned, put on the clipboard, or
 /// handed to the OS as a drag payload, by asking for it by name. It also
-/// persisted: `set_pinned` writes paths to `settings.json`, and they are
+/// persisted: `set_pinned` writes paths to `pinned.json` — the local file, never
+/// the roaming preferences one, which is the whole point of the split — and they are
 /// restored and re-scanned at the next launch.
 ///
 /// Reusing the asset scope rather than inventing a second list is the point.
@@ -115,6 +116,50 @@ pub fn read_capture(path: &Path) -> std::io::Result<Vec<u8>> {
     // metadata call and here.
     file.take(MAX_CAPTURE_BYTES).read_to_end(&mut bytes)?;
     Ok(bytes)
+}
+
+/// Let the webview read the captures a restart is about to put back.
+///
+/// **Here, and not in `catch/mod.rs`, for a gate-shaped reason.**
+///
+/// `check-dirs.mjs` holds `allow_directory` — which opens `p` *and* `p/*` — to
+/// the three modules whose grants are folders by design, and `catch/mod.rs` is
+/// one of them because `allow_reading_captures` legitimately grants the watch
+/// list. That exemption is per *file*, so while this function lived there the
+/// gate written to keep it on `allow_file` could not see it: restoring the
+/// parent-directory grant that was round 22's blocker passed the script, knip,
+/// clippy and every test. A reviewer proved it by re-landing exactly that.
+///
+/// This module grants nothing by directory and never will, so the rule holds
+/// here by construction rather than by an allowlist entry. It is also where the
+/// scope invariant is stated, which is the better home regardless.
+///
+/// Each pinned file by name. `pinned.json` is hand-editable, and `set_pinned`
+/// and `set_settings` both let the webview write it, so this list is
+/// webview-supplied and persisted — exactly the input this module's header
+/// describes the scope as containing. One hand-edited path granted by directory
+/// would open that whole folder to OCR, credential scanning, the clipboard and
+/// drag payloads for the session, since Tauri's scope only ever adds.
+///
+/// Called synchronously from `setup`, before the catch engine starts on its
+/// worker, and that timing is the point. The webview is created *before*
+/// `setup` runs, `settings::load` completes a few statements in, and
+/// `restorePinned` builds tiles at once — while the engine's own grant is
+/// behind `spawn_blocking` because resolving watch folders can take
+/// multi-second SMB round trips. Losing that race is permanent, not transient:
+/// the image `error` handler is `{ once: true }` and the view reuses the node,
+/// so a present file reads as "the file has gone" for the whole session.
+pub fn allow_reading_pinned<R: Runtime>(app: &AppHandle<R>, pinned: &[PathBuf]) {
+    let scope = app.asset_protocol_scope();
+
+    for path in pinned {
+        if let Err(err) = scope.allow_file(path) {
+            // The path is not logged: `diag.rs` forbids a capture's directory.
+            crate::diag::warn(&format!(
+                "a pinned capture may not show until the catch engine is up: {err}"
+            ));
+        }
+    }
 }
 
 #[cfg(test)]

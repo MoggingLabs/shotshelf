@@ -115,7 +115,7 @@ pub fn run() {
             // Without this the tiles a restart puts back can render as "the file
             // has gone" for files that are present, and permanently — the image
             // `error` handler is `{ once: true }`.
-            catch::allow_reading_pinned(
+            webview_path::allow_reading_pinned(
                 app.handle(),
                 &current
                     .pinned

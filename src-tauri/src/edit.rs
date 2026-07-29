@@ -44,6 +44,8 @@ pub fn allow_reading_edits<R: Runtime>(app: &AppHandle<R>) {
     let Ok(dir) = edits_dir(app) else {
         return;
     };
+    // The user's own saved edits; the folder is the unit.
+    #[allow(clippy::disallowed_methods)]
     if let Err(err) = app.asset_protocol_scope().allow_directory(&dir, false) {
         crate::diag::warn(&format!("saved edits may not display ({err})"));
     }
