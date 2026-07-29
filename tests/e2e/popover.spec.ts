@@ -243,3 +243,27 @@ test("a capture arriving in a shelf you opened does not reshape it", async ({ pa
   await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "browse");
   await expect(page.locator(".tile")).toHaveCount(1);
 });
+
+test("a window the user restored does not put itself away", async ({ page }) => {
+  // The harness used to emit `shelf://opened` with `null` where Rust emits a
+  // boolean, so every browser test modelled a deliberate open as the launch
+  // appearance: the front end kept its four-second dismissal armed and a window
+  // the user had just opened dismissed itself. Nothing pinned the payload, so
+  // the harness's model of this contract was unconstrained and wrong.
+  //
+  // Driven through the command the editor uses to restore its window, so this
+  // fails if the payload regresses on either side.
+  await page.clock.install();
+  await bootShelf(page);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  // Through the stubbed Tauri entry point the app itself uses, so the mock's
+  // emit runs — emitting the event directly would bypass the very code under
+  // test.
+  await page.evaluate(
+    () => void window.__TAURI_INTERNALS__.invoke("show_shelf", { focus: true }),
+  );
+  await page.clock.runFor(5_000);
+
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+});

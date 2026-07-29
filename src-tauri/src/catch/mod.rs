@@ -848,11 +848,20 @@ mod tests {
             next_launch.iter().map(|c| &c.path).collect::<Vec<_>>(),
         );
 
-        // Specifically the newest, not the last element: the list is handed
-        // over oldest-first, so taking the tail would leave the watermark
-        // behind and re-offer the newest capture on every launch, for ever.
-        let tail = chosen.last().expect("something was chosen").ts;
-        assert!(newest >= tail);
+        // No further assertion here, and that is deliberate.
+        //
+        // Two have been tried and both were tautologies. `newest ==
+        // chosen.iter().map(|c| c.ts).max()` is `newest_of` compared to itself.
+        // `newest >= chosen.last().ts` reads as though it guards against taking
+        // the tail — but the list is handed over oldest-first, so the last
+        // element *is* the maximum, and it reduces to `max >= max`. Its comment
+        // named the wrong element as the danger too.
+        //
+        // The real mistake is `first()`, which parks the watermark on the
+        // oldest capture in the batch so everything newer comes again on every
+        // launch, for ever — and the re-run above catches exactly that: with
+        // `first()`, feeding the watermark back returns the rest of the batch
+        // instead of nothing. Verified by mutation, both ways.
 
         // And a launch with nothing to bring back must not move it at all —
         // moving it forward on an empty answer would skip captures taken

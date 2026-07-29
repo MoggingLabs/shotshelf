@@ -273,9 +273,21 @@ export function installTauriMock(): void {
     // spec hanging `preview_shelf` still saw the window report itself opened
     // and tested a state the real app cannot reach.
     if (answer.succeeded) {
+      // `true`, not `null`, and the payload is the contract.
+      //
+      // Rust's `mark_opened` carries a `deliberate` flag, and both of these
+      // routes pass `true`: `show_shelf { focus: true }` is the tray, the
+      // hotkey or the editor restoring its window, and `preview_shelf` is a
+      // quick look. Only the launch appearance sends `false`.
+      //
+      // Emitting `null` made every browser test model a deliberate open as the
+      // launch — so the front end left its four-second dismissal timer armed,
+      // and a window the user had just opened put itself away. A probe driving
+      // `browseShelf()` and advancing the clock five seconds saw `hide_shelf`,
+      // and nothing in the suite pinned the payload in either direction.
       if ((cmd === "show_shelf" && named["focus"] === true) || cmd === "preview_shelf") {
         queueMicrotask(() => {
-          emitTo("shelf://opened", null);
+          emitTo("shelf://opened", true);
         });
       }
       if (cmd === "hide_shelf") {

@@ -10,8 +10,9 @@
 # imports too.
 #
 # `BaseDirectory` is listed as a disallowed *type* rather than left to the
-# script. The script matches the literal text `BaseDirectory::`, which one
-# import alias defeats:
+# script. The script matched the literal text `BaseDirectory::`, which one
+# import alias defeated — it matches the bare name now, and catches this too,
+# but clippy is the one that resolves the path rather than the spelling:
 #
 #     use tauri::path::BaseDirectory as Roaming;
 #     app.path().resolve("pinned.json", Roaming::AppData)

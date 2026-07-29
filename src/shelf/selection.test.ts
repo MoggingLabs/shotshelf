@@ -194,10 +194,25 @@ test("the keyboard leaves a card that is unpicked or swept away", () => {
   assert.equal(swept.focus(), "a", "nor on one that left the shelf");
 });
 
-test("focus falls back to the last picked when there is no anchor", () => {
-  const selection = new Selection();
-  selection.toggle("a");
-  selection.toggle("c");
+test("the keyboard has nowhere to be when nothing is picked", () => {
+  // The only state in which `focus()` is undefined, and the reason it needs no
+  // fallback: every path that clears the cursor sets it to the last remaining
+  // pick *after* the deletion, so an undefined cursor means an empty set.
+  //
+  // This test used to be called "focus falls back to the last picked when there
+  // is no anchor" and did `toggle("a"); toggle("c")` — which leaves both an
+  // anchor and a cursor at `c`, so it held identically for all three
+  // implementations the docstring above says must be told apart.
+  const empty = new Selection();
+  assert.equal(empty.focus(), undefined);
 
-  assert.equal(selection.focus(), "c");
+  const cleared = new Selection();
+  cleared.toggle("a");
+  cleared.toggle("a");
+  assert.equal(cleared.focus(), undefined, "unpicking the last one empties it");
+
+  const swept = new Selection();
+  swept.toggle("a");
+  swept.retain([]);
+  assert.equal(swept.focus(), undefined, "so does the retention sweep");
 });

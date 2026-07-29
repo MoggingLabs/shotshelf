@@ -51,7 +51,15 @@ export class Selection {
    * that is right at both ends.
    */
   focus(): string | undefined {
-    return this.#cursor ?? [...this.#picked].pop();
+    // No fallback: `#cursor` is undefined only when nothing is picked.
+    //
+    // It used to end `?? [...this.#picked].pop()`, which could never run. Every
+    // place that clears the cursor — `clear`, the remove branch of `toggle`,
+    // `retain` — assigns the last remaining pick *after* the deletion, so
+    // `#cursor === undefined` implies `#picked` is empty and the fallback
+    // returned `undefined` too. Removing it also removed a false reading: that
+    // the cursor is merely a hint over the picked set, when it is the answer.
+    return this.#cursor;
   }
 
   has(id: string): boolean {
