@@ -45,14 +45,17 @@ tokens visible on screen, private messages. Shotshelf's core privacy guarantee:
   `scripts/check-dirs.mjs` and `src-tauri/clippy.toml` both refuse to let another module
   resolve a root for itself.
 
-  There is also no "capture index" and there are no thumbnail files: cards render from the
-  capture itself through `convertFileSrc`.
+  There is also no "capture index" and there are no thumbnail files **for images**: those cards
+  render from the capture itself through `convertFileSrc`. A recording cannot be drawn that
+  way, so one poster frame per recording is written to the cache and the card renders that —
+  which the next paragraph lists, and which this sentence used to contradict.
 
   Shotshelf does write picture data derived from your captures, in four places, and an earlier
   version of this sentence said poster frames were the only one — which `docs/USAGE.md` had
   already contradicted. They are: video poster frames (`posters`), the downscaled copies made
   for hand-off while "Send smaller copies" is on (`handoff`), saved edits and comparisons
-  (`edits`), and a single `video-drag-preview.png`. All are on the local device, none roam, and
+  (`edits`), and a single `video-drag-preview.png` — which is the bundled app icon written
+  out verbatim, so no capture data reaches it; three of the four are derived, not four. All are on the local device, none roam, and
   the first two are caches Shotshelf prunes; the third is your own work and is never pruned.
 - Any change that would introduce a network call touching captures is a privacy regression and will
   be rejected.

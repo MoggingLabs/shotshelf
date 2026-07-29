@@ -283,7 +283,7 @@ async fn run_ffmpeg<R: Runtime>(
         stderr
     };
 
-    match tokio::time::timeout(FRAME_TIMEOUT, collect).await {
+    match tokio::time::timeout(crate::limits::FRAME_TIMEOUT, collect).await {
         Ok(stderr) => Ok(parse_duration(&String::from_utf8_lossy(&stderr))),
         Err(_) => {
             // Killed and then given a moment to actually die. `kill` only
@@ -296,9 +296,6 @@ async fn run_ffmpeg<R: Runtime>(
         }
     }
 }
-
-/// How long one frame grab may take before it is given up on.
-const FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// How many recordings may be decoded at once — see `limits::FRAMES`, which
 /// holds this bound beside the other two so the set can be read together.

@@ -150,29 +150,26 @@ pub async fn describe_capture<R: Runtime>(
     // silently dead for the session. Held out here, the permit is released the
     // moment this returns, and the cost of a wedge is one leaked thread rather
     // than a feature that never works again.
-    let permit = scan_limit()
-        .clone()
-        .acquire_owned()
-        .await
-        .map_err(|err| err.to_string())?;
-
+    // Through the shared helper, which is what `limits.rs` says it is for.
+    //
+    // This was a fourth hand-written copy of the same acquire / spawn / timeout
+    // / release shape — and `limits.rs`'s header names *this* function as the
+    // reasoning the other three were converted from, while it stayed a copy
+    // itself. Byte-for-byte the same but for the error string, so it also
+    // carried its own chance of getting the permit release wrong.
     let for_worker = source.clone();
-    // A blocking worker rather than the async runtime that also serves the
-    // shelf's other commands.
-    let worker =
-        tauri::async_runtime::spawn_blocking(move || Findings::from(enrich::describe(&for_worker)));
-
-    let findings = match tokio::time::timeout(SCAN_TIMEOUT, worker).await {
-        Ok(joined) => joined.map_err(|err| err.to_string())?,
-        Err(_) => {
-            drop(permit);
-            return Err(format!(
-                "reading {} took too long",
-                source.file_name().unwrap_or_default().to_string_lossy()
-            ));
-        }
-    };
-    drop(permit);
+    let named = source
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let findings = crate::limits::under_limit(
+        scan_limit().clone(),
+        crate::limits::SCAN_TIMEOUT,
+        &named,
+        move || Findings::from(enrich::describe(&for_worker)),
+    )
+    .await?;
 
     if let Ok(mut cache) = scan_cache().lock() {
         // Bounded: a shelf that has seen thousands of captures in one session
@@ -189,14 +186,6 @@ pub async fn describe_capture<R: Runtime>(
 /// How many scans to remember before starting over.
 const SCAN_CACHE_LIMIT: usize = 500;
 
-/// How long one capture may be read for before the caller gives up on it.
-///
-/// Generous: OCR on a dense 4K screenshot is genuinely slow. It exists so a
-/// recogniser that never returns costs one tile rather than the feature.
-const SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-
-/// How long one sizing job may run before the caller gives up on it.
-///
 /// Identity of a capture's *contents*, through `cache::Version`.
 ///
 /// The same answer the hand-off and poster caches key on, rather than a third

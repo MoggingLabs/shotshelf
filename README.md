@@ -75,8 +75,10 @@ Per our standing rule, we don't rewrite what exists. Research found **no forkabl
 that auto-catches screenshots** — every one that does (Dropover, FlowShelf) is closed-source macOS-only,
 which is exactly our opening. So we **build the combination**, but **adopt** the hard parts:
 `tauri-plugin-drag`/`drag-rs` (drag-out), `notify` + `tauri-plugin-clipboard` (capture detection), and
-bundled ffmpeg (video thumbnails). We **interoperate** with ShareX rather than fork it (watch its output
-folder).
+bundled ffmpeg (video thumbnails). We **interoperate** with capture tools rather than fork
+them — by watching folders, hooking nothing. ShareX's default output folder is not among the ones
+watched by default, so a ShareX user points `SHOTSHELF_WATCH_DIRS` at it or changes ShareX's
+output; naming it as though it worked untouched was wrong.
 
 ## 🚀 Run it
 
@@ -404,8 +406,10 @@ already-installed apps.
 
 Screenshots and recordings routinely contain sensitive material (client data, tokens on screen).
 Shotshelf is **local-only**: no cloud, no telemetry, no upload. There are no thumbnail files and
-no capture index — cards render from the capture itself. Shotshelf does write picture data of
-its own in four places, all local and all listed in [USAGE](./docs/USAGE.md): video poster
+no capture index — image cards render from the capture itself, and a recording renders the one
+poster frame Shotshelf extracts for it. Shotshelf does write picture data
+of its own, all local and all listed in [USAGE](./docs/USAGE.md) — including `clipboard/`, which
+holds captures caught off the clipboard and is the *only* copy of those: video poster
 frames, the downscaled copies made for hand-off when "Send smaller copies" is on, saved edits
 and comparisons, and one drag-preview image. Settings live in two JSON files, and the one
 naming captures is kept out of the roaming profile on purpose. See [SECURITY.md](./SECURITY.md). This repo never contains real captures.

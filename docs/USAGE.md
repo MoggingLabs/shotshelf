@@ -123,7 +123,9 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
 - **Copy** — for apps that take a paste but refuse a file drop. Images go on the clipboard as
   pixels, recordings as a file reference.
 - **Pin** (the star) — pinned captures ignore the retention window and the item limit, and are
-  the only ones still on the shelf after a restart. A pinned tile keeps its star showing.
+  the only ones kept **indefinitely** across a restart. A relaunch also brings back up to twenty
+  *unpinned* captures from the previous 24 hours, which is a different thing — see
+  Troubleshooting. A pinned tile keeps its star showing.
 - **Remove** (the cross) — takes it off the shelf. **It never deletes the file.**
 - **Pick several** — click one, then ctrl-click (⌘-click) others, or shift-click for a range.
   Dragging any one of them carries them all, oldest first.

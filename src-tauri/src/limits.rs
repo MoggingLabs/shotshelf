@@ -55,6 +55,19 @@ pub fn shared(cell: &'static OnceLock<Arc<Semaphore>>, permits: usize) -> &'stat
 // operation with no sharing in it at all, and `edit.rs` reached into the share
 // module to get at it. That import was the tell.
 
+/// How long a credential scan may take before its permit is given back.
+///
+/// Generous: OCR on a dense 4K screenshot is genuinely slow. It exists so a
+/// recogniser that never returns costs one tile rather than the feature.
+///
+/// Beside the pool it guards, like the other two. `limits.rs`'s own argument —
+/// that reading these apart is what let one of them be forgotten — applied to
+/// the deadlines as much as the pools, and only one of the three was here.
+pub(crate) const SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// How long a poster frame may take.
+pub(crate) const FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// How long a single sizing job may take before its permit is given back.
 ///
 /// Generous — a Lanczos3 resize of a 4K screenshot is real work, and a
@@ -94,7 +107,7 @@ where
 /// property that was wrong at all three call sites, and stating it needs a job
 /// that never finishes and a deadline measured in milliseconds rather than the
 /// real minute.
-async fn under_limit<T, W>(
+pub(crate) async fn under_limit<T, W>(
     limit: std::sync::Arc<tokio::sync::Semaphore>,
     deadline: std::time::Duration,
     what: &str,

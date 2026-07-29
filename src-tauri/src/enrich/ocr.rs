@@ -109,8 +109,8 @@ mod platform {
         // unscanned with no indication why.
         //
         // The blast radius was every non-PNG capture: `catch::kind_of` accepts
-        // jpg, jpeg, gif, bmp and webp, and ShareX — which this app watches for
-        // on purpose — writes JPEG by default. A credential warning that
+        // jpg, jpeg, gif, bmp and webp, and plenty of capture tools write
+        // JPEG by default. A credential warning that
         // quietly does not run on four of five accepted formats is worse than
         // one that is switched off, because the card still looks checked.
         let bitmap = BitmapDecoder::CreateAsync(&stream)?
