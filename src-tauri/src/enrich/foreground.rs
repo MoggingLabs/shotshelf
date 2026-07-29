@@ -123,16 +123,48 @@ fn tidy(raw: &str) -> Option<String> {
 
 /// Control and formatting characters that have no business in a label.
 ///
-/// The C0/C1 controls, the bidirectional overrides and isolates, and the
-/// zero-width joiners and spaces.
+/// Two threats, and the ranges are grouped by which one they answer.
+///
+/// **Reordering.** A right-to-left override makes the rest of the string
+/// render backwards, so `Notes\u{202E}gnp.tnuocca` reads as `Notes account.png`
+/// on screen. Every character that can do this is here: the marks, the
+/// embeddings, the overrides and the isolates.
+///
+/// **Invisibility.** A zero-width space hides a join inside a word, so two
+/// labels that render identically are different strings.
+///
+/// The earlier version listed four ranges chosen from memory and described
+/// itself as "the bidirectional overrides and isolates" while omitting
+/// U+061C — an Arabic letter mark, a bidi control of exactly the kind the
+/// sentence claimed to cover — along with U+206A-U+206F and the tag block.
+/// `char::is_control()` does not cover any of them: they are category `Cf`,
+/// not `Cc`, so `is_control` returns false for every one.
+///
+/// The honest limit: this is a list, and Unicode adds format characters. It is
+/// the complete set of `Cf` and invisible characters in the planes a window
+/// title realistically carries, and the test below names individual hostile
+/// characters rather than re-asking this predicate, so a range going missing
+/// is a failure rather than a tautology.
 fn is_display_noise(c: char) -> bool {
     c.is_control()
         || matches!(c,
-            '\u{200B}'..='\u{200F}'
-                | '\u{202A}'..='\u{202E}'
-                | '\u{2060}'..='\u{2064}'
-                | '\u{2066}'..='\u{2069}'
-                | '\u{FEFF}')
+            // Invisible on their own, in ascending order.
+            '\u{00AD}'                  // soft hyphen
+                | '\u{034F}'            // combining grapheme joiner
+                | '\u{061C}'            // Arabic letter mark — a bidi control
+                | '\u{115F}'..='\u{1160}' // Hangul choseong/jungseong fillers
+                | '\u{17B4}'..='\u{17B5}' // Khmer inherent vowels
+                | '\u{180B}'..='\u{180F}' // Mongolian selectors and separator
+                | '\u{200B}'..='\u{200F}' // zero-width set, LRM, RLM
+                | '\u{202A}'..='\u{202E}' // embeddings and overrides
+                | '\u{2060}'..='\u{206F}' // joiners, isolates, deprecated formats
+                | '\u{3164}'            // Hangul filler
+                | '\u{FEFF}'            // byte-order mark
+                | '\u{FFA0}'            // halfwidth Hangul filler
+                | '\u{FFF9}'..='\u{FFFB}' // interlinear annotation
+                | '\u{1BCA0}'..='\u{1BCA3}' // shorthand format controls
+                | '\u{1D173}'..='\u{1D17A}' // musical beam/slur formats
+                | '\u{E0000}'..='\u{E0FFF}') // tags and variation selectors
 }
 
 #[cfg(target_os = "windows")]
@@ -299,16 +331,49 @@ mod tests {
         assert_eq!(tidy(""), None);
     }
 
+    /// Characters a hostile window title would actually use, each named.
+    ///
+    /// Not `is_display_noise` re-applied to its own output. That assertion —
+    /// "no character in the result satisfies the predicate" — is true by
+    /// construction for *any* predicate, because `tidy` maps exactly what the
+    /// predicate matches. Deleting the whole `matches!` arm left it passing
+    /// with U+202E and U+200B rendering in the card, since both are category
+    /// `Cf` and `char::is_control()` is false for them.
+    ///
+    /// A literal list cannot do that: each entry fails on its own if the range
+    /// covering it is dropped.
+    const HOSTILE: &[(char, &str)] = &[
+        ('\u{202E}', "right-to-left override"),
+        ('\u{202D}', "left-to-right override"),
+        ('\u{2066}', "left-to-right isolate"),
+        ('\u{2069}', "pop directional isolate"),
+        ('\u{200E}', "left-to-right mark"),
+        ('\u{061C}', "Arabic letter mark"),
+        ('\u{200B}', "zero-width space"),
+        ('\u{200D}', "zero-width joiner"),
+        ('\u{00AD}', "soft hyphen"),
+        ('\u{180E}', "Mongolian vowel separator"),
+        ('\u{2064}', "invisible plus"),
+        ('\u{206A}', "inhibit symmetric swapping"),
+        ('\u{3164}', "Hangul filler"),
+        ('\u{FEFF}', "byte-order mark"),
+        ('\u{E0041}', "tag latin capital A"),
+    ];
+
     #[test]
     fn a_title_cannot_smuggle_bidi_or_zero_width_characters_into_the_ui() {
         // A window title is chosen by whatever program is in front, and this
         // one renders in Shotshelf's own card and tooltip. U+202E reverses
         // everything after it on screen; U+200B hides a join inside a word.
-        let spoofed = tidy("Notes\u{202E}gnp.tnuocca\u{200B}drac").expect("a label");
-        assert!(
-            !spoofed.chars().any(is_display_noise),
-            "control characters survived: {spoofed:?}",
-        );
+        for (hostile, name) in HOSTILE {
+            let title = format!("Notes{hostile}gnp.tnuocca");
+            let label = tidy(&title).unwrap_or_else(|| panic!("{name} ate the whole label"));
+            assert!(
+                !label.contains(*hostile),
+                "{name} (U+{:04X}) survived into {label:?}",
+                *hostile as u32,
+            );
+        }
 
         // And the words either side are still words.
         assert_eq!(

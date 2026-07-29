@@ -189,31 +189,29 @@ async function trackCount(page: import("@playwright/test").Page): Promise<number
     });
 }
 
-test("the alert strip is not hidden by the column shape when an overlay is up", async ({
+test("a failure is readable in the peeked column, where the failures happen", async ({
   page,
 }) => {
-  // The second lock on a door `window::preview` now closes. The column shape
-  // hides the alert strip as furniture you did not ask for — but an editor's
-  // failed save is reported there, and the editor's own docstring calls that
-  // the one failure that must never be quiet. Reached directly, because the
-  // state it guards is meant to be unreachable through the app.
+  // The column shape used to `display: none` this strip as "furniture you did
+  // not ask for", with one hole cut in it for the editor overlay. Every other
+  // message stayed painted out — including the drag failure, and the peeked
+  // column is the primary drag surface. So the report most likely to be needed
+  // was hidden in exactly the mode where it would be raised.
+  //
+  // Asserted with `toBeVisible`, not `toContainText`: text is present in a
+  // `display: none` element too, which is why the e2e drag test passed
+  // throughout. This one fails if the shape rule ever comes back.
   await bootShelf(page);
   await land(page, FIXTURE.wide);
   await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
 
-  // Nothing on the overlay: the strip stays out of the way, as intended.
-  await page.evaluate(() => {
-    document.querySelector("#shelf-alert")?.removeAttribute("hidden");
-  });
-  await expect(page.locator("#shelf-alert")).toBeHidden();
+  // Through a real `say()` path — the app's own update notice — rather than by
+  // un-hiding the element by hand. Setting the attribute directly would test
+  // the CSS against a state the app never produces.
+  await page.evaluate(() => window.__shotshelf__.emit("update://available", "0.3.0"));
 
-  // Something on the overlay: the strip has to come back.
-  await page.evaluate(() => {
-    const frame = document.createElement("div");
-    frame.className = "editor";
-    document.querySelector("#shelf-overlay")?.append(frame);
-  });
   await expect(page.locator("#shelf-alert")).toBeVisible();
+  await expect(page.locator("#shelf-alert")).toContainText("0.3.0");
 });
 
 test("the CSS mirrors the card metrics the column window is sized against", async ({ page }) => {

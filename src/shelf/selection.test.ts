@@ -23,12 +23,21 @@ test("toggling adds and removes without disturbing the rest", () => {
   assert.deepEqual(selection.ids(), ["b"]);
 });
 
-test("captures are handed over in the order they were picked", () => {
+test("ids() is pick order, which is not handover order", () => {
   const selection = new Selection();
   selection.toggle("c");
   selection.toggle("a");
 
-  // A before and an after are only useful the right way round.
+  // Pick order, and *only* pick order. This test used to be called "captures
+  // are handed over in the order they were picked", which is the exact belief
+  // `inHandoverOrder` was written to correct: reading this list as a before/an
+  // after handed the pair over backwards whenever the user picked the newer
+  // capture first, or dragged a range upwards. Naming it that way here put the
+  // trap back into the file that removed it, one test above the one that
+  // documents why it is a trap.
+  //
+  // What `ids()` guarantees is insertion order of a set — useful for "which
+  // are lit", useless for "which is the before".
   assert.deepEqual(selection.ids(), ["c", "a"]);
 });
 

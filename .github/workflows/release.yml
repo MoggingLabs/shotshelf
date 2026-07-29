@@ -45,6 +45,37 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The tag is the fourth place the version is written, and the only one
+      # outside the repo.
+      #
+      # `src/version.test.ts` joins the three in-repo literals to each other and
+      # is blind to this one, so `git tag v0.2.0` on a tree at 0.1.0 built
+      # artifacts named `Shotshelf_0.1.0_…` under a `0.2.0` release. An operator
+      # following README's manifest example then publishes a `0.2.0` URL that
+      # 404s for every Windows client — or points it at the 0.1.0 file, in which
+      # case `{{current_version}}` never advances and the update is re-offered
+      # for ever.
+      #
+      # Compared against `tauri.conf.json` alone, deliberately: that is the
+      # literal the bundle is named with, and the unit test already guarantees
+      # the other two agree with it. Checking all three here would be a second
+      # copy of a rule that has an owner.
+      #
+      # Before the gate, because it costs a second and the gate costs minutes.
+      - name: Check the tag matches the shipping version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          shipping=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          tagged="${GITHUB_REF_NAME#v}"
+          if [ "$shipping" != "$tagged" ]; then
+            echo "::error::tag $GITHUB_REF_NAME ships version $shipping." \
+                 "Bump tauri.conf.json (and let src/version.test.ts check the rest)," \
+                 "or retag."
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME matches the shipping version $shipping."
+
       - uses: actions/setup-node@v7
         with:
           node-version: 22

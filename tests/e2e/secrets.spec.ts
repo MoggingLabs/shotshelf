@@ -135,9 +135,16 @@ test("a capture that cannot be read is marked unread, not warned about", async (
   // nothing either, because a bare card claims to have been checked.
   await expect(page.locator(".tile__unscanned")).toBeVisible();
   await expect(page.locator(".tile__secret")).toHaveCount(0);
-  // No alert strip: the absence of a warning has never meant "safe", and
-  // saying so on every capture would train people to ignore it.
-  await expect(page.locator("#shelf-alert")).toBeHidden();
+  // Nothing about *this* on the alert strip: the absence of a warning has
+  // never meant "safe", and saying so on every capture would train people to
+  // ignore it.
+  //
+  // Asserted on the text, not on the element's visibility. `toBeHidden` passed
+  // for the wrong reason — the column shape used to `display: none` the strip
+  // outright, so this held even while the strip carried "No capture folders
+  // are being watched", which the boot genuinely says. One shared element
+  // cannot answer "did *this* feature stay quiet" by being invisible.
+  await expect(page.locator("#shelf-alert")).not.toContainText(/secret|credential|scan/i);
 });
 
 test("recordings are not scanned", async ({ page }) => {

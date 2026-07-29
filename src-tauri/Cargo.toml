@@ -44,10 +44,20 @@ tauri-plugin-single-instance = "2"                                # one shelf, o
 notify = "8"
 notify-debouncer-full = "0.7"
 
-# Pixel work: downscaling a capture for hand-off, and diffing a before
-# against an after. Default features off — the formats
-# Shotshelf actually meets are PNG, JPEG and WebP, and pulling in the rest
-# costs compile time for decoders nothing will ever call.
+# Pixel work: downscaling a capture for hand-off, and diffing a before against
+# an after.
+#
+# The narrowing is a statement of intent, not an effective one, and saying so
+# here is the point: `tauri` itself depends on `image` with default features,
+# and Cargo unifies features across the graph, so `cargo tree -f "{p} | {f}"`
+# resolves the full default set — avif, bmp, gif, tiff and the rest — however
+# this line is written. The compile time is paid either way.
+#
+# Kept because it is the correct declaration of what Shotshelf meets (PNG, JPEG
+# and WebP) and it becomes effective the day Tauri narrows its own. The claim it
+# used to make — that this saved compile time for decoders nothing calls — was
+# measurably false, and it is worth knowing that `imaging::load` will in fact
+# decode considerably more than these three.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 
 # Secret detection over recognised text. Hand-rolling this many patterns would

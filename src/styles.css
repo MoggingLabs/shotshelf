@@ -86,20 +86,25 @@ body {
   display: none;
 }
 
-/* The alert strip is furniture the column does not want either — *unless*
-   something is on the overlay.
+/* The alert strip is deliberately NOT hidden here, and that is the whole rule:
+   nothing about the column's shape decides whether a failure gets read.
 
-   A failed save is reported here, and the editor's own docstring calls that the
-   one failure that must never be quiet. Hiding the strip by shape meant the
-   message was written correctly and painted out of existence, after the redact
-   tool had already destroyed pixels the user believed were saved.
+   There used to be a `display: none` on this element in column mode, with an
+   `:has(.shelf__overlay:not(:empty))` hole cut in it so the editor's save
+   failures survived. That hole was cut for the one case someone noticed, and
+   the cases nobody noticed stayed painted out — including the drag failure,
+   whose whole reason for existing (`shelf/drag.ts`) is the user who "presses,
+   drags, drops, and nothing happens at all". The peeked column is the *primary*
+   drag surface: a capture lands, it peeks, and grabbing it right then is the
+   product. So the one message that most needed saying was hidden in exactly the
+   mode where it would be said.
 
-   `window::preview` now puts the shelf into the browse shape, so this state
-   should be unreachable; this is the second lock on the same door, because
-   losing that message is not a failure worth being clever about. */
-.shelf[data-mode="column"]:not(:has(.shelf__overlay:not(:empty))) .shelf__alert {
-  display: none;
-}
+   The root cause was two owners for one decision. `status.ts::say` and `hush`
+   already decide whether there is anything to read, and express it by setting
+   and clearing the `hidden` attribute — the strip has no content at any other
+   time. Restating that decision in CSS, keyed on a *layout* question, gave the
+   two rules room to disagree, and they did. There is now one owner. Adding a
+   second hole would have been a third. */
 
 /* Horizontal padding matches the browse view exactly, so a card comes out the
    same width in both shapes — which is the whole point of the column. */

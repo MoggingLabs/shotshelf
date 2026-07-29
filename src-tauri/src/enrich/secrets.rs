@@ -180,8 +180,23 @@ static PATTERNS: LazyLock<Vec<Pattern>> = LazyLock::new(|| {
 /// The most findings one capture will report.
 ///
 /// A screenshot of a contact list is thousands of distinct addresses, and the
-/// whole list crosses IPC and becomes a tooltip. Past a handful the warning
-/// has already made its point.
+/// whole list crosses IPC and becomes a tooltip. Past a handful the warning has
+/// already made its point.
+///
+/// What this bounds, precisely: the IPC payload and the tooltip. It is applied
+/// after the scan, so the working set during the scan is *not* bounded by it —
+/// `seen` holds one owned copy of every distinct raw match, which for that
+/// contact list is every address on screen at once, in the module written to
+/// stop those values spreading.
+///
+/// Left that way on purpose rather than by oversight. Truncating during the
+/// loop would bound it, but findings are ordered worst-first *after*
+/// collection, so stopping early would let fifty email addresses hide a private
+/// key found further down — trading a bounded allocation for a missed
+/// credential. The real bound is the length of the recognised text, which is
+/// itself bounded on Linux by `ocr::MAX_TEXT`; on Windows and macOS it is
+/// whatever the platform recogniser returns, in practice tens of kilobytes.
+/// `regex` is linear, so there is no hang either way.
 const MAX_FINDINGS: usize = 50;
 
 /// Scan recognised text for anything worth a second look.
@@ -380,22 +395,44 @@ and again: {token}
             serde_json::from_str(include_str!("../../../tests/fixtures/secret-kinds.json"))
                 .expect("the shared kinds fixture parses");
 
-        let ours: Vec<String> = [
+        // Exhaustive by the compiler. The list used to be a bare array
+        // literal, so a sixth variant was simply absent from it: the array
+        // agreed with the fixture, the fixture agreed with TypeScript, and the
+        // new kind rendered with no CSS rule at all — which is the exact
+        // failure the comment above describes, left open by the test written
+        // to close it.
+        //
+        // The `match` is what makes that impossible: adding a variant stops
+        // this compiling until it is named here, and naming it here fails the
+        // assertion until the shared fixture and the TypeScript union agree.
+        let all = [
             SecretKind::PrivateKey,
             SecretKind::ServiceToken,
             SecretKind::Jwt,
             SecretKind::Assignment,
             SecretKind::PersonalData,
-        ]
-        .iter()
-        .map(|kind| {
-            serde_json::to_value(kind)
-                .expect("a kind serialises")
-                .as_str()
-                .expect("as a string")
-                .to_owned()
-        })
-        .collect();
+        ];
+        for kind in all {
+            // No wildcard arm — that is the whole mechanism.
+            match kind {
+                SecretKind::PrivateKey
+                | SecretKind::ServiceToken
+                | SecretKind::Jwt
+                | SecretKind::Assignment
+                | SecretKind::PersonalData => {}
+            }
+        }
+
+        let ours: Vec<String> = all
+            .iter()
+            .map(|kind| {
+                serde_json::to_value(kind)
+                    .expect("a kind serialises")
+                    .as_str()
+                    .expect("as a string")
+                    .to_owned()
+            })
+            .collect();
 
         assert_eq!(
             ours, expected,
@@ -523,34 +560,110 @@ and again: {token}
         assert!(!masked.contains("someone"));
     }
 
+    /// One sample per shipped pattern, and the **exact** preview it may
+    /// produce.
+    ///
+    /// Joined to `PATTERNS` by label, and asserted in both directions, because
+    /// the previous version of this test carried its own copy of each `marker`
+    /// and so could only ever agree with itself. Every `marker` is a
+    /// credential-disclosure decision — `mask_prefix` shows exactly that many
+    /// characters, verbatim — and the shipped table had ten of them with one
+    /// covered end to end. Raising `"Google API key"` from 4 to 30 would have
+    /// put thirty characters of a live key into the card tooltip with every
+    /// gate green, in the module whose stated rule is that a finding never
+    /// repeats the secret.
+    ///
+    /// Exact equality, not `!contains(…)`: a containment check passes for any
+    /// marker that happens to stop before the fixture's chosen tail, so it
+    /// tests the fixture rather than the rule.
+    const SAMPLES: &[(&str, &str, &str)] = &[
+        (
+            "private key",
+            "-----BEGIN RSA PRIVATE KEY-----",
+            "-----BEGIN\u{2026}",
+        ),
+        ("GitHub token", "ghp_A1b2C3d4E5f6G7h8I9j0", "ghp_\u{2026}"),
+        (
+            "OpenAI or Anthropic API key",
+            "sk-ant-A1b2C3d4E5f6G7h8",
+            "sk-\u{2026}",
+        ),
+        ("AWS access key ID", "AKIAIOSFODNN7EXAMPLE", "AKIA\u{2026}"),
+        (
+            "Google API key",
+            // Exactly 35 characters after `AIza`, which is what the pattern
+            // requires — a sample two characters long matched nothing, and the
+            // test said so rather than passing on an empty result.
+            "AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
+            "AIza\u{2026}",
+        ),
+        ("Slack token", "xoxb-A1b2C3d4E5f6G7h8", "xoxb-\u{2026}"),
+        (
+            "Stripe secret key",
+            "sk_live_A1b2C3d4E5f6G7h8",
+            "sk_\u{2026}",
+        ),
+        (
+            "signed token",
+            "eyJhbGciOiJI.eyJzdWIiOiIx.SflKxwRJSMeK",
+            "eyJ\u{2026}",
+        ),
+        (
+            "secret in a config value",
+            "API_KEY=A1b2C3d4E5f6",
+            "API_KEY=\u{2022}\u{2022}\u{2022}",
+        ),
+        (
+            "email address",
+            "someone@example.com",
+            "\u{2022}\u{2022}\u{2022}@example.com",
+        ),
+    ];
+
     #[test]
-    fn every_kind_is_masked_by_a_rule_that_names_it_without_showing_it() {
-        for (kind, value, marker, must_not_contain) in [
-            (
-                SecretKind::Assignment,
-                "SECRET_TOKEN=abcdefghijkl",
-                0,
-                "abcdefgh",
-            ),
-            (
-                SecretKind::PersonalData,
-                "first.last@corp.example",
-                0,
-                "first.last",
-            ),
-            // Four is `AKIA`; anything past it is the credential, and a fixed
-            // seven used to show three characters of it.
-            (
-                SecretKind::ServiceToken,
-                "AKIAIOSFODNN7EXAMPLE",
-                4,
-                "IOSFODNN",
-            ),
-        ] {
-            let masked = mask(kind, value, marker);
+    fn every_shipped_pattern_has_a_sample_and_no_sample_is_stale() {
+        // The coverage half. Without it, adding an eleventh pattern — the way
+        // every one of the ten arrived — silently adds an unverified
+        // disclosure decision, and the test below still passes.
+        for pattern in PATTERNS.iter() {
             assert!(
-                !masked.contains(must_not_contain),
-                "{kind:?} leaked {must_not_contain} in {masked}",
+                SAMPLES.iter().any(|(label, ..)| *label == pattern.label),
+                "no sample covers the shipped pattern {:?}",
+                pattern.label,
+            );
+        }
+        for (label, ..) in SAMPLES {
+            assert!(
+                PATTERNS.iter().any(|pattern| pattern.label == *label),
+                "sample {label:?} names no shipped pattern",
+            );
+        }
+    }
+
+    #[test]
+    fn no_shipped_pattern_shows_more_than_its_type_marker() {
+        // Through `scan`, not `mask`: the preview a card actually renders is
+        // the product of the pattern's own marker travelling through the whole
+        // pipeline, and only one of the ten was ever checked that far.
+        for (label, sample, expected) in SAMPLES {
+            let findings = scan(sample);
+            let found = findings
+                .iter()
+                .find(|finding| finding.label == *label)
+                .unwrap_or_else(|| panic!("{label:?} did not match its own sample {sample:?}"));
+
+            assert_eq!(
+                found.preview, *expected,
+                "{label:?} previewed {:?} for {sample:?}",
+                found.preview,
+            );
+            // And the belt: whatever the rule, the tail of the credential is
+            // never in the rendered string.
+            let tail: String = sample.chars().rev().take(6).collect();
+            assert!(
+                !found.preview.contains(&tail),
+                "{label:?} leaked the tail of its own sample: {:?}",
+                found.preview,
             );
         }
     }
@@ -582,14 +695,27 @@ and again: {token}
 
     #[test]
     fn scanning_a_wall_of_text_does_not_hang() {
+        // Deliberately seeded. With ordinary prose alone this passed with every
+        // entry in `PATTERNS` deleted — a scanner that matches nothing is very
+        // fast — so it timed an empty loop and called it a performance
+        // guarantee. The seeds make it time the real work.
         // OCR of a dense screenshot can be long, and the catch pipeline is on a
         // deadline. `regex` guarantees linear time; this asserts the wiring.
-        let haystack = "lorem ipsum dolor sit amet ".repeat(20_000);
+        let haystack = SAMPLES
+            .iter()
+            .map(|(_, sample, _)| format!("lorem ipsum {sample} dolor sit amet "))
+            .collect::<String>()
+            .repeat(4_000);
         let started = std::time::Instant::now();
-        let _ = scan(&haystack);
+        let findings = scan(&haystack);
         assert!(
             started.elapsed().as_secs() < 2,
             "scan should be linear in input size"
+        );
+        // And it did the work being timed.
+        assert!(
+            !findings.is_empty(),
+            "the seeded secrets were not scanned for"
         );
     }
 }

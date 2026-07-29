@@ -368,8 +368,23 @@ pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Capture
 fn scan(dirs: &[PathBuf]) -> Vec<(SystemTime, PathBuf, CaptureKind)> {
     let mut found = Vec::new();
     for dir in dirs {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            continue;
+        // The macOS case this exists for: the folder permission prompt was
+        // declined, so `is_dir()` still succeeds, the folder is watched, the
+        // status dot is green — and every read returns `Operation not
+        // permitted`. Backfill then returns nothing, which is
+        // indistinguishable from "no captures were taken", and `docs/USAGE.md`
+        // sends the user to a log that said nothing.
+        let entries = match std::fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(err) => {
+                crate::diag::warn(&format!(
+                    "could not read {} — {err}. On macOS this is usually a \
+                     declined folder-permission prompt; grant it under \
+                     Privacy & Security -> Files and Folders.",
+                    dir.display()
+                ));
+                continue;
+            }
         };
         for entry in entries.flatten() {
             let path = entry.path();

@@ -9,8 +9,11 @@
 //! Shrinking first is therefore free in quality terms and not free in cost
 //! terms, which is an unusually one-sided trade. What is *not* free is
 //! shrinking too far: a screenshot's smallest legible text is often the point
-//! of sending it, so this only ever shrinks, never enlarges, and never crosses
-//! below the ceiling.
+//! of sending it, so this only ever shrinks and never enlarges. A capture past
+//! the ceiling comes out with its long edge *on* the ceiling, give or take the
+//! single rounding in `scale_edge` — it used to land as much as eight pixels
+//! under it, because the resize rounded a second time from the first rounding's
+//! output.
 
 use image::{imageops::FilterType, DynamicImage};
 
@@ -42,7 +45,10 @@ pub fn for_handoff(image: DynamicImage, long_edge: u32) -> Sized {
 
     // Never enlarge. A small capture is small on purpose — a cropped region, a
     // dialog — and upscaling it invents detail that was never there.
-    if longest <= long_edge || longest == 0 {
+    // `longest == 0` was a second clause here and could never be reached:
+    // `0 <= long_edge` holds for every `u32`, so the first one had already
+    // returned.
+    if longest <= long_edge {
         return Sized {
             image,
             resized: false,
@@ -50,13 +56,24 @@ pub fn for_handoff(image: DynamicImage, long_edge: u32) -> Sized {
     }
 
     let scale = f64::from(long_edge) / f64::from(longest);
-    // `resize` preserves aspect ratio within the box it is given, and rounding
-    // up keeps a very wide capture from losing its short edge to zero.
     let target_width = scale_edge(width, scale);
     let target_height = scale_edge(height, scale);
 
+    // `resize_exact`, not `resize`, and the difference is a rounding.
+    //
+    // `resize` treats its arguments as a *box* and re-derives its own ratio as
+    // `min(w/width, h/height)` from the already-rounded pair, then rounds again.
+    // When the short edge rounded down it became the binding one and dragged
+    // the long edge with it: `for_handoff(10000x500, 1568)` produced **1560**x78,
+    // not 1568x78, and the error grows with the aspect ratio. The module header
+    // says a capture is reduced to this long edge, and it was not.
+    //
+    // Both edges here come from one `scale` computed from one long edge, so the
+    // aspect ratio is already preserved to within a pixel — asking `resize` to
+    // preserve it a second time added nothing but the second rounding. One
+    // rounding, in `scale_edge`, which is the function that documents it.
     Sized {
-        image: image.resize(target_width, target_height, FilterType::Lanczos3),
+        image: image.resize_exact(target_width, target_height, FilterType::Lanczos3),
         resized: true,
     }
 }
@@ -65,6 +82,12 @@ pub fn for_handoff(image: DynamicImage, long_edge: u32) -> Sized {
 ///
 /// A 6000x1 panorama scaled by the long edge would otherwise round its height
 /// to zero, and an image with a zero dimension fails to encode.
+///
+/// The floor is `.max(1)`, and `.round()` is round-to-nearest. `for_handoff` used
+/// to credit the guarantee to "rounding up", which this function does not do —
+/// and a test two hundred lines below asserts, correctly, that "the floor is a
+/// floor, not a rounding-up rule". One file, three statements, two of them
+/// agreeing and the third describing a mechanism that was never here.
 fn scale_edge(edge: u32, scale: f64) -> u32 {
     let scaled = (f64::from(edge) * scale).round();
     // `as u32` saturates at zero for negatives and at u32::MAX above the
@@ -96,6 +119,31 @@ mod tests {
 
     fn image(width: u32, height: u32) -> DynamicImage {
         DynamicImage::ImageRgba8(RgbaImage::new(width, height))
+    }
+
+    #[test]
+    fn an_extreme_aspect_ratio_still_lands_on_the_ceiling() {
+        // The long edge is the whole contract of this module, and it was being
+        // missed by up to eight pixels: `resize` re-derived its own ratio from
+        // the already-rounded pair and rounded a second time, so the short edge
+        // rounding down dragged the long edge under the ceiling with it.
+        //
+        // Two ratios where the second rounding used to bite. Every existing
+        // test used dimensions where it happened to cancel.
+        for (width, height) in [(10_000_u32, 500_u32), (3_841, 1_000)] {
+            let sized = for_handoff(
+                DynamicImage::ImageRgba8(image::RgbaImage::new(width, height)),
+                LONG_EDGE,
+            );
+            assert!(sized.resized);
+            assert_eq!(
+                sized.image.width().max(sized.image.height()),
+                LONG_EDGE,
+                "{width}x{height} came out {}x{}",
+                sized.image.width(),
+                sized.image.height(),
+            );
+        }
     }
 
     #[test]

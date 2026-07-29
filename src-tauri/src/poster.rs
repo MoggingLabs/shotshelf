@@ -401,6 +401,47 @@ mod tests {
     }
 
     #[test]
+    fn a_truncated_frame_is_not_a_frame() {
+        // ffmpeg killed on the timeout leaves a non-empty file, and the rename
+        // that follows would cache it under path+mtime for that file's whole
+        // life — a permanently broken thumbnail with no way to retry.
+        //
+        // Named separately because nothing reached this predicate at all: the
+        // two magic bytes could be deleted, leaving a bare length check, with
+        // the suite green. That is the entire difference between "a frame" and
+        // "something was there".
+        // The module idiom: a process-scoped directory under the system temp,
+        // rather than a new dependency for one test.
+        let dir = std::env::temp_dir().join(format!("shotshelf-frame-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a scratch directory");
+
+        let missing = dir.join("absent.jpg");
+        assert!(
+            !has_frame(&missing),
+            "a file that is not there is not a frame"
+        );
+
+        let empty = dir.join("empty.jpg");
+        std::fs::write(&empty, b"").expect("write");
+        assert!(!has_frame(&empty), "an empty file is not a frame");
+
+        // Non-empty, and long enough to pass a length check on its own — this
+        // is what a killed ffmpeg actually leaves behind.
+        let garbage = dir.join("killed.jpg");
+        std::fs::write(&garbage, b"not a jpeg at all").expect("write");
+        assert!(!has_frame(&garbage), "length alone is not the test");
+
+        // The JPEG start-of-image marker, and nothing else about the file is
+        // valid — which is the point: this predicate decides "did ffmpeg begin
+        // writing a JPEG", not "is this a whole image".
+        let real = dir.join("frame.jpg");
+        std::fs::write(&real, [0xFF, 0xD8, 0xFF, 0xE0, 0x00]).expect("write");
+        assert!(has_frame(&real), "a JPEG header is a frame");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn duration_survives_a_round_trip_through_the_cache_name() {
         // The length rides in the filename so a cache hit needs no second
         // ffmpeg run; a mismatch here would silently show the wrong duration.
@@ -434,6 +475,16 @@ mod tests {
         // the life of the cache.
         let key = "0123456789abcdef";
         let prefix = cache_prefix(key);
+
+        // The layout, written out once. Every other assertion in this module
+        // calls `cache_prefix` on both sides of the comparison, which agrees
+        // with itself for *any* implementation: make it return `""` and each
+        // one still passes, because `starts_with("")` is true of every string.
+        // Deleting the discriminator that keeps one capture's sweep off
+        // another's frames was a green change. This is the one place the shape
+        // is stated rather than re-derived.
+        assert_eq!(prefix, "0123456789abcdef_");
+
         assert!(cache_name(key, Some(1)).starts_with(&prefix));
         assert!(cache_name(key, None).starts_with(&prefix));
 

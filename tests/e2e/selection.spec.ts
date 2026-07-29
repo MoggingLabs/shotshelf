@@ -250,9 +250,15 @@ test("a drag that cannot start says so instead of doing nothing", async ({ page 
   // capture deleted after its tile was built: the thumbnail is already loaded,
   // so no `error` event fires and the card shows no warning either. Press,
   // drag, drop — and nothing happens, with the reason only in the console.
+  //
+  // Left in the peeked column deliberately — no `openBrowse`. This test used to
+  // open the browse view first, which proved the report only in the mode where
+  // a drag is least likely; the column shape was hiding the strip outright, so
+  // the fix it was written to prove did not work where it mattered. And it
+  // asserted `toContainText`, which passes on a `display: none` element, so it
+  // stayed green throughout.
   await bootShelf(page);
   await land(page, FIXTURE.wide);
-  await openBrowse(page);
   await page.evaluate(() =>
     window.__shotshelf__.reject("prepare_drag", "that capture is no longer on disk"),
   );
@@ -263,5 +269,6 @@ test("a drag that cannot start says so instead of doing nothing", async ({ page 
   await page.mouse.move(140, 240, { steps: 4 });
   await page.mouse.up();
 
+  await expect(page.locator("#shelf-alert")).toBeVisible();
   await expect(page.locator("#shelf-alert")).toContainText(/could not be dragged out/i);
 });

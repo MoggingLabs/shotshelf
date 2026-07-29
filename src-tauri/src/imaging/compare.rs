@@ -264,7 +264,24 @@ pub fn side_by_side(
 /// check, and then blits out of a canvas far too small. `imaging::load`'s
 /// dimension cap makes it unreachable today; it should not depend on that.
 fn composite_size(before: (u32, u32), after: (u32, u32)) -> Option<(u32, u32)> {
-    let width = u64::from(before.0) + u64::from(GUTTER) + u64::from(after.0);
+    // The right-hand pane is as wide as the **region space**, not as the after
+    // image — `changed_regions` reports boxes in the coordinate space of the
+    // larger of the two, so a region can extend past the after image's own
+    // width whenever the capture shrank.
+    //
+    // Sized to the after image, every such box fell outside the canvas and
+    // `outline` dropped it pixel by pixel, silently. That is not an edge case:
+    // a dialog closing or a window being resized between the two shots is the
+    // ordinary way to produce it, and the vanished strip is usually the single
+    // largest change in the pair. `pixel_changed` marks it correctly — the
+    // `(Some, None)` arm is there for exactly this — and the drawing threw it
+    // away, so the feature's whole output was wrong for half its input space
+    // while its docstring promised "changed areas outlined on the after".
+    //
+    // The extra width is background, which is the honest rendering: the
+    // outline says "this was here and is not any more".
+    let pane = u64::from(before.0.max(after.0));
+    let width = u64::from(before.0) + u64::from(GUTTER) + pane;
     let height = u64::from(before.1.max(after.1));
 
     // Four bytes per pixel. Checked, because at the extremes the product of
@@ -476,13 +493,48 @@ mod tests {
     }
 
     #[test]
+    fn a_capture_that_shrank_still_has_its_lost_area_outlined() {
+        // The whole output of Compare, for half its input space.
+        //
+        // `changed_regions` reports in the coordinate space of the *larger*
+        // image, so when the after is narrower a region can sit past the after
+        // image's own width. The composite was sized to the after image, every
+        // such box fell off the canvas, and `outline` discarded it a pixel at a
+        // time — no warning, no partial mark, just nothing where the largest
+        // change in the pair should be.
+        //
+        // Asserted end to end, through `changed_regions` into `side_by_side`,
+        // because that join was what nothing exercised: each half was tested
+        // and the seam between them was not.
+        let before = filled(64, 32, [255, 0, 0, 255]);
+        let after = filled(32, 32, [255, 0, 0, 255]);
+
+        let regions = changed_regions(&before, &after, Sensitivity::default());
+        assert!(
+            !regions.is_empty(),
+            "the area present only in the before is a change",
+        );
+
+        let sheet = side_by_side(&before, &after, &regions).expect("a small pair fits");
+        let marked = (0..sheet.width())
+            .flat_map(|x| (0..sheet.height()).map(move |y| (x, y)))
+            .filter(|&(x, y)| sheet.get_pixel(x, y) == HIGHLIGHT)
+            .count();
+
+        assert!(marked > 0, "the lost area was outlined nowhere");
+    }
+
+    #[test]
     fn side_by_side_holds_both_captures_and_a_gutter() {
         let before = filled(40, 20, [255, 0, 0, 255]);
         let after = filled(30, 25, [0, 0, 255, 255]);
 
         let sheet = side_by_side(&before, &after, &[]).expect("a small pair fits");
 
-        assert_eq!(sheet.width(), 40 + GUTTER + 30);
+        // The right pane is the region space — `max(40, 30)` — not the after
+        // image's own 30, so a box reported past the after's width still lands
+        // on canvas.
+        assert_eq!(sheet.width(), 40 + GUTTER + 40);
         assert_eq!(sheet.height(), 25, "as tall as the taller of the two");
         assert_eq!(
             sheet.get_pixel(0, 0),

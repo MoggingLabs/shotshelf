@@ -61,7 +61,24 @@ fn settle(candidates: Vec<PathBuf>) -> Vec<PathBuf> {
                 let _ = std::fs::create_dir(dir);
             }
         })
-        .filter(|dir| dir.is_dir())
+        // Said out loud. `docs/USAGE.md` sends the user to `shotshelf.log` to
+        // find out "which folder failed and why" when nothing appears, and
+        // this is one of the two places a folder can vanish from the watch
+        // list — the other is `mod.rs::scan`. Both were silent, so the one
+        // documented diagnostic for the app's central failure printed nothing
+        // at all and the user was told to read an empty answer.
+        //
+        // Not an error: a machine without `~/Desktop` is ordinary, and this
+        // list is candidates rather than requirements. It is written down
+        // because "the folder I expected is not being watched" is otherwise
+        // indistinguishable from "the watcher is broken".
+        .filter(|dir| {
+            let there = dir.is_dir();
+            if !there {
+                crate::diag::info(&format!("not watching {} — no such folder", dir.display()));
+            }
+            there
+        })
         .filter(|dir| seen.insert(dedupe_key(dir)))
         .collect()
 }

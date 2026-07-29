@@ -87,8 +87,16 @@ pub fn load(path: &Path) -> Result<DynamicImage, ImageError> {
     // inherited, and deliberately equals the default: an earlier version set
     // it to 1 GiB, which quietly doubled the protection it was overriding.
     //
-    // `compare_captures` decodes two of these in one blocking task, so the
-    // real ceiling for that command is twice this number.
+    // `compare_captures` is the worst case and it is more than twice this
+    // number, which is what an earlier version of this comment said. It holds
+    // two decoded inputs, plus a composite that `compare.rs` describes as
+    // "larger than both inputs put together" and caps separately at 512 MiB,
+    // plus the encoded PNG on top — so roughly four allocations of this order,
+    // not two. `limits::SIZING` admits two such commands at once.
+    //
+    // Nothing is unbounded: `compare::composite_size` computes in `u64` and
+    // refuses past its own ceiling. The number was simply understated, in the
+    // one place someone would look it up.
     //
     // The dimension cap is generous: an 8K display is 7680 wide, and a
     // stitched or multi-monitor capture is legitimately larger still.

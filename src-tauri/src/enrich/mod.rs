@@ -123,10 +123,18 @@ mod tests {
 
     #[test]
     fn the_findings_that_cross_the_wire_carry_masked_previews_and_no_text() {
-        // `Enrichment` holds the capture's full text; `Findings` is what the
-        // webview gets. This pins that the conversion drops the text and keeps
-        // the masked previews — the split exists for exactly that reason, and
-        // nothing else asserts it.
+        // What actually crosses the wire, asserted as a *shape*.
+        //
+        // The previous version of this comment said "`Enrichment` holds the
+        // capture's full text" — that struct is `{ read, secrets }` and its own
+        // docstring says the recognised text never reaches it — and claimed
+        // "nothing else asserts it" when `secrets.rs` does. It then checked
+        // `!wire.contains("\"text\"")` against a graph that serialises
+        // `{secrets, scanned}` and `{kind, label, preview, severity}`: no edit
+        // to the production code could make that fail.
+        //
+        // The key set can. Adding a field that carries recognised text — the
+        // one mistake this test exists to catch — changes it, and this fails.
         let text = "export GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789";
         let enrichment = Enrichment {
             read: true,
@@ -145,9 +153,31 @@ mod tests {
             !wire.contains("ghp_abcdefghijklmnopqrstuvwxyz0123456789"),
             "the secret's value reached the webview: {wire}",
         );
-        assert!(
-            !wire.contains("\"text\""),
-            "recognised text reached the webview: {wire}"
+        let parsed: serde_json::Value = serde_json::from_str(&wire).expect("valid JSON");
+        let mut keys: Vec<&str> = parsed
+            .as_object()
+            .expect("Findings is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["scanned", "secrets"],
+            "the wire grew a field: {wire}"
+        );
+
+        let mut finding_keys: Vec<&str> = parsed["secrets"][0]
+            .as_object()
+            .expect("a finding is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        finding_keys.sort_unstable();
+        assert_eq!(
+            finding_keys,
+            ["kind", "label", "preview", "severity"],
+            "a finding grew a field: {wire}"
         );
     }
 }
