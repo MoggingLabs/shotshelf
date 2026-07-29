@@ -1,6 +1,6 @@
 //! Where Shotshelf keeps things, and which root each thing belongs in.
 //!
-//! Two roots, and the difference between them is a privacy rule rather than a
+//! Three roots, and the difference between them is a privacy rule rather than a
 //! filing preference. On Windows `app_data_dir()` is `%APPDATA%` — the
 //! **roaming** profile, which a domain roaming profile or Enterprise State
 //! Roaming copies to a network share at logoff. Anything that is a capture, a

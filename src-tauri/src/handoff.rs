@@ -70,13 +70,19 @@ fn sized_copy<R: Runtime>(app: &AppHandle<R>, source: &Path) -> Result<Option<Pa
 
     // Written under a name unique to this call, then renamed into place.
     //
-    // The uniqueness has to be per *operation*, not per process: these
-    // commands are `command(async)`, so a drag and a copy of the same capture
-    // run concurrently inside one process, and a staged name shared between
-    // them lets the second `write` truncate the file the first had finished —
-    // whereupon the first's `rename` publishes a zero-length PNG, and the
-    // `is_file` check above then accepts it forever. A per-process id was
+    // The uniqueness has to be per *operation*, not per process: `prepare_drag`
+    // and `copy_capture` are `async fn` commands, so a drag and a copy of the
+    // same capture run concurrently inside one process, and a staged name shared
+    // between them lets the second `write` truncate the file the first had
+    // finished — whereupon the first's `rename` publishes a zero-length PNG, and
+    // the `is_file` check above then accepts it forever. A per-process id was
     // exactly that mistake.
+    //
+    // The spelling matters here, because verifying this argument means going to
+    // `share.rs` and looking: it says `#[tauri::command]` on an `async fn`, not
+    // the `#[tauri::command(async)]` this used to name. `share.rs` argues
+    // against that second form by name, so a reader who took this literally
+    // would find no hazard and could reasonably delete the nonce.
     //
     // A rename is atomic, so the target is either absent or whole. That also
     // means a write interrupted by a crash or a full disk leaves a `.part`

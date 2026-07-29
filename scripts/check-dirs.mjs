@@ -123,10 +123,17 @@ const ROAMING_CALLER = "src-tauri/src/settings.rs";
  * to three cast allowances, and with a bare `3` one of them could become
  * `disallowed_methods` without moving the number.
  *
- * The consequence is that *any* clippy allowance needs a line here, not only the
- * ones touching `clippy.toml`. That is the point — an allowance is a decision,
- * and the cast ones below are decisions too. They are cheap to add and the diff
- * is the record. No count is quoted, here or anywhere: the table is the count.
+ * The consequence is that *any* allowance needs a line here, not only the ones
+ * touching `clippy.toml`. That is the point — an allowance is a decision, and
+ * the cast ones below are decisions too. They are cheap to add and the diff is
+ * the record. No count is quoted, here or anywhere: the table is the count.
+ *
+ * "Any allowance" was a claim before it was true. `silencedIn` harvested
+ * `clippy::` names plus the literal `warnings`, so a bare rustc lint was
+ * dropped and this table saw an empty set for a file that had switched one off
+ * — with three `#[allow(dead_code)]` live in the tree, uncounted, and
+ * `cargo clippy -- -D warnings` the only thing enforcing "no dead code" on the
+ * Rust side at all.
  */
 const ALLOWANCES = new Map([
   // Resolves every root; one per resolving statement, never file-scope.
@@ -182,9 +189,32 @@ const ALLOWANCES = new Map([
   // constants declared a few lines above them.
   ["src-tauri/src/catch/clipboard.rs", ["clippy::cast_possible_truncation"]],
   ["src-tauri/src/catch/folders.rs", ["clippy::cast_possible_truncation"]],
+  // The rustc allowances, which this table could not see until now.
+  //
+  // `#[allow(dead_code)]` is the strongest escape hatch in the crate:
+  // `cargo clippy -- -D warnings` is the only thing enforcing "no dead code" on
+  // the Rust side, and this switches it off. Three were live in the tree,
+  // uncounted, under a comment reading "Every escape hatch is counted, wherever
+  // it is" — because `silencedIn` harvested `clippy::` names and the literal
+  // `warnings`, and a bare rustc lint matched neither.
+  //
+  // All three are the *same* decision, and it is a good one: a function that is
+  // deliberately compiled on every OS so it can be reached from a test, and
+  // called for real on only some of them. The alternative is `cfg`-gating it
+  // out, which is how `macos_candidates` shipped a bug nobody could reproduce.
+  // Each is `cfg_attr`-scoped to exactly the platforms with no caller, so a
+  // genuinely dead function still fails the build everywhere else.
+  ["src-tauri/src/catch/paths.rs", ["dead_code", "dead_code"]],
+  ["src-tauri/src/share.rs", ["dead_code"]],
 ]);
 
-import { clippyLevelsIn, disallowedIn, grantsIn, silencedIn } from "./rust-source.mjs";
+import {
+  clippyLevelsIn,
+  disallowedIn,
+  grantsIn,
+  silencedIn,
+  weakeningFlagsIn,
+} from "./rust-source.mjs";
 /**
  * The modules whose asset-protocol grants are whole folders on purpose.
  *
@@ -276,6 +306,52 @@ const STRENGTH = ["allow", "warn", "deny", "forbid"];
           `That switches a clippy rule off for the whole crate with no attribute ` +
           `anywhere for the allowance table to see.`,
       );
+    }
+  }
+
+  // The third place a lint level comes from, which nothing here read.
+  //
+  // A level is the union of `[lints.clippy]`, the attributes in the source, and
+  // the rustc flags cargo assembles from every a .cargo/config.toml on its
+  // discovery path. This gate modelled the first two. A four-line file at the
+  // repo root —
+  //
+  //     [build]
+  //     rustflags = ["-Aclippy::disallowed_methods"]
+  //
+  // — switched off the resolved-path half of the roaming-profile rule with
+  // `cargo clippy -- -D warnings` printing "Finished" and this script printing
+  // success, while a module alias wrote the diagnostic log into `%APPDATA%`.
+  // The file is not git-ignored and CI runs clippy from the repo root.
+  //
+  // Enumerated by glob rather than by a list of paths this file believes in:
+  // cargo walks up from wherever it is invoked, so one beside the crate counts
+  // too, and the legacy extensionless `config` is still honoured.
+  for (const config of globSync([".cargo/config.toml", ".cargo/config", "*/.cargo/config*"])) {
+    const weakening = weakeningFlagsIn(readFileSync(config, "utf8"));
+    if (weakening.length > 0) {
+      problemsWithConfig.push(
+        `  ${config.replaceAll("\\", "/")}: passes [${weakening.join(", ")}] to rustc. ` +
+          `Cargo adds these to every build, so they override \`[lints.clippy]\` ` +
+          `and leave \`cargo clippy -- -D warnings\` green over a rule that is ` +
+          `no longer in force. A lint level is a decision — make it in ` +
+          `Cargo.toml, where this gate can see it.`,
+      );
+    }
+  }
+
+  // And the same flags set as environment variables in CI, which cargo also
+  // reads and which no committed TOML would show.
+  for (const workflow of globSync(".github/workflows/*.yml")) {
+    const text = readFileSync(workflow, "utf8");
+    for (const name of ["RUSTFLAGS", "RUSTDOCFLAGS", "CLIPPY_CONF_DIR"]) {
+      if (new RegExp(String.raw`^\s*${name}\s*:`, "m").test(text)) {
+        problemsWithConfig.push(
+          `  ${workflow.replaceAll("\\", "/")}: sets \`${name}\`, which cargo ` +
+            `folds into every lint level and this gate cannot resolve. ` +
+            `Whatever it is for belongs in Cargo.toml or clippy.toml.`,
+        );
+      }
     }
   }
 
@@ -423,9 +499,10 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
     problems.push(
       `  ${normalised}: silences [${silenced.join(", ") || "nothing"}], ` +
         `and check-dirs.mjs accounts for [${permitted.join(", ") || "nothing"}]. ` +
-        `An \`allow\` or \`expect\` naming a clippy lint switches off part of ` +
-        `\`clippy.toml\` for everything below it, so adding one is a decision, ` +
-        `not a formality — say why in the table there.`,
+        `An \`allow\` or \`expect\` switches a lint off for everything below it — ` +
+        `a clippy one takes part of \`clippy.toml\` with it, and \`dead_code\` ` +
+        `takes the only thing enforcing "no dead code" in the crate. Adding one ` +
+        `is a decision, not a formality — say why in the table there.`,
     );
   }
 

@@ -224,6 +224,9 @@ export function grantsIn(source) {
   return found;
 }
 
+/** A lint name: `dead_code`, `clippy::disallowed_methods`, `rustdoc::broken_intra_doc_links`. */
+const LINT = /^(?:[a-z_]+::)?[a-z_][a-z0-9_]*$/;
+
 /**
  * The lints an attribute silences, in source order.
  *
@@ -232,6 +235,20 @@ export function grantsIn(source) {
  * and strings that the old line anchor was standing in for. Balanced across
  * brackets, so a `cfg_attr` wrapper, a `reason = "…"`, or several lints in one
  * attribute are all read rather than missed.
+ *
+ * **Every** lint, not only clippy's. This harvested `/clippy::[a-z_]+/` plus the
+ * literal `warnings`, so a bare rustc lint — `dead_code`, `unused` — was dropped
+ * and the allowance table saw an empty set for a file that had switched one off.
+ * `#[allow(dead_code)]` is the strongest escape hatch in the crate: `cargo
+ * clippy -- -D warnings` is the *only* thing enforcing "no dead code" on the
+ * Rust side, and three of them were live in the tree, uncounted, under a comment
+ * in `check-dirs.mjs` reading "Every escape hatch is counted, wherever it is."
+ *
+ * Read as arguments rather than scanned for a pattern: each `allow(…)` /
+ * `expect(…)` in the attribute has its argument list split at depth zero, a
+ * `reason = "…"` dropped because it carries an `=`, and whatever is left taken
+ * whole. That is what makes "every lint" true rather than "every lint I thought
+ * to write a pattern for", which is the shape that was walked past nine times.
  *
  * @param {string} source
  * @returns {string[]}
@@ -262,30 +279,40 @@ export function silencedIn(source) {
     // ordinary spelling. The prefix class keeps identifiers that merely end in
     // `allow` from counting.
     const body = code.slice(open + 1, end).replace(/\s+/g, "");
-    if (!/(?:^|[(,])(?:allow|expect)\(/.test(body)) continue;
 
-    const before = found.length;
-    found.push(...[...body.matchAll(/clippy::[a-z_]+/g)].map((lint) => lint[0]));
-    // `warnings` is every lint at once, clippy's included, and names no group.
-    if (/(?:^|[(,])warnings(?=[,)])/.test(body)) found.push("warnings");
+    // Each `allow(…)` and `expect(…)` in the attribute — including one nested
+    // inside a `cfg_attr` wrapper, which is how the three `dead_code`
+    // allowances in this tree are written. The prefix class keeps identifiers
+    // that merely end in `allow` from counting.
+    for (const gate of body.matchAll(/(?:^|[(,])(?:allow|expect)\(/g)) {
+      const from = gate.index + gate[0].length;
+      let depth = 1;
+      let to = from;
+      while (to < body.length && depth > 0) {
+        if (body[to] === "(") depth += 1;
+        else if (body[to] === ")") depth -= 1;
+        if (depth > 0) to += 1;
+      }
 
-    // An allowance whose lint name cannot be read is reported, not ignored.
-    //
-    // This is bypass nine, and it is the one the "decidable" claim above was
-    // wrong about. `silencedIn` recognises the attribute and then harvests
-    // *names*; a macro composes the name from tokens it never sees —
-    // `macro_rules! quiet { ($lint:ident, …) => { #[allow(clippy::$lint)] … } }`
-    // — so the harvest came back empty and the allowance table read the file as
-    // silencing nothing. A reviewer routed the diagnostic log into `%APPDATA%`
-    // that way with `clippy.toml` and `Cargo.toml` untouched.
-    //
-    // Naming a lint this can never read is a decision like any other, so it
-    // fails closed: an unreadable name is reported as `clippy::<unreadable>`,
-    // which no table entry matches until someone writes one and says why.
-    // Only when it *names* a clippy lint this could not read — a bare
-    // `#[allow(dead_code)]` names a rustc lint and switches off nothing here.
-    const namesClippy = body.includes("clippy::") || body.includes("$");
-    if (before === found.length && namesClippy) found.push("clippy::<unreadable>");
+      for (const argument of splitAtDepth(body.slice(from, to))) {
+        // A `reason = "…"` is a note, not a lint. The string is already blanked,
+        // so all that survives of it is the `=`.
+        if (argument.includes("=")) continue;
+
+        // An allowance whose lint name cannot be read is reported, not ignored.
+        //
+        // A macro composes the name from tokens this never sees —
+        // `macro_rules! quiet { ($lint:ident, …) => { #[allow(clippy::$lint)] … } }`
+        // — so the harvest came back empty and the allowance table read the file
+        // as silencing nothing. A reviewer routed the diagnostic log into
+        // `%APPDATA%` that way with `clippy.toml` and `Cargo.toml` untouched.
+        //
+        // Naming a lint this cannot read is a decision like any other, so it
+        // fails closed: it is reported as `<unreadable>`, which no table entry
+        // matches until someone writes one and says why.
+        found.push(LINT.test(argument) ? argument : "<unreadable>");
+      }
+    }
   }
 
   return found;
@@ -447,7 +474,64 @@ export function disallowedIn(source) {
 }
 
 /**
- * Split a comma-separated list, keeping nested tables and arrays whole.
+ * Every flag in a cargo config that weakens a lint level.
+ *
+ * A clippy lint's level is not just `[lints.clippy]` and the attributes in the
+ * source. It is the union of those with the rustc flags cargo assembles — from
+ * `[build] rustflags`, from any `[target.…] rustflags`, from `[env] RUSTFLAGS`
+ * — in **every** a .cargo/config.toml on cargo's discovery path. The gate
+ * modelled the first two and read neither of the rest, so a four-line file at
+ * the repo root:
+ *
+ * ```toml
+ * [build]
+ * rustflags = ["-Aclippy::disallowed_methods"]
+ * ```
+ *
+ * switched off the resolved-path half of the roaming-profile rule with
+ * `cargo clippy -- -D warnings` printing "Finished" and `check-dirs.mjs`
+ * printing "only src-tauri/src/settings.rs reaches the roaming one" — while a
+ * module alias wrote the diagnostic log into `%APPDATA%`. The file is not
+ * git-ignored and CI runs clippy from the repo root, so it applies there too.
+ *
+ * Whole-file rather than "inside a `rustflags` array": a cargo config has no
+ * legitimate reason to contain any of these, so the value question is "is a
+ * weakening flag present", not "is it present in the place I thought to look".
+ * That distinction is the same one that let five TOML spellings past the
+ * `[lints.clippy]` scan.
+ *
+ * `-D`/`--deny`/`--forbid` are hardenings and are not returned.
+ *
+ * @param {string} source
+ * @returns {string[]}
+ */
+export function weakeningFlagsIn(source) {
+  const toml = tomlWithoutComments(source);
+  const found = [];
+
+  // The flag, then whatever it names — `-Aclippy::x`, `-A clippy::x`,
+  // `--allow=clippy::x` and `--cap-lints allow` are all one spelling of this.
+  //
+  // The name is optional, because an array may put the flag and its lint in
+  // separate strings: `["-A", "clippy::disallowed_methods"]`. Requiring one
+  // matched nothing at all there, which is the form a reviewer would reach for
+  // second.
+  for (const flag of toml.matchAll(
+    /(?<![\w-])(--cap-lints|--force-warn|--allow|-A)(?:\s*=\s*|\s+|(?=[A-Za-z]))?([\w:]*)/g,
+  )) {
+    found.push(`${flag[1] ?? ""} ${flag[2] ?? ""}`.trim());
+  }
+
+  return found;
+}
+
+/**
+ * Split a comma-separated list, keeping anything nested whole.
+ *
+ * Shared by the TOML arrays in [`disallowedIn`] and the attribute argument lists
+ * in [`silencedIn`]: both need "the items at this level", and both were getting
+ * it wrong in the same way — a comma inside a nested table or a nested
+ * `allow(…)` is not a separator.
  *
  * @param {string} body
  * @returns {string[]}
@@ -458,8 +542,8 @@ function splitAtDepth(body) {
   let from = 0;
 
   for (let i = 0; i < body.length; i += 1) {
-    if (body[i] === "[" || body[i] === "{") depth += 1;
-    else if (body[i] === "]" || body[i] === "}") depth -= 1;
+    if (body[i] === "[" || body[i] === "{" || body[i] === "(") depth += 1;
+    else if (body[i] === "]" || body[i] === "}" || body[i] === ")") depth -= 1;
     else if (body[i] === "," && depth === 0) {
       parts.push(body.slice(from, i));
       from = i + 1;

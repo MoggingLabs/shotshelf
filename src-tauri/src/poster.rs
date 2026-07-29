@@ -43,12 +43,7 @@ pub struct VideoDetails {
 /// while living private in `settings.rs`, so raising the item cap would have
 /// made 750 too small and this paragraph false — and re-introduced the exact
 /// failure it records. The margin stays a decision made here.
-const POSTER_CACHE_LIMIT: usize =
-    crate::settings::MAX_ITEMS + crate::settings::MAX_PINNED + POSTER_CACHE_MARGIN;
-
-/// Room above the largest shelf that can exist, so a frame is not evicted
-/// while its tile is still on screen.
-const POSTER_CACHE_MARGIN: usize = 50;
+const POSTER_CACHE_LIMIT: usize = crate::cache::shelf_wide_limit();
 
 /// Drop the oldest cached frames. Called on a timer from `lib.rs`.
 ///
@@ -406,48 +401,6 @@ fn poster_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_detail_fields_are_the_ones_the_front_end_reads() {
-        // `#[serde(rename_all = "camelCase")]` is the only thing turning
-        // `duration_ms` into the `durationMs` that `src/shelf/types.ts`
-        // declares, and nothing joined the two. Dropping the attribute compiles
-        // and leaves every Rust test green, while `tile.ts`'s `describeSize`
-        // reads `undefined` — which is not `null`, so it takes the branch that
-        // formats a duration and prints `NaN` under every recording.
-        //
-        // Same join as `CaptureKind`'s, one struct over: the fixture is the
-        // shared statement, and `src/shelf/types.test.ts` asserts the other half.
-        // Sorted on both sides. `serde_json` stores an object in a `BTreeMap`,
-        // so it hands the keys back alphabetically, while `Object.keys` in the
-        // sibling test yields declaration order — comparing the raw orders
-        // would fail on a correct tree and say nothing about the names.
-        let mut expected: Vec<String> = serde_json::from_str(include_str!(
-            "../../tests/fixtures/video-detail-fields.json"
-        ))
-        .expect("the shared field fixture parses");
-        expected.sort();
-
-        let serialised = serde_json::to_value(VideoDetails {
-            poster: None,
-            duration_ms: None,
-            bytes: 0,
-        })
-        .expect("video details serialise");
-
-        let mut fields: Vec<String> = serialised
-            .as_object()
-            .expect("video details serialise as an object")
-            .keys()
-            .cloned()
-            .collect();
-        fields.sort();
-
-        assert_eq!(
-            fields, expected,
-            "the wire fields have drifted from tests/fixtures/video-detail-fields.json"
-        );
-    }
 
     #[test]
     fn reads_the_duration_ffmpeg_prints() {

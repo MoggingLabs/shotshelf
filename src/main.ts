@@ -370,12 +370,19 @@ void whenEngineIsUp("the watch folders", () => invoke<WatchState>("catch_watch_d
     // total failure left the dot with no state at all and the sole signal was
     // an alert that erases itself after twelve seconds.
     noteWatchUnavailable();
-    // Not "no captures will be picked up": the clipboard watcher is started
-    // unconditionally and is independent of the folder watchers, so
-    // Win+Shift+S and ⌘⌃⇧4 are still caught. `status.ts` had this exact
-    // sentence corrected this round; the correction landed in one file and not
-    // the other.
-    say("Shotshelf could not reach its catch engine — folder watching is off. See the log.");
+    // Neither watcher is claimed to be running or not running here, because
+    // this arm knows nothing about either.
+    //
+    // It said "folder watching is off", copied from `status.ts`, where the
+    // premise holds: there the engine has answered and `started.clipboard` is a
+    // fact. Here it has answered nothing. `catch_watch_dirs` fails only with
+    // `STARTING`, and `whenEngineIsUp` retries that — so reaching this line
+    // means `catch::start` has not finished after two minutes, and `started` is
+    // its last statement. Either the engine is still before `folders::start`,
+    // and *nothing* is being caught while this names only folders; or it is
+    // past it, and folder watching is running while this says it is off. There
+    // is no state in which the sentence was true.
+    say("Shotshelf could not reach its catch engine — captures may not be picked up. See the log.");
   })
   // Its own chain, deliberately. Asking whether captures can be checked for
   // credentials is advisory, and hanging it off the watch-folder call meant a

@@ -571,10 +571,17 @@ test("escape during a slow open cancels it instead of dismissing the shelf", asy
   await expect(page.locator(".editor")).toHaveCount(0);
 });
 
-test("a capture whose file has gone reports rather than doing nothing", async ({ page }) => {
+test("a capture that will not open reports rather than doing nothing", async ({ page }) => {
   // The Edit control is offered for any single picked capture, including one
   // whose file has since been emptied out of the Recycle Bin. The open failed
   // and returned in silence, so the button simply looked broken.
+  //
+  // The message names no single cause, and neither does this. `readable`
+  // answers the same `undefined` for a missing file, a decode failure, a
+  // fifteen-second timeout on a disconnected share, and an asset-protocol
+  // refusal — so "its file is gone", which this used to assert, was a claim the
+  // code cannot support, and `src/shelf/view/preview.ts` opens the same capture on the
+  // same value.
   await bootShelf(page);
   await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", null));
   await land(page, FIXTURE.missing);
@@ -585,7 +592,7 @@ test("a capture whose file has gone reports rather than doing nothing", async ({
 
   // Asserted on the text for the same reason as above: the boot message made
   // "the strip is visible" true before this test did anything at all.
-  await expect(page.locator("#shelf-alert")).toHaveText(/its file is gone/);
+  await expect(page.locator("#shelf-alert")).toHaveText(/could not be opened/);
   await expect(page.locator("#shelf-alert")).toBeVisible();
   await expect(page.locator(".editor")).toHaveCount(0);
 });

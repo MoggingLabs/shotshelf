@@ -203,12 +203,11 @@ export function installTauriMock(EVENTS: WindowEvents): void {
       listeners.set(event, [...(listeners.get(event) ?? []), id]);
       return Promise.resolve(id);
     }
-    if (cmd === "plugin:event|unlisten") {
-      const event = named["event"] as string;
-      const id = named["eventId"] as number;
-      listeners.set(event, (listeners.get(event) ?? []).filter((entry) => entry !== id));
-      return Promise.resolve(null);
-    }
+    // No `plugin:event|unlisten` branch: nothing in `src/` unlistens, which
+    // `src-tauri/capabilities/default.json` records as the reason that permission was
+    // removed. A stub for a command the app cannot send is a branch no test can
+    // reach — and it read as evidence the harness covered a path that does not
+    // exist.
 
     calls.push({
       cmd,

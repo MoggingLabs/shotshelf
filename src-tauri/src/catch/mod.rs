@@ -20,6 +20,8 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+
+use crate::limits::lock;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 /// Event the shelf front-end listens on. Payload is [`Capture`].
@@ -130,9 +132,7 @@ impl CaptureSink {
             return;
         }
 
-        if source == Source::Folder && kind == CaptureKind::Image {
-            self.note_folder_image(path);
-        }
+        self.note_folder_image(path, kind, source);
 
         let capture = Capture {
             path: path.display().to_string(),
@@ -187,7 +187,7 @@ impl CaptureSink {
         }
     }
 
-    /// Arm the echo marker for a folder image that has just been emitted.
+    /// Arm the echo marker, if what was just emitted is a folder image.
     ///
     /// Split from `emit` so it can be tested: `emit` needs an `AppHandle`, which
     /// no test in this crate can build, so the whole *producer* of the marker
@@ -195,6 +195,14 @@ impl CaptureSink {
     /// Win+PrtSc shelved twice and left an unpruned PNG in a folder the app
     /// never prunes. `folders.rs` records that exact outcome as a defect it
     /// already shipped once.
+    ///
+    /// The *condition* comes with it, which the first split did not do. `emit`
+    /// kept `if source == Source::Folder && kind == CaptureKind::Image` and
+    /// called this for the body only, so swapping `Folder` for `Clipboard`
+    /// there — after which no folder image ever arms the marker, and every
+    /// Win+PrtSc shelves twice again — left clippy and all 155 tests green.
+    /// Extracting a helper had moved the boundary and not the decision, and the
+    /// decision is the part worth testing.
     ///
     /// Only the header is read: `image_dimensions` does not decode. A file that
     /// cannot be read arms nothing, which fails safe — an unarmed marker means
@@ -205,7 +213,11 @@ impl CaptureSink {
     /// header for, shelves twice from then on and leaves an unpruned PNG in a
     /// folder the app never prunes — visible to the user, and previously with
     /// nothing anywhere saying why.
-    pub fn note_folder_image(&self, path: &Path) {
+    pub fn note_folder_image(&self, path: &Path, kind: CaptureKind, source: Source) {
+        if source != Source::Folder || kind != CaptureKind::Image {
+            return;
+        }
+
         match image::image_dimensions(path) {
             Ok(shape) => *lock(&self.folder_echo) = Some((Instant::now(), shape)),
             // The filename only, like every other line this module writes: a
@@ -480,20 +492,7 @@ pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Capture
     // folder nothing is watching, because backfill is then the only way in. An
     // earlier comment here claimed the opposite ("admits nothing"), and a third
     // above it described a `now` fallback that no longer exists.
-    let chosen = to_backfill(
-        found,
-        SystemTime::now(),
-        since,
-        &started.since,
-        |path, kind, modified| {
-            // Both signals, not either. The budget is the portable one; the
-            // lock is a stronger answer where the OS offers it.
-            SystemTime::now()
-                .duration_since(modified)
-                .is_ok_and(|age| age >= folders::settle_budget(kind))
-                && folders::is_readable(path)
-        },
-    );
+    let chosen = to_backfill(found, SystemTime::now(), since, &started.since, settled);
 
     // Move the watermark past what is being handed over.
     //
@@ -566,6 +565,28 @@ fn scan(dirs: &[PathBuf]) -> Vec<(SystemTime, PathBuf, CaptureKind)> {
         }
     }
     found
+}
+
+/// Whether a capture found on disk has stopped being written to.
+///
+/// The production answer to [`to_backfill`]'s `finished` parameter, and a named
+/// function rather than a closure written inline at the call. It was a closure:
+/// `to_backfill` takes the predicate as a parameter *precisely* so a test can
+/// substitute one, and the value production actually passes then sat inside the
+/// body of a `#[tauri::command]`, which no test in this crate can execute. So
+/// the tests asserted that `to_backfill` applies a predicate correctly and
+/// nothing at all about which predicate it applies — and the test that reads
+/// closest to this one writes its own copy, without the `is_readable` half.
+/// Flipping `>=` to `<=` here left clippy and all 155 tests green, and shelves
+/// exactly the files that may still be growing.
+///
+/// Both signals, not either. The budget is the portable one; the lock is a
+/// stronger answer where the OS offers it.
+fn settled(path: &Path, kind: CaptureKind, modified: SystemTime) -> bool {
+    SystemTime::now()
+        .duration_since(modified)
+        .is_ok_and(|age| age >= folders::settle_budget(kind))
+        && folders::is_readable(path)
 }
 
 /// Which of the files found should be shelved, and when each was taken.
@@ -798,21 +819,6 @@ pub const STARTING: &str = "the catch engine is still starting";
 #[cfg(test)]
 const STARTING_FIXTURE: &str = include_str!("../../../tests/fixtures/engine-starting.json");
 
-/// The names [`Watching`] puts on the wire, as the front end reads them.
-///
-/// The other half of the same problem the sentinel above has: two hand-typed
-/// lists of field names in two languages with nothing joining them.
-#[cfg(test)]
-const WATCH_STATE_FIXTURE: &str = include_str!("../../../tests/fixtures/watch-state-fields.json");
-
-/// A watcher thread dying mid-update should not take the whole engine with it;
-/// the worst a poisoned lock costs here is one stale timestamp.
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 /// Now, as Unix milliseconds.
 ///
 /// Literally `as_ms(SystemTime::now())`. An earlier commit claimed to have made
@@ -942,49 +948,6 @@ mod tests {
             shared["starting"].as_str(),
             Some(STARTING),
             "the sentinel and the fixture the front end reads have drifted",
-        );
-    }
-
-    #[test]
-    fn the_watch_state_fields_are_the_ones_the_front_end_reads() {
-        // The other hand-maintained cross-language pair in this module. These
-        // two field names are all that connect `Watching` to what `main.ts`
-        // destructures out of `catch_watch_dirs`. Renaming either compiles and
-        // leaves every test here green, while the front end reads `undefined` —
-        // which is falsy, so `showWatchState` raises "Clipboard captures are not
-        // being picked up" on every healthy launch, and points the user at the
-        // one indicator `docs/USAGE.md` tells them to check.
-        //
-        // The names, not their casing: both are one lowercase word, so the
-        // struct's `rename_all` does not touch them and this would not notice
-        // its removal. It stays for the next field that does need it.
-        //
-        // Same join as `VideoDetails`', one crate over: the fixture is the
-        // shared statement and `src/status.test.ts` asserts the other half.
-        // Sorted on both sides — `serde_json` hands an object's keys back
-        // alphabetically out of a `BTreeMap`, `Object.keys` yields declaration
-        // order, and what is being joined is the set of names.
-        let mut expected: Vec<String> =
-            serde_json::from_str(WATCH_STATE_FIXTURE).expect("the shared field fixture parses");
-        expected.sort();
-
-        let serialised = serde_json::to_value(Watching {
-            dirs: Vec::new(),
-            clipboard: false,
-        })
-        .expect("the watch state serialises");
-
-        let mut fields: Vec<String> = serialised
-            .as_object()
-            .expect("the watch state serialises as an object")
-            .keys()
-            .cloned()
-            .collect();
-        fields.sort();
-
-        assert_eq!(
-            fields, expected,
-            "the wire fields have drifted from tests/fixtures/watch-state-fields.json",
         );
     }
 
@@ -1179,7 +1142,7 @@ mod tests {
         // the early folder's file is the watcher's, the late folder's is not.
         let early = PathBuf::from("/early");
         let late = PathBuf::from("/late");
-        // Both starts well past `BACKFILL_SETTLED`, so this measures the
+        // Both starts well past every settle budget, so this measures the
         // hand-over boundary rather than the liveness one.
         let started = vec![
             (
@@ -1441,7 +1404,7 @@ mod tests {
         image.save(&shot).expect("a png");
 
         let sink = CaptureSink::default();
-        sink.note_folder_image(&shot);
+        sink.note_folder_image(&shot, CaptureKind::Image, Source::Folder);
 
         assert!(
             !sink.take_folder_echo(Duration::from_secs(4), (9, 9)),
@@ -1455,8 +1418,80 @@ mod tests {
         // A file that cannot be read arms nothing, which keeps the clipboard
         // capture rather than swallowing it.
         let sink = CaptureSink::default();
-        sink.note_folder_image(&dir.join("not-there.png"));
+        sink.note_folder_image(
+            &dir.join("not-there.png"),
+            CaptureKind::Image,
+            Source::Folder,
+        );
         assert!(!sink.take_folder_echo(Duration::from_secs(4), (3, 2)));
+
+        // And the *condition*, which used to live in `emit` beside an
+        // `AppHandle` no test can build. Swapping `Folder` for `Clipboard`
+        // there stopped every folder image arming the marker — every Win+PrtSc
+        // shelving twice again — with clippy and all 155 tests green.
+        for (kind, source) in [
+            (CaptureKind::Image, Source::Clipboard),
+            (CaptureKind::Video, Source::Folder),
+            (CaptureKind::Video, Source::Clipboard),
+        ] {
+            let sink = CaptureSink::default();
+            sink.note_folder_image(&shot, kind, source);
+            assert!(
+                !sink.take_folder_echo(Duration::from_secs(4), (3, 2)),
+                "{kind:?} from {source:?} is not a folder image and must arm nothing"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_capture_still_being_written_is_not_settled() {
+        // The production answer to `to_backfill`'s `finished` parameter, which
+        // was an inline closure inside a `#[tauri::command]` — so the tests
+        // asserted that `to_backfill` applies a predicate correctly and nothing
+        // about which predicate it applies. Flipping `>=` to `<=` in it left
+        // clippy and all 155 tests green, and shelves exactly the files that
+        // may still be growing.
+        //
+        // Real files and the real clock, because that is what the production
+        // predicate reads. The synthetic-predicate tests above cover the
+        // *policy*; this covers the answer.
+        let dir = std::env::temp_dir().join("shotshelf-settled-test");
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        let shot = dir.join("fresh.png");
+        std::fs::write(&shot, [0_u8; 8]).expect("a file");
+
+        let just_now = SystemTime::now();
+        assert!(
+            !settled(&shot, CaptureKind::Image, just_now),
+            "a capture written this instant is inside its settle budget"
+        );
+        assert!(
+            !settled(&shot, CaptureKind::Video, just_now),
+            "a recording written this instant is inside its settle budget"
+        );
+
+        // Past the budget for an image but not for a recording, which gets the
+        // longer one because ffmpeg stalls mid-encode.
+        let between =
+            SystemTime::now() - folders::settle_budget(CaptureKind::Video) + Duration::from_secs(1);
+        assert!(settled(&shot, CaptureKind::Image, between));
+        assert!(
+            !settled(&shot, CaptureKind::Video, between),
+            "a recording was called finished inside the video budget"
+        );
+
+        let long_ago = SystemTime::now() - Duration::from_secs(3_600);
+        assert!(settled(&shot, CaptureKind::Image, long_ago));
+        assert!(settled(&shot, CaptureKind::Video, long_ago));
+
+        // Both signals, not either: a file old enough but not openable is not
+        // handed over.
+        assert!(
+            !settled(&dir.join("not-there.png"), CaptureKind::Image, long_ago),
+            "a capture that cannot be opened was called finished"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

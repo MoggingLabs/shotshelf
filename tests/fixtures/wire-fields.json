@@ -1,0 +1,19 @@
+{
+  "Capture": ["path", "kind", "ts", "context"],
+  "Context": ["label"],
+  "DragSource": ["path", "icon"],
+  "Finding": ["kind", "label", "preview", "severity"],
+  "Findings": ["secrets", "scanned"],
+  "LocalState": ["pinned", "lastCaptureMs"],
+  "PinnedItem": ["path", "kind", "ts"],
+  "Settings": [
+    "retentionHours",
+    "maxItems",
+    "hotkey",
+    "downscaleExports",
+    "checkForUpdates",
+    "pinned"
+  ],
+  "VideoDetails": ["poster", "durationMs", "bytes"],
+  "Watching": ["dirs", "clipboard"]
+}

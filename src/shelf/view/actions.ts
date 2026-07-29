@@ -30,9 +30,13 @@ export interface TileHandlers {
 }
 
 function pinLabel(pinned: boolean): string {
+  // Not "past the retention window": `retentionHours` defaults to `null` and
+  // `ShelfStore.sweep` returns immediately when it is, so on a default install
+  // the tooltip named the one effect pinning does *not* have while omitting the
+  // two it always does — exemption from the item cap, and surviving a restart.
   return pinned
     ? "Pinned — kept until you unpin it"
-    : "Pin to keep this past the retention window";
+    : "Pin to keep this capture, and bring it back next launch";
 }
 
 function action(name: Parameters<typeof icon>[0], title: string): HTMLButtonElement {

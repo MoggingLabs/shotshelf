@@ -203,9 +203,16 @@ export function showWatchState(dirs: readonly string[], clipboard: boolean): voi
   if (dirs.length === 0) {
     // Not "captures will not be picked up": the clipboard watcher is started
     // unconditionally and is independent of the folder watchers, so
-    // Win+Shift+S and ⌘⌃⇧4 *are* still caught in exactly this state — Rust
-    // even logs "clipboard watch only". The old sentence was false whenever
-    // the tooltip beside it ("Watching the clipboard only") was true.
+    // Win+Shift+S and ⌘⌃⇧4 *are* still caught in exactly this state. The old
+    // sentence was false whenever the tooltip beside it ("Watching the
+    // clipboard only") was true.
+    //
+    // An empty list has three causes and the log says so differently for each:
+    // "no capture folders found" when discovery came back empty, "folder
+    // watching unavailable" when the whole watcher failed, and a per-directory
+    // line when each `watch` call was refused. An earlier version of this
+    // comment named only the first and presented it as what the log always
+    // says, which would send a reader looking for a line that is not there.
     say("No capture folders are being watched — only the clipboard. See the log for why.");
   }
 }
@@ -252,7 +259,7 @@ function paint(): void {
   mark.classList.toggle("shelf__mark--live", watch?.live === true);
   mark.title = [
     watch?.said,
-    scanned === false ? "Captures are not checked for credentials on this platform." : undefined,
+    scanned === false ? "Captures are not being checked for credentials here." : undefined,
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n\n");

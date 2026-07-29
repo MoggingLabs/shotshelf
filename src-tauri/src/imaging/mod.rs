@@ -51,11 +51,16 @@ impl std::fmt::Display for ImageError {
     }
 }
 
-impl std::error::Error for ImageError {}
-
 /// Serialised to the front-end, which reports failures rather than swallowing
 /// them — an export that silently handed over the wrong file would be worse
 /// than one that refused.
+///
+/// No `impl std::error::Error`: nothing here takes an `ImageError` as
+/// `Box<dyn Error>`, calls `source()`, or `?`s it into a boxed error, and this
+/// conversion needs `Display` alone. It carried one anyway, and no gate could
+/// see it — rustc's `dead_code` lint does not analyse trait impls, so an unused
+/// impl is invisible in a way an unused `fn` is not. The impl comes back in the
+/// same diff as the caller that needs it.
 impl From<ImageError> for String {
     fn from(error: ImageError) -> Self {
         error.to_string()

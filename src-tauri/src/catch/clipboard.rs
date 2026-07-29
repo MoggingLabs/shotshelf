@@ -42,7 +42,26 @@ const READ_RETRY: Duration = Duration::from_millis(80);
 #[allow(clippy::cast_possible_truncation)]
 const ECHO_GRACE: Duration =
     Duration::from_millis(super::folders::SLOWEST_IMAGE.as_millis() as u64 * 2);
-const ECHO_WINDOW: Duration = Duration::from_secs(4);
+
+/// How long after a folder image a clipboard copy still counts as its echo.
+///
+/// Derived from the grace above rather than written out, because the whole rule
+/// only works while `ECHO_GRACE < ECHO_WINDOW`: the worker sleeps the grace and
+/// *then* asks whether the marker is younger than the window, so a grace that
+/// outgrows the window means the answer is always no. Every Win+PrtSc would
+/// shelve twice and leave an unpruned PNG — verbatim the defect `folders.rs`
+/// says these constants exist to prevent.
+///
+/// Two of the three numbers already moved together; this was the third, a
+/// hand-written `from_secs(4)`, and it is the one the rule depends on. Raising
+/// `IMAGE_STABLE_TICKS` from one to six — the same class of edit
+/// `folders.rs` names as the motivating hazard — put a 5000 ms grace against a
+/// 4000 ms window with nothing to say so. Written as grace + slack, the
+/// inequality holds by construction and `ECHO_SLACK` is the decision that
+/// genuinely belongs in this file: how much later than the folder watcher's
+/// worst case a copy may still arrive and be recognised.
+const ECHO_SLACK: Duration = Duration::from_millis(2_500);
+const ECHO_WINDOW: Duration = ECHO_GRACE.saturating_add(ECHO_SLACK);
 
 /// Returns whether the monitor is actually running, which the status line
 /// needs: it used to append "+ the clipboard" whatever happened here.
@@ -190,4 +209,36 @@ fn write_capture<R: Runtime>(app: &AppHandle<R>, bytes: &[u8]) -> Result<PathBuf
     std::fs::write(&path, bytes).map_err(|err| err.to_string())?;
 
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_echo_window_outlasts_the_grace_the_worker_sleeps() {
+        // The whole Win+PrtSc rule rests on this one inequality and nothing
+        // asserted it. The worker sleeps `ECHO_GRACE` and *then* asks whether
+        // the folder marker is younger than `ECHO_WINDOW`, so a grace that
+        // outgrows the window means the answer is always no: every Win+PrtSc
+        // shelves twice and leaves an unpruned PNG in a folder the app never
+        // prunes — verbatim the defect `folders.rs` says these constants exist
+        // to prevent.
+        //
+        // Two of the three numbers already moved together; this was the third,
+        // a hand-written `from_secs(4)`. Raising `IMAGE_STABLE_TICKS` from one
+        // to six — the same class of edit `folders.rs` names as the motivating
+        // hazard — put a 5000 ms grace against a 4000 ms window with nothing
+        // anywhere to say so.
+        assert!(
+            ECHO_WINDOW > ECHO_GRACE,
+            "the marker has already expired by the time the worker looks at it: \
+             grace {ECHO_GRACE:?}, window {ECHO_WINDOW:?}",
+        );
+
+        // And it moves with the watcher it is waiting for, rather than being a
+        // constant that happens to be big enough today.
+        assert_eq!(ECHO_GRACE, super::super::folders::SLOWEST_IMAGE * 2);
+        assert_eq!(ECHO_WINDOW, ECHO_GRACE + ECHO_SLACK);
+    }
 }

@@ -131,10 +131,7 @@ impl SettingsStore {
 
     /// The newest capture the shelf has been told about, in Unix ms.
     pub fn last_capture_ms(&self) -> u64 {
-        *self
-            .last_capture
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        *crate::limits::lock(&self.last_capture)
     }
 
     /// Record that a capture this recent has reached the shelf.
@@ -153,10 +150,7 @@ impl SettingsStore {
     /// sharing one write path was the seam being wrong, not just slow.
     pub fn note_capture(&self, ts: u64) {
         {
-            let mut newest = self
-                .last_capture
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut newest = crate::limits::lock(&self.last_capture);
             if ts <= *newest {
                 return;
             }
@@ -220,9 +214,7 @@ impl SettingsStore {
     }
 
     fn lock(&self) -> MutexGuard<'_, Settings> {
-        self.current
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        crate::limits::lock(&self.current)
     }
 }
 
@@ -1280,12 +1272,28 @@ mod tests {
             current: Mutex::new(Settings::default()),
             last_capture: Mutex::new(0),
         };
-        // Preferences on disk first, as any real install has them.
+        // Preferences on disk first, as any real install has them — and
+        // carrying a pin, which is what makes the blanking observable.
+        //
+        // This wrote `Settings::default()`, whose `pinned` is already empty, so
+        // the one line the module header credits with the whole rule — `let
+        // preferences = Settings { pinned: Vec::new(), ..settings.clone() }` —
+        // was never reached. Deleting it left this test green; the only thing
+        // that caught it was a one-off migration test whose own docstring says
+        // it exists for "anyone who built from source in between", which makes
+        // it the most deletable test in the crate.
         store
-            .replace(Settings::default())
+            .replace(Settings {
+                pinned: vec![pin(&secret)],
+                ..Settings::default()
+            })
             .expect("the preferences write succeeds");
         let before = std::fs::read_to_string(&roaming).expect("preferences were written");
         assert!(before.contains("hotkey"));
+        assert!(
+            !before.contains("acme-migration-plan"),
+            "a full preferences write carried a capture path into the roaming file: {before}",
+        );
 
         // **Not written at all**, which is stronger than "written identically".
         //

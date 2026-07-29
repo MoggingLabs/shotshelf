@@ -16,9 +16,28 @@
 //! tile at once, and pinned captures are exempt from the item cap, so "one per
 //! tile" is unbounded.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use tokio::sync::Semaphore;
+
+/// Take a lock, tolerating a thread that died holding it.
+///
+/// Poisoning means a previous holder panicked, not that the data is unusable.
+/// Nothing behind any of these locks is an invariant a panic could half-update:
+/// the worst case is a stale timestamp or a settings value re-read a moment
+/// later. Propagating the poison would turn one dead watcher thread into a
+/// permanently dead engine.
+///
+/// Here rather than in `catch/mod.rs`, which had it as a private `lock<T>`,
+/// because `settings.rs` needed the same rule and wrote
+/// `unwrap_or_else(|poisoned| poisoned.into_inner())` out three more times
+/// beside it. One rule, four expressions of it, in a crate that had already
+/// named the concept once.
+pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// How many captures may be *sized* at once — the hand-off and clipboard paths.
 ///

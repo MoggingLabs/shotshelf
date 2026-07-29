@@ -338,6 +338,10 @@ body {
   color: #fff;
   font-size: 9.5px;
   font-variant-numeric: tabular-nums;
+  /* Matched to `.tile__label`, which fades *in* over this same corner as this
+     fades out. Without it the badge snapped away a tenth of a second before the
+     label arrived, under a comment two lines up saying it fades. */
+  transition: opacity 110ms ease-out;
 }
 
 .tile__badge-text {
@@ -689,6 +693,13 @@ body {
 #editor-save {
   background: var(--accent);
   color: #fff;
+}
+
+/* Its own, because an id outranks `.editor__action:hover` — so the primary
+   action in the editor was the one control in the app that did not respond to
+   the pointer at all. */
+#editor-save:hover {
+  background: #7275f4;
 }
 
 /* The picture area: whatever is left once the toolbar has taken its height.

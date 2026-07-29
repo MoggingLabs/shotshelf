@@ -37,6 +37,26 @@ pub enum Entry {
     Directory,
 }
 
+/// How many entries a cache serving the whole shelf has to hold.
+///
+/// The largest shelf that can exist, plus room above it so an entry is not
+/// evicted while its tile is still on screen.
+///
+/// One home, because it was written out twice — `POSTER_CACHE_LIMIT` and
+/// `SCAN_CACHE_LIMIT`, each with its own `*_MARGIN = 50` — and both files
+/// record having *already* been fixed once for hand-writing this number too
+/// small. Two copies of a derivation is the same defect one step later: the
+/// next `MAX_PINNED` change moves whichever one the author remembered.
+pub const fn shelf_wide_limit() -> usize {
+    crate::settings::MAX_ITEMS + crate::settings::MAX_PINNED + MARGIN
+}
+
+/// Room above the largest shelf that can exist.
+///
+/// The decision that genuinely belongs here: how much slack a cache keeps so a
+/// tile still on screen cannot lose its entry to an eviction.
+const MARGIN: usize = 50;
+
 /// Which entries a sweep would drop, given what is in the cache.
 ///
 /// Split from the deleting so the part that has a direction can be tested
@@ -114,10 +134,14 @@ pub fn prune(dir: &Path, limit: usize, kind: Entry) {
 /// Milliseconds, because a capture tool overwriting its output inside one
 /// second is ordinary.
 ///
-/// `Hash` and `Eq` because all three caches key a map on this. No `Ord`: it was
-/// derived under a comment saying "so callers can compare versions rather than
-/// only test equality", and no caller compares — two call `key()` and one uses
-/// it as a `HashMap` key. A derive justified by a sentence nobody had checked.
+/// `Hash` and `Eq` because one caller keys a `HashMap` on this — `share.rs`'s
+/// scan cache. The other two turn it into a filename with `key()` and need
+/// neither. No `Ord`: it was derived under a comment saying "so callers can
+/// compare versions rather than only test equality", and no caller compares.
+///
+/// Both halves of that were a derive justified by a sentence nobody had
+/// checked: the retraction of `Ord` was appended to a claim that all three
+/// callers keyed a map, which the retraction's own next clause contradicted.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Version {
     path: PathBuf,

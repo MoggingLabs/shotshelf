@@ -19,6 +19,23 @@ import { icon } from "../../icons.ts";
 import { describeCapture } from "../bridge.ts";
 import type { Findings, SecretFinding } from "../types.ts";
 
+/**
+ * "a token", "an email address" — the label decides which.
+ *
+ * The sentence hard-coded "a", and three of the labels Rust sends begin with a
+ * vowel. One of those, `email address`, carries the *lowest* severity, so it is
+ * the label the ordinary case reaches for: the commonest wording of this
+ * warning read "a email address".
+ *
+ * On the first letter, not a dictionary. Every label is a plain English noun
+ * phrase written in `secrets.rs`, none of them a "European"-style exception,
+ * and a rule with a list of exceptions attached would be a second thing to keep
+ * in step with that file.
+ */
+function article(label: string): string {
+  return `${/^[aeiou]/i.test(label) ? "an" : "a"} ${label}`;
+}
+
 /** How the warning describes what it found, worst first. */
 function summarise(findings: readonly SecretFinding[]): string {
   const [worst] = findings;
@@ -29,7 +46,7 @@ function summarise(findings: readonly SecretFinding[]): string {
     rest === 0 ? "" : ` and ${rest} other${rest === 1 ? "" : "s"}`;
 
   return [
-    `Looks like this capture contains a ${worst.label}${tail}.`,
+    `Looks like this capture contains ${article(worst.label)}${tail}.`,
     `Found: ${worst.preview}`,
     "Shotshelf will still drag and copy it — check before you send it.",
   ].join("\n");

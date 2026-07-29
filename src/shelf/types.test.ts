@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import type { VideoDetails } from "./types.ts";
 import { CAPTURE_KINDS, SECRET_KINDS, canCompare, isEditable, canPreview } from "./types.ts";
 
 /**
@@ -40,27 +39,11 @@ test("the capture kinds match the ones Rust puts on the wire", () => {
   assert.deepEqual([...CAPTURE_KINDS], shared, "front-end kinds have drifted from the fixture");
 });
 
-/**
- * The other half of the `VideoDetails` join.
- *
- * Written as a value that must type-check as a `VideoDetails`, so renaming the
- * field here fails to compile against this literal *and* fails the comparison —
- * and renaming it in Rust, where a single `rename_all` supplies the camel case,
- * fails the sibling test in `poster.rs`.
- */
-test("the video detail fields match the ones Rust sends", () => {
-  // Sorted, because Rust's half reads the keys back out of a `BTreeMap` and so
-  // sees them alphabetically. What is being joined is the set of names.
-  const shared = JSON.parse(
-    readFileSync("tests/fixtures/video-detail-fields.json", "utf8"),
-  ) as string[];
-  const sample: VideoDetails = { poster: null, durationMs: null, bytes: 0 };
-  assert.deepEqual(
-    Object.keys(sample).sort(),
-    [...shared].sort(),
-    "front-end fields have drifted from the fixture",
-  );
-});
+// `VideoDetails`' field names used to be joined here, against a fixture of its
+// own. Every serialising type now goes through `src/wire.test.ts` and one
+// manifest — because a per-type fixture is added by whichever review round
+// tripped over that type, and `Capture`, the payload of the app's central
+// event, never had one.
 
 test("comparison is offered for two images and nothing else", () => {
   // Compare was never one of the sites this rule was extracted to unify: the

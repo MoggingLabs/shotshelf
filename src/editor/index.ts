@@ -112,7 +112,18 @@ export async function openEditor(
       // The Edit control is offered for any single picked capture, including
       // one whose file has since gone — an emptied Recycle Bin, a cleared temp
       // folder. Returning in silence left the button looking simply broken.
-      callbacks.failed("That capture could not be opened — its file is gone.");
+      //
+      // "Its file is gone" was the first version, and it names one of four
+      // causes `readable` cannot tell apart: it answers the same `undefined`
+      // for the image's `error` event *and* for a fifteen-second timeout, which
+      // its own docstring says exists for "a file on a disconnected share, one
+      // still being written" — a file that is present — and the error branch
+      // also covers an asset-protocol scope refusal, which is not hypothetical:
+      // pinned tiles render before the engine grants the scope, which is why
+      // `main.ts` redraws them afterwards. `src/shelf/view/preview.ts` reads the identical
+      // value and opens the capture anyway, so the same file at the same instant
+      // was previewable with Space and "gone" with `e`.
+      callbacks.failed("That capture could not be opened. It may have been moved or deleted.");
       return undefined;
     }
 

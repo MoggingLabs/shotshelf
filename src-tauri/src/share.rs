@@ -41,6 +41,22 @@ pub struct DragSource {
     icon: String,
 }
 
+#[cfg(test)]
+impl DragSource {
+    /// A value for `wire.rs`'s field-name join, which lives outside this module
+    /// and so cannot name these private fields itself.
+    ///
+    /// Written out rather than derived from `Default`: naming each field is what
+    /// makes a rename fail to *compile* here, which is half of what the join is
+    /// for.
+    pub(crate) fn sample() -> Self {
+        Self {
+            path: String::new(),
+            icon: String::new(),
+        }
+    }
+}
+
 /// Confirm a capture is still on disk and work out its drag preview.
 ///
 /// The check matters: a tile can outlive its file (emptied Recycle Bin, a
@@ -119,7 +135,11 @@ pub async fn describe_capture<R: Runtime>(
     // reason, and its comment calls delivering different pixels than the ones
     // on screen a disclosure bug rather than a stale cache. The same is true
     // here, with worse consequences: this one decides whether a warning shows.
-    let version = scan_key(&source);
+    // Through `cache::Version`, which is what the hand-off and poster caches
+    // key on — rather than a third encoding of the same question. A `scan_key`
+    // wrapper stood here and did nothing but forward, beside a `type ScanKey =
+    // cache::Version` alias with one meaning.
+    let version = crate::cache::Version::of(&source);
 
     // Answered from memory when it has been asked before.
     //
@@ -209,13 +229,13 @@ pub async fn describe_capture<R: Runtime>(
 /// `max_items` (up to 200) plus `MAX_PINNED` (500) tiles — so a full shelf
 /// overflowed the cache that exists to serve it, which is the same mistake
 /// `poster.rs` records having made with a hand-written 200 and fixed by
-/// deriving. Same two numbers, same margin, one file over.
-const SCAN_CACHE_LIMIT: usize =
-    crate::settings::MAX_ITEMS + crate::settings::MAX_PINNED + SCAN_CACHE_MARGIN;
-
-/// Room above the largest shelf that can exist, so a scan is not evicted while
-/// its tile is still on screen.
-const SCAN_CACHE_MARGIN: usize = 50;
+/// deriving.
+///
+/// Then both files derived it *separately*, each with its own margin constant —
+/// two copies of a derivation, which is the same defect one step later: the
+/// next `MAX_PINNED` change moves whichever one the author remembered.
+/// `cache::shelf_wide_limit` is the one home now.
+const SCAN_CACHE_LIMIT: usize = crate::cache::shelf_wide_limit();
 
 /// A remembered scan, with when it was remembered.
 ///
@@ -235,20 +255,18 @@ fn next_scan_sequence() -> u64 {
 
 /// Identity of a capture's *contents*, through `cache::Version`.
 ///
-/// The same answer the hand-off and poster caches key on, rather than a third
-/// encoding of it — this one carried its own copy of the mtime read, byte for
-/// byte identical to `handoff.rs`'s. An unreadable timestamp only means the
-/// file shares a version with its other versions, which is where all three
-/// caches were before mtime was part of the key.
-fn scan_key(source: &Path) -> ScanKey {
-    crate::cache::Version::of(source)
-}
-
-type ScanKey = crate::cache::Version;
-
-fn scan_cache() -> &'static std::sync::Mutex<std::collections::HashMap<ScanKey, Remembered>> {
+/// Remembered scans, keyed by which *version* of which capture.
+///
+/// `cache::Version` directly, rather than through the `scan_key` wrapper and
+/// `ScanKey` alias that used to stand here: the wrapper only forwarded and the
+/// alias only renamed, and both had exactly one meaning and one caller. An
+/// unreadable timestamp means a file shares a version with its other versions,
+/// which is where all three of these caches were before mtime was part of the
+/// key.
+fn scan_cache(
+) -> &'static std::sync::Mutex<std::collections::HashMap<crate::cache::Version, Remembered>> {
     static CACHE: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<ScanKey, Remembered>>,
+        std::sync::Mutex<std::collections::HashMap<crate::cache::Version, Remembered>>,
     > = std::sync::OnceLock::new();
     CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
@@ -537,14 +555,18 @@ mod tests {
         // Two versions of the same path differ; a missing file still answers.
         // The encoding itself is `cache::Version`'s, tested there once for all
         // three caches rather than three times in three shapes.
-        assert_eq!(scan_key(&file), scan_key(&file), "stable for one version");
+        assert_eq!(
+            crate::cache::Version::of(&file),
+            crate::cache::Version::of(&file),
+            "stable for one version"
+        );
         assert_ne!(
-            scan_key(&file),
-            scan_key(&dir.join("other.png")),
+            crate::cache::Version::of(&file),
+            crate::cache::Version::of(&dir.join("other.png")),
             "two captures are two versions",
         );
         // An unreadable timestamp is not a panic.
-        let _ = scan_key(&dir.join("never-existed.png"));
+        let _ = crate::cache::Version::of(&dir.join("never-existed.png"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -45,13 +45,14 @@ const IMAGE_STABLE_TICKS: u32 = 1;
 /// this watcher finishing *after* the clipboard grace expired, and every
 /// Win+PrtSc would have shelved two copies plus an unpruned PNG. Nothing joined
 /// them and no test could see it. Now the edit moves both.
-// `as_millis` is a `u128` and this is const arithmetic over three constants
-// declared a few lines up, none of them a second long. `u64::try_from` is not
-// usable in a const initialiser, so the conversion is stated here instead.
-#[allow(clippy::cast_possible_truncation)]
-pub(super) const SLOWEST_IMAGE: Duration = Duration::from_millis(
-    DEBOUNCE.as_millis() as u64 + SETTLE_TICK.as_millis() as u64 * IMAGE_STABLE_TICKS as u64,
-);
+///
+/// The same expression as [`settle_budget`], which is why it *is* that
+/// expression now. It was a second copy of the formula, and the two were only
+/// checked against each other: `the_slowest_image_budget_is_the_one_settle_
+/// actually_applies` measures the real tick count and compares it to this — so
+/// dropping `DEBOUNCE` from `settle_budget` alone left every gate green, and
+/// backfill would hand over files the watcher had not finished debouncing.
+pub(super) const SLOWEST_IMAGE: Duration = settle_budget(CaptureKind::Image);
 /// Recordings grow while they record; require a real pause before believing it.
 ///
 /// This has to outlast an encoder *stalling*, not just writing slowly. ffmpeg
@@ -79,13 +80,23 @@ const VIDEO_STABLE_TICKS: u32 = 8;
 /// `File::open` succeeds on a file its writer still holds — so it answered
 /// "finished" for every in-flight recording on two of the three platforms while
 /// being presented as the general rule.
+/// `const` so `SLOWEST_IMAGE` can be this rather than a second copy of it, and
+/// so `clipboard.rs`'s `ECHO_GRACE` still derives from a compile-time value.
+// `as_millis` is a `u128` and this is const arithmetic over three constants
+// declared a few lines up, none of them a second long. `u64::try_from` is not
+// usable in a const context, so the conversion is stated here instead —
+// `Duration`'s own `+` and `*` are not const either, which is what made the
+// duplicate formula look unavoidable.
+#[allow(clippy::cast_possible_truncation)]
 #[must_use]
-pub(super) fn settle_budget(kind: CaptureKind) -> Duration {
+pub(super) const fn settle_budget(kind: CaptureKind) -> Duration {
     let ticks = match kind {
         CaptureKind::Image => IMAGE_STABLE_TICKS,
         CaptureKind::Video => VIDEO_STABLE_TICKS,
     };
-    DEBOUNCE + SETTLE_TICK * ticks
+    Duration::from_millis(
+        DEBOUNCE.as_millis() as u64 + SETTLE_TICK.as_millis() as u64 * ticks as u64,
+    )
 }
 /// How long a vanished file is kept around before being forgotten.
 const GONE_GRACE: Duration = Duration::from_secs(5);

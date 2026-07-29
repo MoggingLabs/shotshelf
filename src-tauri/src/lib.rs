@@ -27,6 +27,7 @@ mod tray;
 mod update;
 mod webview_path;
 mod window;
+mod wire;
 
 use tauri::Manager;
 

@@ -26,6 +26,7 @@ import {
   grantsIn,
   silencedIn,
   tomlWithoutComments,
+  weakeningFlagsIn,
 } from "./rust-source.mjs";
 
 /** Wrap a fragment in enough Rust that it reads like a real file. */
@@ -59,6 +60,17 @@ void test("every way of writing a silencing attribute is counted", () => {
     "#! [allow(clippy::disallowed_methods)]",
     "#\n[allow(clippy::disallowed_methods)]",
     "# /* still an attribute */ [allow(clippy::disallowed_methods)]",
+    // A rustc lint is an escape hatch too, and the strongest one here:
+    // `cargo clippy -- -D warnings` is all that enforces "no dead code" on the
+    // Rust side, and `#[allow(dead_code)]` switches it off. Three were live in
+    // the tree, uncounted, while the gate's own comment read "Every escape
+    // hatch is counted, wherever it is."
+    "#[allow(dead_code)]",
+    "#[allow(unused)]",
+    "#[allow(unused_variables, unused_mut)]",
+    // The spelling all three of this tree's `dead_code` allowances use.
+    '#[cfg_attr(target_os = "macos", allow(dead_code))]',
+    '#[cfg_attr(any(target_os = "windows", target_os = "macos"), allow(dead_code))]',
   ];
 
   for (const form of seen) {
@@ -71,10 +83,15 @@ void test("every way of writing a silencing attribute is counted", () => {
 
 void test("prose and unrelated attributes are not counted", () => {
   const unseen = [
-    // Not a clippy lint, and not `warnings`: nothing in `clippy.toml` is
-    // switched off by it.
-    "#[allow(dead_code)]",
+    // Not an allowance at all: it changes formatting, and silences nothing.
+    // (It is still dangerous for a different reason — see `codeOnly`.)
     "#[rustfmt::skip]",
+    // Attributes that carry a parenthesised list but are not allowances.
+    "#[derive(Debug, Clone)]",
+    '#[serde(rename_all = "camelCase")]',
+    '#[cfg(target_os = "macos")]',
+    // An identifier that merely ends in `allow`.
+    "#[shallow(dead_code)]",
     // The files that explain why these attributes are dangerous must not read
     // as users of them. This is why the gate blanks comments rather than
     // anchoring to the start of a line.
@@ -105,7 +122,16 @@ void test("the lints an attribute silences are read out by name", () => {
     silencedIn(file("#[allow(clippy::disallowed_methods, clippy::disallowed_types)]")),
     ["clippy::disallowed_methods", "clippy::disallowed_types"],
   );
-  assert.deepEqual(silencedIn(file("#[allow(unused, warnings)]")), ["warnings"]);
+  assert.deepEqual(silencedIn(file("#[allow(unused, warnings)]")), ["unused", "warnings"]);
+  // A `reason` is a note, not a lint — and it is the only argument of an
+  // allowance that is not one.
+  assert.deepEqual(silencedIn(file('#[expect(clippy::disallowed_types, reason = "stated")]')), [
+    "clippy::disallowed_types",
+  ]);
+  // A `cfg_attr` wrapper's own arguments are not lints either.
+  assert.deepEqual(silencedIn(file('#[cfg_attr(target_os = "macos", allow(dead_code))]')), [
+    "dead_code",
+  ]);
 });
 
 void test("a directory grant is judged on its resolved recursion flag", () => {
@@ -218,12 +244,14 @@ void test("an allowance whose lint name cannot be read fails closed", () => {
     "fn x() {}",
     "",
   ].join("\n");
-  assert.deepEqual(silencedIn(composed), ["clippy::<unreadable>"]);
+  assert.deepEqual(silencedIn(composed), ["<unreadable>"]);
 
-  // A rustc lint names nothing of ours and must stay silent — the first version
-  // of this rule reported `#[allow(dead_code)]` as unreadable.
-  assert.deepEqual(silencedIn(file("#[allow(dead_code)]")), []);
-  assert.deepEqual(silencedIn(file("#[allow(unused)]")), []);
+  // A readable name beside an unreadable one is still reported by name, so the
+  // table entry for it does not have to be given up.
+  assert.deepEqual(silencedIn("macro_rules! q { ($l:ident) => { #[allow(dead_code, $l)] }; }"), [
+    "dead_code",
+    "<unreadable>",
+  ]);
 });
 
 void test("TOML comments are blanked, and only real comments", () => {
@@ -397,4 +425,70 @@ void test("a disallowed path is read from the array it has to be in", () => {
     ["disallowed-types = [", '  # { path = "tauri::path::BaseDirectory" },', "]", ""].join("\n"),
   );
   assert.deepEqual(silenced.get("disallowed-types"), []);
+});
+
+void test("a cargo config that weakens a lint is read as weakening it", () => {
+  // The third place a clippy level comes from, and the gate read neither of the
+  // first two spellings of it. A four-line a .cargo/config.toml at the repo
+  // root switched off the resolved-path half of the roaming-profile rule with
+  // `cargo clippy -- -D warnings` printing "Finished" and the directory gate
+  // printing success, while a module alias wrote the diagnostic log into
+  // `%APPDATA%`.
+  const weakening = [
+    ['[build]', 'rustflags = ["-Aclippy::disallowed_methods"]'],
+    ["[build]", 'rustflags = ["-A", "clippy::disallowed_methods"]'],
+    ["[build]", 'rustflags = ["--allow=clippy::disallowed_types"]'],
+    ["[build]", 'rustflags = ["--allow", "warnings"]'],
+    ["[build]", 'rustdocflags = ["-Awarnings"]'],
+    // Not under `[build]` at all: cargo takes these per target and from `[env]`.
+    ["[target.'cfg(all())']", 'rustflags = ["-Aclippy::disallowed_methods"]'],
+    ["[env]", 'RUSTFLAGS = "-Aclippy::disallowed_methods"'],
+    // Caps every lint in the crate at once, naming none of them.
+    ["[build]", 'rustflags = ["--cap-lints", "allow"]'],
+    // Downgrades a `deny` without spelling `allow`.
+    ["[build]", 'rustflags = ["--force-warn=clippy::disallowed_methods"]'],
+  ];
+
+  for (const lines of weakening) {
+    const config = [...lines, ""].join("\n");
+    assert.ok(
+      weakeningFlagsIn(config).length > 0,
+      `this weakens a lint and was not read as weakening: ${lines.join(" / ")}`,
+    );
+  }
+
+  // The flag is reported with what it names, so the message can say which rule
+  // went away rather than just that something did.
+  assert.deepEqual(weakeningFlagsIn('rustflags = ["-Aclippy::disallowed_methods"]'), [
+    "-A clippy::disallowed_methods",
+  ]);
+});
+
+void test("a cargo config that hardens or says nothing is left alone", () => {
+  const fine = [
+    // Hardenings. `-D` is what the gate itself runs with.
+    'rustflags = ["-Dwarnings"]',
+    'rustflags = ["--deny", "clippy::disallowed_methods"]',
+    'rustflags = ["--forbid=unsafe_code"]',
+    // Ordinary configuration.
+    '[build]\ntarget-dir = "target"',
+    '[target.x86_64-pc-windows-msvc]\nlinker = "rust-lld.exe"',
+    // A flag whose name merely ends in one of ours.
+    'rustflags = ["-Zself-profile"]',
+    'rustflags = ["--remap-path-prefix=/a=/b"]',
+    // And a commented-out weakening is not in force.
+    '[build]\n# rustflags = ["-Aclippy::disallowed_methods"]',
+    // A hash inside a string is not a comment, so this one *is* still live —
+    // covered by the weakening test above; here we only check the article of
+    // faith that ordinary strings survive.
+    'linker = "a # inside a string"',
+  ];
+
+  for (const config of fine) {
+    assert.deepEqual(
+      weakeningFlagsIn(config),
+      [],
+      `this weakens nothing and was reported: ${config}`,
+    );
+  }
 });

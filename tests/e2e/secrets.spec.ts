@@ -210,12 +210,16 @@ test("the shelf says once when captures are not being checked", async ({ page })
   await bootShelf(page);
 
   // In the status tooltip rather than on every card: this is a standing
-  // property of the platform, and a warning on each tile is one people stop
+  // property of the machine, and a warning on each tile is one people stop
   // reading. Saying nothing was the worse option — it made an unchecked
   // capture look identical to a checked one.
+  //
+  // "here", not "on this platform": on Linux the answer is per-machine — the
+  // recogniser is present or `tesseract` is not installed — so the wording that
+  // named the platform was a build-level claim the probe cannot make.
   await expect
     .poll(() => page.locator("#shelf-mark").getAttribute("title"))
-    .toMatch(/not checked for credentials/);
+    .toMatch(/not being checked for credentials/);
   await expect(page.locator("#shelf-alert")).toBeHidden();
 });
 

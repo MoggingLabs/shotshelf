@@ -35,7 +35,7 @@ export type CaptureKind = (typeof CAPTURE_KINDS)[number];
  * "Shotshelf". Absent on platforms that cannot say without asking for a
  * permission the app promises not to need.
  */
-interface CaptureContext {
+export interface CaptureContext {
   /**
    * The app and the window title as one line, composed in Rust so there is
    * only one answer.
