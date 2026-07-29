@@ -157,8 +157,14 @@ fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
         position.saturating_add(i32::try_from(extent).unwrap_or(i32::MAX))
     };
 
-    let x = edge(area.position.x, area.size.width) - to_physical(size.0 + SCREEN_MARGIN);
-    let y = edge(area.position.y, area.size.height) - to_physical(size.1 + SCREEN_MARGIN);
+    // Saturating here too. `edge` and `to_physical` were made total and then
+    // fed into a plain `-`, which panics on overflow in a debug build — and
+    // `gate:rust` builds debug. A saturating pair consumed by an unchecked
+    // subtraction does not deliver what the paragraph above promises.
+    let x =
+        edge(area.position.x, area.size.width).saturating_sub(to_physical(size.0 + SCREEN_MARGIN));
+    let y =
+        edge(area.position.y, area.size.height).saturating_sub(to_physical(size.1 + SCREEN_MARGIN));
 
     // On Linux this cannot fail and may not happen. `tao`'s GTK
     // `set_outer_position` returns `()` and only posts a request, which

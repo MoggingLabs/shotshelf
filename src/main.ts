@@ -87,6 +87,9 @@ const popover = new Popover(root, shelf, {
   // out from under any of them. The overlay was missing from this list, so the
   // four-second launch timer discarded an editor opened inside it.
   busy: () => shelf.dragging || shelf.overlayOpen || settingsOpen(),
+  onHidden: () => {
+    closeSettings();
+  },
 });
 
 shelf.start();

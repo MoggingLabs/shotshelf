@@ -17,6 +17,10 @@ export default defineConfig(
   {
     ignores: [
       "dist",
+      // The review council runs each seat in a throwaway worktree under here.
+      // They are clones of this repository, so linting them lints everything
+      // twice — and their transient probe files are not ours to judge.
+      ".claude/worktrees",
       "src-tauri",
       "test-results",
       "playwright-report",
@@ -40,6 +44,8 @@ export default defineConfig(
             "scripts/check-commands.mjs",
             "scripts/check-references.mjs",
             "scripts/check-dirs.mjs",
+            "scripts/rust-source.mjs",
+            "scripts/rust-source.test.mjs",
           ],
         },
         tsconfigRootDir: import.meta.dirname,

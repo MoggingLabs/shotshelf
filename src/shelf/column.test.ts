@@ -205,3 +205,22 @@ test("releasing the last real hold does restart the clock", () => {
   );
   assert.equal(column.expire(COLUMN_MS * 2), true, "and it expires a window later");
 });
+
+test("a column holding only a message is sized for the message", () => {
+  // The zero-card branch had no test at all: deleting it left 111 unit and 160
+  // browser tests green, and it is the whole reason `Popover.showProblem` does
+  // not put its message at the bottom of 136px of nothing.
+  const strip = 46;
+  assert.equal(
+    columnHeight(0, strip),
+    COLUMN_PADDING + strip,
+    "no cards and a strip is padding plus the strip",
+  );
+
+  // The floor still applies when there is nothing else to show — a window of
+  // pure padding is not a window anyone wants either.
+  assert.equal(columnHeight(0), columnHeight(1), "no cards and no strip keeps the one-card floor");
+
+  // And one card plus a strip is still both.
+  assert.equal(columnHeight(1, strip), columnHeight(1) + strip);
+});

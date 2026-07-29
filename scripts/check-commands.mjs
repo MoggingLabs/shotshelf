@@ -15,6 +15,8 @@
 
 import { globSync, readFileSync } from "node:fs";
 
+import { codeOnly } from "./rust-source.mjs";
+
 const LIB = "src-tauri/src/lib.rs";
 
 /**
@@ -32,7 +34,14 @@ const LIB = "src-tauri/src/lib.rs";
 const UNWIRED = new Map();
 
 function registeredCommands() {
-  const source = readFileSync(LIB, "utf8");
+  // Comments blanked first, through the same parser `check-dirs.mjs` uses.
+  //
+  // This split the block on `,` over the raw text, so a single `//` line inside
+  // `generate_handler![…]` produced garbage entries *and swallowed the command
+  // on the line below it* — that command then silently stopped being checked in
+  // either direction. `lib.rs` already writes `//` comments immediately under
+  // the block, so it was one edit away.
+  const source = codeOnly(readFileSync(LIB, "utf8"));
   const block = /generate_handler!\[([\s\S]*?)\]/.exec(source);
   if (!block?.[1]) throw new Error(`no generate_handler! found in ${LIB}`);
 

@@ -395,13 +395,24 @@ test("a capture landing inside the launch appearance keeps its full minute", asy
   await bootShelf(page);
   await launchAppearance(page);
 
-  // Just inside the launch window.
-  await page.clock.runFor(3_900);
+  // Just inside the launch window — and asserted, not assumed.
+  //
+  // `clock.install()` keeps ticking with real time, so `runFor(3_900)` lands at
+  // 3 900 ms *plus* however long booting took. The first version of this test
+  // overshot `LAUNCH_MS` on any loaded machine, the launch dismissal fired
+  // before the capture landed, and `clearCalls()` on the next line erased the
+  // evidence — after which "no further calls" was trivially true. It passed
+  // with the fix reverted.
+  await page.clock.runFor(3_000);
+  // If this is not zero the launch dismissal already fired, and everything
+  // below it would be measuring the wrong thing.
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+
   await land(page, FIXTURE.wide);
   await expect(page.locator(".tile")).toHaveCount(1);
-  await page.evaluate(() => window.__shotshelf__.clearCalls());
 
-  // Past what would have been the launch dismissal.
+  // Past what would have been the launch dismissal. Nothing is cleared, so the
+  // count below covers the whole test rather than only what came after it.
   await page.clock.runFor(2_000);
 
   await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");

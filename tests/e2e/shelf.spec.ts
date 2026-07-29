@@ -777,6 +777,15 @@ test("a capture the engine could not save is reported on screen", async ({ page 
   await expect
     .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("show_shelf").length))
     .toBe(1);
+
+  // The *shelf* is in the column shape, not just the window.
+  //
+  // Asserted on `#shelf-items`, which `Shelf` sets from its own `#mode` and so
+  // decides what is rendered — not on `.shelf`'s `data-mode`, which
+  // `showColumn` writes directly. Reading the second one is why deleting
+  // `setMode` left this test green: the DOM said column while `Shelf` went on
+  // rendering the full browse list into a window resized to a strip.
+  await expect(page.locator("#shelf-items")).toHaveAttribute("data-view", "column");
 });
 
 test("the window a lost-capture message put up goes away with the message", async ({ page }) => {
@@ -859,4 +868,106 @@ test("a lost-capture message does not take the settings panel off screen", async
   // The message still lands — the window is already on screen, strip and all.
   await expect(page.locator("#shelf-alert")).toContainText(/could not be saved/i);
   await expect(page.locator("#settings-panel")).toBeVisible();
+});
+
+test("a capture the backfill already showed does not land a second time", async ({ page }) => {
+  // Backfill wins this race, always: the front end polls for the engine every
+  // 500ms and `catch_backfill` answers at once, while the watcher holds a file
+  // for 750ms — or about 2.8s for a recording — before emitting. So the live
+  // copy arrives *after* the backfilled one, with a different `ts` and
+  // therefore a different id. The first version of this guard only checked what
+  // was already on the shelf when a backfilled capture arrived, which is the
+  // opposite order.
+  // Seeded before boot: the app asks for the backfill during start-up, so a
+  // stub installed afterwards arrives too late to be the answer.
+  await page.addInitScript((file) => {
+    window.__shotshelfStubs__ = {
+      ...(window.__shotshelfStubs__ ?? {}),
+      catch_backfill: [{ path: file, kind: "image", ts: 1 }],
+    };
+  }, FIXTURE.wide);
+  await bootShelf(page);
+  await expect(page.locator(".tile")).toHaveCount(1);
+
+  // The watcher's copy of the same file, stamped when it was caught.
+  await land(page, FIXTURE.wide, { ts: Date.now() });
+
+  await expect(page.locator(".tile")).toHaveCount(1);
+  await expect(page.locator("#shelf-count")).toHaveText("1 capture");
+});
+
+test("a lost-capture message is raised even when the shelf was put away with settings open", async ({
+  page,
+}) => {
+  // Nothing closed the settings panel when the window went down, so
+  // `settingsOpen()` — and `busy()` with it — stayed true for the rest of the
+  // session on a window that was not on screen. `showProblem` returned at that
+  // guard, and the one message a user cannot afford to miss was unreachable
+  // again, through a different guard than the last two rounds fixed.
+  await bootShelf(page);
+  await openBrowse(page);
+  await page.locator("#shelf-settings").click();
+  await expect(page.locator("#settings-panel")).toBeVisible();
+
+  await page.locator("#shelf-hide").click();
+  await page.evaluate((event) => window.__shotshelf__.emit(event, null), HIDDEN_EVENT);
+  // The panel goes with the window, which is the root of it.
+  await expect(page.locator("#settings-panel")).toBeHidden();
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.evaluate(
+    ([event, message]) => window.__shotshelf__.emit(event, message),
+    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+  );
+
+  await expect(page.locator("#shelf-alert")).toContainText(/could not be saved/i);
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("show_shelf").length))
+    .toBe(1);
+});
+
+test("a lost-capture message survives the launch dismissal", async ({ page }) => {
+  // `Popover.catch` was given `#standDown` for exactly this; `showProblem`
+  // raises a window by the same route, in the same four seconds, and was not.
+  await page.clock.install();
+  await bootShelf(page);
+  await launchAppearance(page);
+  await page.clock.runFor(3_000);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.evaluate(
+    ([event, message]) => window.__shotshelf__.emit(event, message),
+    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+  );
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+
+  // Past where the launch timer would have fired.
+  await page.clock.runFor(2_000);
+
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+});
+
+test("a lost-capture message raised during the launch appearance reshapes the shelf too", async ({
+  page,
+}) => {
+  // The launch appearance is the one state where the window is showing, nobody
+  // asked for it, and the shape is *browse* — so `showProblem` has to tell the
+  // shelf, not just the window. Every other route in already does.
+  //
+  // The sibling test above cannot see this: it emits `shelf://hidden` first,
+  // and `adoptHidden` sets the column mode itself, so `setMode` in
+  // `showProblem` is redundant there and deleting it changed nothing.
+  await bootShelf(page);
+  await launchAppearance(page);
+  await expect(page.locator("#shelf-items")).toHaveAttribute("data-view", "browse");
+
+  await page.evaluate(
+    ([event, message]) => window.__shotshelf__.emit(event, message),
+    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+  );
+
+  await expect(page.locator("#shelf-alert")).toContainText(/could not be saved/i);
+  // Otherwise the full browse list renders into a window resized to a strip.
+  await expect(page.locator("#shelf-items")).toHaveAttribute("data-view", "column");
 });

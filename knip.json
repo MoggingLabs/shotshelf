@@ -5,5 +5,6 @@
     "src/**/*.test.ts",
     "scripts/*.mjs"
   ],
-  "project": ["src/**/*.ts", "tests/**/*.ts", "scripts/*.mjs"]
+  "project": ["src/**/*.ts", "tests/**/*.ts", "scripts/*.mjs"],
+  "ignore": [".claude/worktrees/**"]
 }

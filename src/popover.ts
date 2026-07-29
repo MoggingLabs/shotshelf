@@ -35,6 +35,13 @@ export interface PopoverOptions {
    * opened inside its four seconds, marks and all.
    */
   busy(): boolean;
+  /**
+   * The window has gone. Put away anything that only makes sense on screen.
+   *
+   * A callback rather than an import, for the same reason `busy` is one: this
+   * class owns the window and knows nothing about panels.
+   */
+  onHidden(): void;
 }
 
 export class Popover {
@@ -146,7 +153,17 @@ export class Popover {
     // took the panel off screen and left `settingsOpen()` true, which swallows
     // every shelf key until Escape. Each of these states already has the window
     // up with the strip readable, so there is nothing to raise.
-    if (this.#options.busy()) return;
+    // `#showing` as well as `busy()`: the guard is about not taking something
+    // off screen, and there is nothing on screen to take. Without it, any state
+    // that leaves `busy()` true while the window is down — which is every state
+    // it can be in, since a drag, an overlay and the panel all used to survive
+    // a hide — made this message unreachable again.
+    if (this.#showing && this.#options.busy()) return;
+    // The launch timer no longer owns this window, for the same reason `catch`
+    // stood it down: raised at t = 3.9 s, the four-second dismissal took the
+    // message away a tenth of a second later — and this is the one message the
+    // user cannot afford to miss.
+    this.#standDown();
     // The shelf is told, not just the window. `showColumn` sets the column
     // shape and resizes to it; every other route in — `catch` through `note`,
     // and `adoptHidden` — also calls `setMode`, and this one did not. During
@@ -274,6 +291,20 @@ export class Popover {
     // rest of the session. Releasing every hold here is the reconciliation
     // that DOM enter/leave pairs cannot be relied on to provide.
     this.#shelf.releaseColumn();
+    // The settings panel closes with the window, like the overlay above it.
+    //
+    // Nothing else did. `dismiss()` from the hide button, the tray, the hotkey
+    // and the column's own expiry all reach here, and only Escape had a rung
+    // that closed the panel — so "open the shelf, open settings, put the shelf
+    // away" left `settingsOpen()` true for the rest of the session, on a window
+    // that was not on screen.
+    //
+    // Two things read that flag and both then misbehaved: `main.ts`'s keydown
+    // guard swallowed every shelf key, and `busy()` stayed true, which is what
+    // made a lost-capture message unreachable through `showProblem` — the exact
+    // failure the last two rounds were spent fixing, reached through a
+    // different guard.
+    this.#options.onHidden();
     // Whatever shape it was in, the next capture gets the column.
     this.#shelf.setMode("column");
   }

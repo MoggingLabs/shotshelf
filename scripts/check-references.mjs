@@ -273,7 +273,20 @@ function unwrap(block) {
  */
 function repoFiles() {
   const byName = new Map();
-  const listed = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" });
+  // Tracked files *and* untracked ones git would accept, but nothing ignored.
+  //
+  // Plain `ls-files` is the index only, and that made a file created in the
+  // same change as the comment naming it fail this gate until it was staged —
+  // which fired on a real, correct comment the moment its test file was
+  // written. `--others --exclude-standard` adds what is on disk and not
+  // ignored, so `prompts/`, `reference/`, `src-tauri/binaries/` and
+  // `node_modules/` stay out, which is the whole reason this reads git at all
+  // rather than globbing.
+  const listed = execFileSync(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    { encoding: "utf8" },
+  );
 
   for (const entry of listed.split("\0")) {
     if (entry === "") continue;
