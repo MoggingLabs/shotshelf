@@ -114,11 +114,11 @@ impl SettingsStore {
 
     /// Replace the settings and write them out. Returns what was actually
     /// stored so the caller can see any clamping applied.
-    pub fn replace(&self, next: Settings) -> Settings {
+    pub fn replace(&self, next: Settings) -> Result<Settings, String> {
         let next = sanitise(next);
         *self.lock() = next.clone();
-        self.persist(&next);
-        next
+        self.persist(&next)?;
+        Ok(next)
     }
 
     /// Narrower edit for the pin toggle, which the settings surface never touches.
@@ -201,17 +201,27 @@ impl SettingsStore {
     /// syncs it. A pin toggle and a capture both take `persist_local` alone —
     /// see `note_capture` for why rewriting preferences per screenshot was a
     /// bug rather than a cost.
-    fn persist(&self, settings: &Settings) {
+    ///
+    /// Returns whether the preferences half was written, for the same reason
+    /// `persist_local` does: a settings change is something the user just asked
+    /// for and is watching. On a full disk the panel repainted as though it had
+    /// taken, said nothing, and the change was gone at the next launch — with
+    /// the new hotkey already taken from every other app for the session. That
+    /// is the sibling of the `set_pinned` bug fixed a round earlier, left in
+    /// place because only one of the two writers was looked at.
+    fn persist(&self, settings: &Settings) -> Result<(), String> {
         let preferences = Settings {
             pinned: Vec::new(),
             ..settings.clone()
         };
-        if let Err(err) = write(&self.path, &preferences) {
+        let wrote = write(&self.path, &preferences).map_err(|err| {
             crate::diag::warn(&format!("could not save settings: {err}"));
-        }
-        // Both files are written here; the pins half is the same background
-        // write as above and its failure is already logged.
+            format!("Those settings could not be saved: {err}")
+        });
+        // The pins half is a background write here and its failure is logged;
+        // the caller is watching the preferences half.
         let _ = self.persist_local();
+        wrote
     }
 
     fn lock(&self) -> MutexGuard<'_, Settings> {
@@ -399,7 +409,10 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
     // so a migrated set of pins lands in its new home immediately.
     let missing = |path: &PathBuf| !path.as_os_str().is_empty() && !path.exists();
     if missing(&store.path) || missing(&store.pins) {
-        store.persist(&store.get());
+        // Discarded on purpose: this is the first-run write, before anyone is
+        // watching, and `persist` has already logged any failure. The app runs
+        // on defaults if it cannot write them down.
+        let _ = store.persist(&store.get());
     }
 
     store
@@ -729,6 +742,38 @@ mod tests {
     }
 
     #[test]
+    fn a_settings_write_that_fails_is_reported_rather_than_repainted() {
+        // The sibling of the `set_pinned` bug, left in place because only one of
+        // the two writers was looked at. `persist` logged and discarded, so
+        // `replace` returned the new settings and `set_settings` answered `Ok`:
+        // the panel repainted as though the change had taken, said nothing, and
+        // it was gone at the next launch — with the new hotkey already taken
+        // from every other app for the session.
+        let dir = workspace("unwritable-settings");
+        let roaming = dir.join("settings.json");
+        let local = dir.join("pinned.json");
+
+        let store = load_from(Some(roaming.clone()), Some(local));
+
+        // A *directory* where the staging file goes, so `write` fails at the
+        // step every real failure fails at. A missing parent will not do it —
+        // `write` creates one — and a full disk cannot be simulated portably.
+        std::fs::create_dir_all(roaming.with_extension("json.part")).expect("a blocking directory");
+        let answer = store.replace(Settings {
+            max_items: 12,
+            ..Settings::default()
+        });
+
+        assert!(answer.is_err(), "a failed write must not report success");
+        // And the in-memory value still moved, so the running session behaves as
+        // asked — it is only the persistence that failed, and that is what the
+        // message says.
+        assert_eq!(store.get().max_items, 12);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_corrupt_settings_file_is_kept_rather_than_overwritten() {
         // `persist` writes *both* files, so an unreadable `settings.json` was
         // replaced with defaults whenever `pinned.json` was absent — which is
@@ -964,7 +1009,9 @@ mod tests {
             last_capture: Mutex::new(0),
         };
         // Preferences on disk first, as any real install has them.
-        store.replace(Settings::default());
+        store
+            .replace(Settings::default())
+            .expect("the preferences write succeeds");
         let before = std::fs::read_to_string(&roaming).expect("preferences were written");
         assert!(before.contains("hotkey"));
 
@@ -1237,7 +1284,7 @@ pub fn set_settings<R: Runtime>(
         crate::hotkey::rebind(&app, &previous.hotkey, &candidate.hotkey)?;
     }
 
-    Ok(store.replace(candidate))
+    store.replace(candidate)
 }
 
 #[tauri::command]

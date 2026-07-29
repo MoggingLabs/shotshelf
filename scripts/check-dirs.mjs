@@ -143,8 +143,9 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
   // this file to be bypassed that way. Clippy resolves the path instead, and
   // the three legitimate granters carry a named `#[allow]` at the call.
   //
-  // Second: the exemption here is per *file*, which is the reason
-  // `webview_path::allow_reading_pinned` lives where it does: while that
+  // Second: the exemption here is per *file*. That once let a directory grant
+  // hide inside an exempt module, which is why a grant belongs in a file that
+  // never legitimately needs one: while that
   // function sat in `src-tauri/src/catch/mod.rs`, which is exempt for
   // `allow_reading_captures`, this check could not see it and the escalation
   // re-landed with every gate green. A reviewer proved exactly that. A module

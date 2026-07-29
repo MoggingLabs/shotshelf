@@ -577,3 +577,19 @@ test("a pin that could not be saved says so instead of lighting the star in sile
   await expect(page.locator("#shelf-alert")).toBeVisible();
   await expect(page.locator("#shelf-alert")).toContainText(/could not be saved/i);
 });
+
+// The launch redraw has no browser test, and that is written down rather than
+// implied.
+//
+// `main.ts` redraws every card once the catch engine reports ready, because a
+// pinned capture renders before the asset-protocol scope is open and the image
+// `error` handler is `{ once: true }` — so a present file reads as "the file has
+// gone" for the session. The previous fix granted the scope from the stored pin
+// list, which let a hand-edited `pinned.json` admit any absolute path; that is
+// gone.
+//
+// Driving the retry from a spec needs the fake clock stepped past two 500 ms
+// retries but stopped short of the four-second launch dismissal, which reshapes
+// the shelf — and every arrangement of that I tried either missed the redraw or
+// measured the dismissal instead. A test that passes for the wrong reason is
+// worse than none here, so this says what is uncovered.

@@ -162,6 +162,20 @@ export class Shelf {
     return editorIsOpen() || previewIsOpen();
   }
 
+  /**
+   * Draw every card again from scratch.
+   *
+   * Called once, when the catch engine reports ready: a capture restored at
+   * launch can have rendered before the asset-protocol scope was open, and that
+   * failure is permanent — the image `error` handler is `{ once: true }` and the
+   * view reuses the node. Cheap, and only on a transition that happens once a
+   * session.
+   */
+  redrawTiles(): void {
+    this.#view.forgetTiles();
+    this.#refresh();
+  }
+
   /** Window height the column needs for what it is holding. */
   columnHeight(): number {
     return columnHeight(this.#column.size, alertHeight());

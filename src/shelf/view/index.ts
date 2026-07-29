@@ -28,6 +28,24 @@ export class ShelfView {
   /** Card per capture id, reused across redraws. */
   readonly #tiles = new Map<string, HTMLElement>();
 
+  /**
+   * Forget every built tile, so the next render makes them again.
+   *
+   * For one case: a thumbnail that failed because the asset-protocol scope was
+   * not open yet. The image `error` handler is `{ once: true }` and this map
+   * hands the same node back on every later render, so a capture restored at
+   * launch — before the catch engine finishes granting the scope on its worker —
+   * showed "the file has gone" for a file that was there, permanently.
+   *
+   * The alternative tried first was granting the scope from the stored pin list,
+   * which let a hand-edited `pinned.json` admit any absolute path. Rebuilding
+   * the tiles fixes the rendering without widening what Rust will read.
+   */
+  forgetTiles(): void {
+    for (const tile of this.#tiles.values()) tile.remove();
+    this.#tiles.clear();
+  }
+
   constructor(list: HTMLElement, count: HTMLElement, callbacks: TileCallbacks) {
     this.#list = list;
     this.#count = count;

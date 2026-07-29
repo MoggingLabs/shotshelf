@@ -327,7 +327,16 @@ void initSettings(() => shelf.applySettings())
   });
 
 void whenEngineIsUp("the watch folders", () => invoke<string[]>("catch_watch_dirs"))
-  .then((dirs) => showWatchState(dirs))
+  .then((dirs) => {
+    showWatchState(dirs);
+    // The engine is up, so the asset-protocol scope for capture folders is now
+    // open. Anything restored before that — pinned captures, which render as
+    // soon as `get_settings` answers — may have failed to load against a scope
+    // that did not yet include them, and that failure does not retry itself:
+    // the image `error` handler is `{ once: true }` and the view reuses the
+    // node. One redraw here is the whole fix.
+    shelf.redrawTiles();
+  })
   .catch((error: unknown) => {
     console.error("[shotshelf] could not read the watch folders", error);
     // The indicator is told too. Only the `.then` used to set it, so the app's

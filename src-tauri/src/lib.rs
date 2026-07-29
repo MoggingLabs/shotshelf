@@ -108,21 +108,20 @@ pub fn run() {
             let current = stored.get();
             app.manage(stored);
 
-            // Before anything slow, and before the webview can ask.
+            // No scope grant from the stored pin list, deliberately.
             //
-            // `restorePinned` runs as soon as `get_settings` answers, which is
-            // now; the engine's own grant is on a worker that may take seconds.
-            // Without this the tiles a restart puts back can render as "the file
-            // has gone" for files that are present, and permanently — the image
-            // `error` handler is `{ once: true }`.
-            webview_path::allow_reading_pinned(
-                app.handle(),
-                &current
-                    .pinned
-                    .iter()
-                    .map(|item| std::path::PathBuf::from(&item.path))
-                    .collect::<Vec<_>>(),
-            );
+            // Pinned tiles render before the engine's grant lands, and a round
+            // fixed that by granting each stored pin. But `pinned.json` is
+            // hand-editable and both `set_pinned` and `set_settings` let the
+            // webview write it, with `allowed_pins` keeping anything that merely
+            // parses as absolute — so one pin plus a restart admitted an
+            // arbitrary file to `describe_capture`, `copy_capture` and
+            // `prepare_drag`. That is the capability this module's header says
+            // the scope removes.
+            //
+            // The race is real; the grant was the wrong end of it. The front end
+            // retries a thumbnail once the catch engine reports ready, which
+            // fixes the rendering without widening what Rust will read.
 
             // A shortcut another app already owns is worth saying out loud —
             // the shelf still works, it just can't be summoned that way.
