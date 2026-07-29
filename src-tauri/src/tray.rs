@@ -104,10 +104,12 @@ pub fn set_capture_count<R: Runtime>(app: AppHandle<R>, count: usize) {
     // `not(any(windows, macos))`, which names the GTK platform.
     //
     // Both macOS and every GTK platform have a real `set_title`; only Windows
-    // does not. The five sites that spell it the narrower way — `catch/paths.rs`,
-    // `enrich/foreground.rs`, `enrich/ocr.rs`, `share.rs`, `window.rs` — are
-    // each choosing a GTK-specific implementation, which is a different question
-    // from "does this API exist here".
+    // does not. The sites that spell it the narrower way are each choosing a
+    // GTK-specific *implementation*, which is a different question from "does
+    // this API exist here" — and no list of them is given, because the last one
+    // was wrong on the count and named `share.rs`, which uses this same wider
+    // form for the same reason. A tally in prose goes stale; the criterion does
+    // not.
     //
     // What was wrong before was `any(macos, linux)`: an enumeration, so the
     // capture count silently never reached the tray on any other Unix

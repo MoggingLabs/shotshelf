@@ -367,12 +367,28 @@ enum Payload {
 
 /// What the clipboard plugin wants for a file, per platform.
 ///
-/// **Windows and macOS want a bare path.** This used to say macOS wanted a
-/// `file://` URI and that the plugin "rejects the wrong one outright" — both
-/// false. `clipboard-rs`'s macOS backend hands the strings straight to
-/// `NSFilenamesPboardType`, which is a property list of POSIX paths: it does
-/// not convert and it does not reject, so a URI went onto the pasteboard
-/// verbatim and pasted as nothing usable.
+/// **Windows: a bare path. macOS: `file://` plus a raw path. Linux: `file://`
+/// plus a percent-encoded one.** Three platforms and three contracts; the
+/// `cfg` blocks below give each its own, because grouping any two of them has
+/// now produced a bug twice.
+///
+/// Two earlier versions of this paragraph were wrong in opposite directions,
+/// and the second one caused a shipped blocker, so both are recorded here
+/// rather than quietly replaced.
+///
+/// The first said macOS wanted a URI *because the plugin rejects the wrong one*.
+/// The second retracted that as "false" on the grounds that `clipboard-rs`'s
+/// macOS backend hands strings straight to `NSFilenamesPboardType`, a property
+/// list of POSIX paths that neither converts nor rejects — true of that layer,
+/// and it grouped macOS with Windows. The retraction had reasoned one layer too
+/// low: the plugin sits above `clipboard-rs` and refuses a bare path on macOS
+/// outright, so every recording copy on a Mac failed with "Invalid file uri"
+/// and never reached the pasteboard at all.
+///
+/// What remains genuinely unknown is what a receiver makes of a `file://` URI
+/// found in `NSFilenamesPboardType` — nobody here has a Mac. That is stated at
+/// the `cfg` below, where the choice is made. It is not a reason to send the
+/// form that provably cannot get past the plugin.
 ///
 /// **X11 wants a `file://` URI in `text/uri-list`**, which must be
 /// percent-encoded — and this emitted raw spaces. Reachable only for
@@ -394,32 +410,39 @@ enum Payload {
 /// raw space is not something anyone here has tested on a Linux desktop —
 /// which `docs/USAGE.md` already says of Linux generally.
 fn file_uri(path: &Path) -> String {
-    // Windows is the *only* platform that takes a bare path here.
+    // Three platforms, three different contracts. Grouping any two of them has
+    // now caused a bug twice, so each says what it is.
     //
-    // `tauri-plugin-clipboard`'s `write_files_uris` validates before it does
-    // anything: it rejects a `file://` prefix on Windows and **requires** one on
-    // macOS and Linux. macOS was grouped with Windows, so every recording copy
-    // on a Mac returned "Invalid file uri … should start with file://" — not a
-    // degraded paste, a hard error, every time, for the one path
-    // `docs/USAGE.md` documents as "recordings as a file reference".
-    //
-    // The earlier docstring above reasoned from `clipboard-rs`'s
-    // `NSFilenamesPboardType`, which does want POSIX paths, and never looked at
-    // the plugin layer sitting on top of it. Both statements were true about
-    // their own layer and the wrong one won.
+    // **Windows: a bare path.** `tauri-plugin-clipboard`'s `write_files_uris`
+    // rejects a `file://` prefix here outright.
     #[cfg(target_os = "windows")]
     {
         path.to_string_lossy().into_owned()
     }
-    // macOS and Linux both take the URI form the plugin demands.
+    // **macOS: `file://` and a raw path.**
     //
-    // NOT VERIFIED ON A MAC, and worth stating plainly: `clipboard-rs` puts this
-    // string verbatim into `NSFilenamesPboardType`, which is documented as a
-    // property list of POSIX paths, so a receiver may or may not resolve a
-    // `file://` URI found there. What is certain is that the previous form
-    // never reached the pasteboard at all — the plugin refused it first — so
-    // this is the better of two imperfect options rather than a known-good one.
-    #[cfg(not(target_os = "windows"))]
+    // The prefix is forced from above and the *absence* of escaping is forced
+    // from below. The plugin refuses a bare path on macOS — that was the
+    // blocker, every recording copy failing with "Invalid file uri" — and it
+    // has no other entry point. Underneath, `clipboard-rs` puts the string
+    // verbatim into `NSFilenamesPboardType`, documented as an array of fully
+    // qualified pathnames, so a receiver that strips `file://` gets whatever is
+    // left. Percent-encoding it, which the previous version did by sharing the
+    // Linux branch, meant that leftover contained `%20` for every space — and
+    // every default macOS recording name has spaces. That turned a loud failure
+    // into a silent one. The plugin's own convention for this platform
+    // is `format!("file://{}", file)` built from a bare path, with no encoding —
+    // which is what this now matches.
+    #[cfg(target_os = "macos")]
+    {
+        format!("file://{}", path.to_string_lossy())
+    }
+    // **Linux: `file://` and percent-encoded.**
+    //
+    // This is a `text/uri-list`, where escaping is required by the format: a raw
+    // space makes the entry malformed. See `percent_encode_path` above for why
+    // recordings are the case that always needs it.
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         format!("file://{}", percent_encode_path(&path.to_string_lossy()))
     }
@@ -443,6 +466,9 @@ fn video_preview<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
 ///
 /// Deliberately conservative: everything outside the unreserved set and `/` is
 /// escaped, which is always valid even where it is not required.
+// Linux only. macOS takes the `file://` form without escaping — a pasteboard
+// of pathnames, not a `text/uri-list` — so this is unused on both of the other
+// two, and the allowance says exactly which.
 #[cfg_attr(any(target_os = "windows", target_os = "macos"), allow(dead_code))]
 fn percent_encode_path(path: &str) -> String {
     let mut out = String::with_capacity(path.len());

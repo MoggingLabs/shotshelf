@@ -59,21 +59,21 @@ Linux user has did not work when followed verbatim; `.github/workflows/ci.yml` i
 same set.) The tray needs an AppIndicator host — GNOME needs the
 AppIndicator extension; KDE, Xfce and Cinnamon have one already.
 
-Two things work differently there. The first is imposed by the drag protocol: the URIs Shotshelf
+Three things work differently there. The first is imposed by the drag protocol: the URIs Shotshelf
 advertises when you drag a capture out are built by the drag library, which does not
 percent-encode them, and every Linux screenshot name contains spaces. Whether that matters
 depends on the application you drop onto — most tolerate it, some may not — and nobody has yet
 run Shotshelf on a Linux desktop to find out. Copy still works either way.
 
-The third is scope. Linux has no single conventional screenshot folder — GNOME, KDE and
+The second is scope. Linux has no single conventional screenshot folder — GNOME, KDE and
 Flameshot each choose differently and several write straight into `~/Pictures` — so Shotshelf
 watches `~/Pictures` and `~/Videos` themselves, not just a `Screenshots` subfolder. Two
 consequences worth knowing: anything you drop into either folder is shelved as a capture, and
 the shelf's own webview is granted read access to the images and videos sitting directly in
-them. Windows watches three specific subfolders and macOS one, so this is broader than either.
+them. Windows watches four specific subfolders and macOS one, so this is broader than either.
 Set `SHOTSHELF_WATCH_DIRS` to narrow it.
 
-The second is imposed by the tray protocol rather than by choice: Linux
+The third is imposed by the tray protocol rather than by choice: Linux
 tray icons deliver no click events to the app, so **open the shelf from the icon's menu or the
 hotkey** rather than by clicking the icon.
 

@@ -1,6 +1,7 @@
 //! What the shelf remembers between launches.
 //!
-//! A single JSON file in the OS config directory — no accounts, no sync, no
+//! Two JSON files, split by what may roam. `settings.json` in the OS config
+//! directory — no accounts, no sync, no
 //! network, and deliberately few knobs. It holds where the shelf sits, how long
 //! captures stay, the toggle shortcut, and the paths of pinned items. Capture
 //! *contents* are never written here; only paths and a little metadata.
@@ -384,6 +385,12 @@ fn set_aside(path: &std::path::Path) -> Option<std::path::PathBuf> {
 ///
 /// Preferences only. Pinned paths live somewhere else — see [`pins_path`].
 fn settings_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    // The one permitted call. `clippy.toml` disallows `dirs::preferences`
+    // everywhere else — the script alone matched on how the call is *spelled*,
+    // and one module alias walked past it — so the exception lives here, next
+    // to the reason: this file writes `settings.json` and nothing else, and
+    // `persist` blanks `pinned` before serialising it.
+    #[allow(clippy::disallowed_methods)]
     Some(crate::dirs::preferences(app).ok()?.join("settings.json"))
 }
 

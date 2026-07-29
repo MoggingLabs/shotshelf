@@ -24,6 +24,20 @@ jobs:
   bundle:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    # Promoted to a job-level env var because `secrets` is **not** among the
+    # contexts available to a step's `if:` — GitHub's context table lists
+    # github, needs, strategy, matrix, job, runner, env, vars, steps and inputs,
+    # and nothing else. `if: ${{ secrets.X != '' }}` therefore either fails the
+    # workflow outright or silently never runs; either way the signature check
+    # below, which is the only thing in the repo that notices a configured key
+    # producing no `.sig`, was not a check at all. `env` *is* available, so this
+    # is the shape GitHub's own secrets guide prescribes.
+    #
+    # The value is only ever compared against empty — never echoed, never passed
+    # to a shell — and `TAURI_SIGNING_PRIVATE_KEY` still reaches the bundler
+    # through the step-level `env` block, unchanged.
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     strategy:
       fail-fast: false
       matrix:
@@ -147,7 +161,7 @@ jobs:
       # documented outcome. The failure being caught is "you meant to sign and
       # did not", which is silent in every other signal.
       - name: Check the signed artifacts were actually signed
-        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        if: env.HAS_SIGNING_KEY != ''
         shell: bash
         run: |
           signatures=$(find src-tauri/target/release/bundle -type f -name '*.sig' | wc -l)

@@ -246,11 +246,15 @@ export class Shelf {
     if (item.kind === "video") void forgetVideo(item.path);
   }
 
-  #enforceLimits(): void {
+  /** `true` if anything was evicted, which is the caller's cue to refresh. */
+  #enforceLimits(): boolean {
+    let evictedAny = false;
     for (const evicted of this.#store.trim(this.#options.limits().maxItems)) {
       this.#release(evicted);
       this.#column.remove(evicted.id);
+      evictedAny = true;
     }
+    return evictedAny;
   }
 
   /**
@@ -633,8 +637,15 @@ export class Shelf {
     if (pinned === undefined) return;
 
     this.#view.reflectPin(id, pinned);
-    // A newly pinned capture may put the shelf back under its cap.
-    this.#enforceLimits();
+    // *Un*pinning is what can evict: the cap counts unpinned captures, so
+    // pinning only ever reduces that count and can never push the shelf over.
+    // The comment here used to say the opposite, and the code matched the
+    // comment — `#enforceLimits` was called without the `#refresh()` its other
+    // two callers pair it with. So unpinning at the cap dropped a capture while
+    // the header still counted it, the tray badge was never told, and `#order`
+    // went on naming a card that had gone, which an arrow key or a shift-range
+    // could then select to no effect.
+    if (this.#enforceLimits()) this.#refresh();
     void this.#savePins();
   }
 

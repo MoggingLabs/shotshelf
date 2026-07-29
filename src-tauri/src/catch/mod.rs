@@ -561,6 +561,22 @@ pub fn catch_watch_dirs<R: Runtime>(app: AppHandle<R>) -> Result<Vec<String>, St
 /// for `get_settings`, which loses the same race for the same reason.
 pub const STARTING: &str = "the catch engine is still starting";
 
+/// The same sentence, as the front end matches it.
+///
+/// One string in three hand-maintained copies across two languages, with
+/// nothing joining them: this constant, `main.ts`'s `includes("still starting")`
+/// and the e2e harness's own copy of the message. Rewording this alone left
+/// every gate green — clippy, 129 Rust tests, 118 browser tests — while in the
+/// real app `main.ts`'s `transient` predicate would answer `false` on the first
+/// reply, so both catch commands fail immediately and every launch reports
+/// "Shotshelf could not reach its catch engine" on a healthy machine. That is
+/// the exact failure this sentinel exists to prevent.
+///
+/// The fixture is the join, the way `secret-kinds.json` and
+/// `settings-bounds.json` already are for their rules.
+#[cfg(test)]
+const STARTING_FIXTURE: &str = include_str!("../../../tests/fixtures/engine-starting.json");
+
 /// A watcher thread dying mid-update should not take the whole engine with it;
 /// the worst a poisoned lock costs here is one stale timestamp.
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -571,15 +587,13 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// Now, as Unix milliseconds.
 ///
-/// Exactly `as_ms(SystemTime::now())`. It used to be that expression written
-/// out a second time eighty lines away, with different saturation — this one
-/// used a wrapping `as` cast where `as_ms` clamps to `u64::MAX` — in the module
-/// that stamps both live captures and backfilled ones.
+/// Literally `as_ms(SystemTime::now())`. An earlier commit claimed to have made
+/// it so and only edited the comment: the body stayed a second copy with
+/// different saturation — a wrapping `as` cast where `as_ms` clamps — eighty
+/// lines from the original, in the module that stamps both live captures and
+/// backfilled ones. This is the deduplication that message described.
 pub(crate) fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|since| since.as_millis() as u64)
-        .unwrap_or_default()
+    as_ms(SystemTime::now())
 }
 
 #[cfg(test)]
@@ -607,6 +621,20 @@ mod tests {
 
     fn names(chosen: &[Capture]) -> Vec<&str> {
         chosen.iter().map(|c| c.path.as_str()).collect()
+    }
+
+    #[test]
+    fn the_starting_sentinel_matches_what_the_front_end_waits_for() {
+        // Both sides of one string, joined through the fixture rather than
+        // agreeing by hand. `src/main.ts` matches on a substring of this; the
+        // e2e harness replies with it.
+        let shared: serde_json::Value =
+            serde_json::from_str(STARTING_FIXTURE).expect("the shared fixture parses");
+        assert_eq!(
+            shared["starting"].as_str(),
+            Some(STARTING),
+            "the sentinel and the fixture the front end reads have drifted",
+        );
     }
 
     #[test]

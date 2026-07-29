@@ -146,17 +146,52 @@ test("handing over does not disturb the caller's list", () => {
   assert.equal(items[0]?.path, "/b.png", "the input was sorted in place");
 });
 
-test("the keyboard moves from the card last acted on, not the bottom of a range", () => {
-  // `extendTo` rebuilds the picked set in on-screen order, so after a range
-  // selected *upwards* `ids().at(-1)` is the bottom of the range — the opposite
-  // end from the card the user shift-clicked. `moveSelection` read that, so the
-  // next ArrowUp stepped down from the wrong card.
-  const selection = new Selection();
-  selection.only("d");
-  selection.extendTo("b", ORDER);
+test("the keyboard moves from the card shift-clicked, at either end of a range", () => {
+  // Both directions, because each one alone is satisfied by a wrong answer.
+  //
+  // `extendTo` rebuilds the picked set in on-screen order, so `ids().at(-1)` is
+  // the bottom of the range whichever end the user came from — right for a
+  // downward range, wrong for an upward one. Returning `#anchor` instead is the
+  // mirror image: right upwards, wrong downwards. Only the card actually
+  // shift-clicked is right at both ends, and only a test that checks both can
+  // tell the three apart.
+  const upwards = new Selection();
+  upwards.only("d");
+  upwards.extendTo("b", ORDER);
+  assert.deepEqual(upwards.ids(), ["b", "c", "d"]);
+  assert.equal(upwards.focus(), "b", "the card just shift-clicked");
 
-  assert.deepEqual(selection.ids(), ["b", "c", "d"]);
-  assert.equal(selection.focus(), "d", "the anchor is where the range started");
+  const downwards = new Selection();
+  downwards.only("b");
+  downwards.extendTo("d", ORDER);
+  assert.deepEqual(downwards.ids(), ["b", "c", "d"]);
+  assert.equal(downwards.focus(), "d", "the card just shift-clicked");
+});
+
+test("re-extending a range carries the keyboard with it", () => {
+  // The anchor stays put so the range re-counts from the same place; the cursor
+  // does not, because the user's attention moved.
+  const selection = new Selection();
+  selection.only("b");
+  selection.extendTo("d", ORDER);
+  selection.extendTo("c", ORDER);
+
+  assert.deepEqual(selection.ids(), ["b", "c"]);
+  assert.equal(selection.focus(), "c");
+});
+
+test("the keyboard leaves a card that is unpicked or swept away", () => {
+  const unpicked = new Selection();
+  unpicked.toggle("a");
+  unpicked.toggle("c");
+  unpicked.toggle("c");
+  assert.equal(unpicked.focus(), "a", "the cursor cannot sit on an unpicked card");
+
+  const swept = new Selection();
+  swept.toggle("a");
+  swept.toggle("c");
+  swept.retain(["a"]);
+  assert.equal(swept.focus(), "a", "nor on one that left the shelf");
 });
 
 test("focus falls back to the last picked when there is no anchor", () => {

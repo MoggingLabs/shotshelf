@@ -28,19 +28,30 @@ export class Selection {
   readonly #picked = new Set<string>();
   /** Where a range selection counts from. */
   #anchor: string | undefined;
+  #cursor: string | undefined;
 
   /**
-   * The card the keyboard should move from — the one last *acted on*, not the
-   * last in on-screen order.
+   * The card the keyboard moves from — the one the user touched **last**.
    *
-   * `extendTo` clears and rebuilds `#picked` top-to-bottom, so after a range
-   * selected *upwards* the last entry of `ids()` is the bottom of the range,
-   * which is the opposite end from the card the user shift-clicked.
-   * `moveSelection` read `ids().at(-1)` and so stepped downwards from the wrong
-   * card on the next ArrowUp.
+   * Distinct from `#anchor`, and the distinction is the whole point. The anchor
+   * is where a range *started* and deliberately stays put so shift-clicking
+   * again re-extends from it; the cursor is where the user last put their
+   * attention, which for `extendTo` is the target they shift-clicked.
+   *
+   * `moveSelection` originally read `ids().at(-1)`. `extendTo` rebuilds the
+   * picked set in on-screen order, so that is the *bottom* of the range
+   * whichever end the user came from — right after a downward range and wrong
+   * after an upward one, where ArrowUp then stepped down from the far end.
+   *
+   * The first attempt at this returned `#anchor`, which is wrong in the mirror
+   * image: after a downward range B→D the anchor is B, so ArrowDown collapsed
+   * the selection onto C — *inside* the range just made — instead of continuing
+   * to E. And because the anchor and the bottom coincide for an upward range,
+   * the test written for it could not fail. A separate cursor is the only thing
+   * that is right at both ends.
    */
   focus(): string | undefined {
-    return this.#anchor ?? [...this.#picked].pop();
+    return this.#cursor ?? [...this.#picked].pop();
   }
 
   has(id: string): boolean {
@@ -55,6 +66,7 @@ export class Selection {
   clear(): void {
     this.#picked.clear();
     this.#anchor = undefined;
+    this.#cursor = undefined;
   }
 
   /** Pick exactly this one, dropping anything else. */
@@ -62,6 +74,7 @@ export class Selection {
     this.#picked.clear();
     this.#picked.add(id);
     this.#anchor = id;
+    this.#cursor = id;
   }
 
   /** Add or remove one, leaving the rest alone. */
@@ -71,9 +84,13 @@ export class Selection {
       // The anchor has to move off something no longer picked, or the next
       // range counts from a card that is not selected.
       if (this.#anchor === id) this.#anchor = [...this.#picked].pop();
+      // Same for the cursor: the keyboard cannot move from a card the user
+      // just unpicked.
+      if (this.#cursor === id) this.#cursor = [...this.#picked].pop();
     } else {
       this.#picked.add(id);
       this.#anchor = id;
+      this.#cursor = id;
     }
   }
 
@@ -99,8 +116,11 @@ export class Selection {
     this.#picked.clear();
     for (const between of order.slice(start, end + 1)) this.#picked.add(between);
     // The anchor stays put, so shift-clicking again re-extends from the same
-    // place rather than walking down the list.
+    // place rather than walking down the list. The cursor does the opposite: it
+    // follows the card just shift-clicked, because that is where the user's
+    // attention is and where an arrow key should carry on from.
     this.#anchor = anchor;
+    this.#cursor = id;
   }
 
   /**
@@ -117,6 +137,10 @@ export class Selection {
     }
     if (this.#anchor !== undefined && !live.has(this.#anchor)) {
       this.#anchor = [...this.#picked].pop();
+    }
+    // A capture swept off the shelf cannot be where the keyboard is.
+    if (this.#cursor !== undefined && !live.has(this.#cursor)) {
+      this.#cursor = [...this.#picked].pop();
     }
   }
 }

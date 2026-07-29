@@ -17,6 +17,18 @@ import {
   openBrowse,
   test,
 } from "../harness/app.ts";
+import engineStarting from "../fixtures/engine-starting.json" with { type: "json" };
+
+/**
+ * The sentinel Rust sends while the catch engine comes up — read, not restated.
+ *
+ * It lived in three hand-maintained copies: `catch::STARTING`, `main.ts`'s
+ * `includes("still starting")`, and this spec's own literal. Rewording the Rust
+ * constant left every gate green while, in the real app, both catch commands
+ * would fail on their first reply and every launch would report "Shotshelf
+ * could not reach its catch engine" on a healthy machine.
+ */
+const ENGINE_STARTING = engineStarting.starting;
 
 test("an empty shelf says so rather than showing a blank panel", async ({ page }) => {
   await bootShelf(page);
@@ -469,20 +481,24 @@ test("a shelf that asks before the catch engine is up waits rather than reportin
   // The retry had no test at all: replacing it with a bare throw left every
   // spec green, because nothing anywhere rejected with that message — the
   // harness could only reject with `get_settings`'s wording.
-  await page.addInitScript(() => {
+  // The sentinel is passed *in* rather than closed over: `addInitScript` runs
+  // its function in the page, where a Node-side constant is not in scope, so a
+  // closure would have supplied `undefined` and the retry would never have
+  // matched.
+  await page.addInitScript((starting: string) => {
     window.__shotshelfStubs__ = {
       catch_watch_dirs: {
         __rejectsTimes__: 3,
-        because: "the catch engine is still starting",
+        because: starting,
         then: ["/home/someone/Pictures"],
       },
       catch_backfill: {
         __rejectsTimes__: 3,
-        because: "the catch engine is still starting",
+        because: starting,
         then: [{ path: "/captures/wide.png", kind: "image", ts: 1 }],
       },
     };
-  });
+  }, ENGINE_STARTING);
   await bootShelf(page);
   await openBrowse(page);
 

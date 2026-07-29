@@ -32,6 +32,15 @@ disallowed-methods = [
   { path = "tauri::path::PathResolver::app_config_dir", reason = "roaming; go through `dirs::preferences`" },
   { path = "tauri::path::PathResolver::app_local_data_dir", reason = "go through `dirs::local`" },
   { path = "tauri::path::PathResolver::app_cache_dir", reason = "go through `dirs::cache`" },
+  # The roaming root itself, not just the Tauri functions under it.
+  #
+  # `check-dirs.mjs` holds this to one caller by matching the text
+  # `dirs::preferences`, which `use crate::dirs as roots; roots::preferences(app)`
+  # walks straight past — a reviewer wrote a capture path into the roaming
+  # profile that way with both gates green, which is the one thing SECURITY.md
+  # promises cannot happen. Clippy resolves the path, so the alias is the same
+  # function.
+  { path = "shotshelf_lib::dirs::preferences", reason = "the roaming profile: only `settings.rs` may, and only for settings" },
 ]
 
 disallowed-types = [

@@ -59,7 +59,8 @@ One job, done well. No accounts, no cloud, no 15 settings.
 
 ## 🧱 How it works (target)
 
-1. **Catch engine** — watches the OS screenshot/recording save folders (Windows + macOS) with the Rust
+1. **Catch engine** — watches the OS screenshot/recording save folders (all three, with Linux the broadest — see
+  [USAGE](./docs/USAGE.md)) with the Rust
    [`notify`](https://github.com/notify-rs/notify) crate, plus a clipboard watch
    (`tauri-plugin-clipboard`) for clipboard-only captures (Win+Shift+S / ⌘⌃⇧4). Emits a "new capture" event.
 2. **Shelf UI** — an always-on-top, frameless edge widget rendering recent captures as thumbnails
@@ -240,11 +241,15 @@ to start; a shortcut that won't register is refused and the previous one stays a
 
 **Retention** takes captures off the shelf, never off the disk — nothing here deletes, moves or
 modifies a capture. **Pinned** captures (the ★ on a tile) ignore retention and the item limit,
-and are the only shelf state that survives a restart; only their paths and a timestamp are
-stored, never capture contents. Retention is in hours and accepts fractions, which is the only
-practical way to watch expiry work without waiting an hour.
+and are the only shelf state that survives a restart. Only their paths, kind and timestamp are
+stored — never capture contents — alongside a note of how recent the newest capture seen was,
+which is how a relaunch knows not to bring back something you removed.
 
-The popover places itself in the corner each time it opens, measured against the monitor's work
+Retention is in hours and accepts fractions, which is the only practical way to watch expiry work without waiting an hour.
+
+On Wayland it does not: a Wayland client has no protocol for choosing its own position, so the
+shelf appears wherever the compositor puts it. Everywhere else, the popover places itself in the
+corner each time it opens, measured against the monitor's work
 area rather than its full size — so it clears the taskbar wherever that sits, and rearranging
 displays needs no setting at all. The column is pinned by that same corner, so as it grows it
 moves upward and the newest card stays where your eye already is.
