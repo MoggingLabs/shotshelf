@@ -355,6 +355,27 @@ mod tests {
                 "{hostile} escaped to {}",
                 target.display(),
             );
+
+            // And the name itself carries nothing that could escape, which is
+            // the assertion that holds on every platform.
+            //
+            // Containment alone is inert off Windows: `D:evil` is not a drive
+            // prefix on macOS or Linux, so `join` does not truncate and the
+            // path cannot leave the directory however `safe_stem` behaves. Two
+            // of the three CI legs were therefore running a test that could not
+            // fail, guarding a path escape — the same shape as the bug in the
+            // comment above.
+            let name = target
+                .file_name()
+                .expect("a target always has a name")
+                .to_string_lossy()
+                .into_owned();
+            for forbidden in [":", "/", "\\", ".."] {
+                assert!(
+                    !name.contains(forbidden),
+                    "{hostile} produced the name {name:?}, which still carries {forbidden:?}",
+                );
+            }
         }
     }
 

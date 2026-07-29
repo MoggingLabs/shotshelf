@@ -234,7 +234,22 @@ mod tests {
             "/dir/../../evil.png",
             r"\server\share\evil.png",
         ] {
-            let target = dir.join(handoff_name(Path::new(hostile)));
+            let name = handoff_name(Path::new(hostile));
+
+            // The name first, because it is the assertion that holds on every
+            // platform. Containment alone is inert off Windows: `D:evil` is not
+            // a drive prefix and `\server\share` is not a UNC path on macOS or
+            // Linux, so `join` does not truncate and the path cannot leave the
+            // directory whatever `handoff_name` returns. Two of the three CI
+            // legs were running a fixture that could not fail.
+            for forbidden in [":", "/", "\\", ".."] {
+                assert!(
+                    !name.contains(forbidden),
+                    "{hostile} produced the name {name:?}, which still carries {forbidden:?}",
+                );
+            }
+
+            let target = dir.join(&name);
             assert!(
                 target.starts_with(dir),
                 "{hostile} escaped the cache as {}",
