@@ -46,7 +46,7 @@ export interface Settings {
    * Ask the release feed whether a newer build exists, at launch.
    *
    * The only network call Shotshelf makes. Off means it opens no socket at
-   * all, which is the point of offering the switch to someone who chose this
+   * all, which is the point of the setting existing at all — it is hand-edited, not a control in the panel to someone who chose this
    * app for being local-only.
    */
   checkForUpdates: boolean;

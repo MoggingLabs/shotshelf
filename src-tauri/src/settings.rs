@@ -38,11 +38,6 @@ use crate::catch::CaptureKind;
 /// worth changing if it gets in the way. It is a setting for that reason.
 pub const DEFAULT_HOTKEY: &str = "CommandOrControl+Shift+S";
 
-/// serde needs a function for a non-`false` default.
-const fn yes() -> bool {
-    true
-}
-
 /// A pinned capture, restored onto the shelf on the next launch.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PinnedItem {
@@ -69,13 +64,13 @@ pub struct Settings {
     /// and bug reports, and silently handing someone a downscaled file when
     /// they asked for their screenshot is the kind of surprise that costs
     /// trust. The original is what was asked for until you say otherwise.
-    #[serde(default)]
     pub downscale_exports: bool,
     /// Ask the release feed whether a newer build exists, at launch.
     ///
     /// On by default, and the only network call the app makes. Off means the
-    /// app opens no socket at all, which is the point of offering it.
-    #[serde(default = "yes")]
+    /// app opens no socket at all. Hand-edited only — the panel offers four
+    /// controls and this is not among them, which `docs/USAGE.md` says and these
+    /// two docstrings used to contradict.
     pub check_for_updates: bool,
     pub pinned: Vec<PinnedItem>,
 }
@@ -1231,6 +1226,15 @@ mod tests {
         let parsed: Settings = serde_json::from_str("{}").expect("an empty object is valid");
         assert_eq!(parsed.max_items, 50);
         assert_eq!(parsed.hotkey, DEFAULT_HOTKEY);
+        // The container-level `#[serde(default)]` fills every missing field
+        // from `Settings::default()`, which is why the two field-level
+        // defaults — and the `yes()` helper one of them needed — were inert.
+        // Asserted here so removing the container default fails.
+        assert!(
+            parsed.check_for_updates,
+            "the non-false default still holds"
+        );
+        assert!(!parsed.downscale_exports);
     }
 
     #[test]

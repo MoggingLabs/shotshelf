@@ -96,6 +96,31 @@ const ROAMING_CALLER = "src-tauri/src/settings.rs";
  * line in this table — a diff, which is what the whole arrangement claimed to
  * be and was not.
  */
+/**
+ * Every way to switch the `clippy.toml` rules off.
+ *
+ * A substring match on `#[allow(clippy::disallowed_methods)]` counted one
+ * spelling of several. `#![allow(…)]` — the inner, module-scope form — does not
+ * contain it, because of the `!`; nor does `#[allow(clippy::all)]`, nor
+ * `#[allow(warnings)]`. Each of those silences the rules for everything below
+ * it, and a reviewer used the first to move the hand-off cache — directories
+ * named after the captures they hold — into the roaming profile with every gate
+ * green.
+ *
+ * The asymmetry made it specifically a hole for *new* offenders: a file already
+ * in the table below cannot switch to the inner form, because its count would
+ * drop and the exact-equality check fires. A file with no entry counted zero,
+ * expected zero, and passed.
+ *
+ * Both documents that warn about the inner form — `src-tauri/clippy.toml` and
+ * `src-tauri/src/dirs.rs` — named it as the dangerous one while neither gate
+ * looked for it.
+ */
+// Anchored to the start of a line, so the two files that *warn* about the
+// inner form in prose are not counted as using it.
+const SILENCERS =
+  /^[^\S\r\n]*#!?\[\s*allow\s*\(\s*(?:clippy::(?:disallowed_methods|disallowed_types|all)|warnings)\s*\)\s*\]/gm;
+
 const ALLOWANCES = new Map([
   // Resolves every root; one per resolving statement, never file-scope.
   ["src-tauri/src/dirs.rs", 3],
@@ -201,13 +226,14 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
   //
   // Deliberately outside the `resolvesRootsByDesign` exemption: `dirs.rs` is
   // allowed to resolve roots, not to grant itself extra allowances.
-  const allowances = source.split("#[allow(clippy::disallowed_methods)]").length - 1;
+  const allowances = [...source.matchAll(SILENCERS)].length;
   const permitted = ALLOWANCES.get(normalised) ?? 0;
   if (allowances !== permitted) {
     problems.push(
       `  ${normalised}: carries ${allowances} \`#[allow(clippy::disallowed_methods)]\`, ` +
         `and ${permitted} ${permitted === 1 ? "is" : "are"} accounted for in check-dirs.mjs. ` +
-        `That attribute silences every rule in \`clippy.toml\` at the call, so adding one is a ` +
+        `Such an attribute silences the \`clippy.toml\` rules for everything below it, so ` +
+          `adding one is a ` +
         `decision, not a formality — say why in the table there.`,
     );
   }

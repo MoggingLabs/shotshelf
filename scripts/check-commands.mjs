@@ -100,14 +100,17 @@ const registered = registeredCommands();
  * Plugin commands are namespaced (`plugin:drag|start_drag`) and are not ours
  * to check.
  */
-// Either quote style.
+// All three quote styles.
 //
-// The pattern required a double quote, so a single-quoted call naming a command
+// The pattern required a double quote, then a double or single one; a
+// backtick-quoted call to a command Rust does not register stayed invisible,
+// and that is the direction that fails at runtime. The pattern required a
+// double quote, so a single-quoted call naming a command
 // Rust does not have was not seen at all — the gate printed the same counts as a
 // clean tree. Nothing in this repo enforces quote style, and the hole was
 // one-directional: single-quoting a *real* call failed closed, which is exactly
 // why it survived unnoticed.
-const invoked = [...source.matchAll(/\binvoke\s*(?:<[^>]*>)?\s*\(\s*(["'])([^"']+)\1/g)]
+const invoked = [...source.matchAll(/\binvoke\s*(?:<[^>]*>)?\s*\(\s*(["'`])([^"'`]+)\1/g)]
   .map((match) => match[2])
   .filter((name) => name !== undefined && !name.includes(":"));
 

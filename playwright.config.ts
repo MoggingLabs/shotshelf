@@ -34,6 +34,18 @@ const shelfWindow = (
 if (!shelfWindow) throw new Error("tauri.conf.json declares no shelf window");
 const POPOVER_VIEWPORT = { width: shelfWindow.width, height: shelfWindow.height };
 
+/**
+ * A user agent with no "Windows" in it.
+ *
+ * `main.ts` sets `data-os="windows"` from `navigator.userAgent`, and the
+ * stylesheet picks the DWM corner radius from that — so a runner whose UA says
+ * Windows can never exercise the default. This is the same Chrome build string
+ * with the platform token swapped, which is exactly what the sniff reads.
+ */
+const NON_WINDOWS_UA =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+  "Chrome/151.0.0.0 Safari/537.36";
+
 export default defineConfig({
   testDir: "tests",
   // A failing gate that passes on a retry is not a gate. CI retries once, to
@@ -73,6 +85,27 @@ export default defineConfig({
       // Viewport last: the device preset carries its own 1280x720, and letting
       // it win measured a card at 1254 wide in a popover that is 225.
       use: { ...devices["Desktop Chrome"], viewport: POPOVER_VIEWPORT, deviceScaleFactor: 1 },
+    },
+    {
+      // The same browser without the preset's Windows user agent.
+      //
+      // `devices["Desktop Chrome"]` carries `Mozilla/5.0 (Windows NT 10.0; …)`
+      // on *every* host, so the app's `data-os` sniff answered "windows" on the
+      // macOS and Linux runners too. The corner radius that macOS and Linux
+      // actually show — the 14px default — was asserted only by the dead arm of
+      // a ternary, and the committed Linux goldens encode the Windows 8px
+      // corner. Setting `--radius: 99px` left the whole visual suite green.
+      //
+      // Only the layout spec: it is the one that reads computed style, and the
+      // pixel goldens are pinned to one OS and one UA on purpose.
+      name: "chromium-not-windows",
+      testMatch: /tests\/visual\/layout\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        userAgent: NON_WINDOWS_UA,
+        viewport: POPOVER_VIEWPORT,
+        deviceScaleFactor: 1,
+      },
     },
   ],
 
