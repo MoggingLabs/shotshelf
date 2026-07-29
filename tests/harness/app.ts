@@ -33,10 +33,17 @@ const WINDOW_EVENTS = {
   //
   // A fixture entry only one side reads is not a join: the Rust test compared
   // `launch` to a `false` written in the test beside it, and the three specs
-  // that model a launch appearance hard-coded their own `false`. So flipping
-  // `window::open(app.handle(), false)` to `true` at start-up — leaving the
-  // launch appearance up for ever, which is the bug an earlier round fixed —
-  // was invisible to every gate. Now the value flows.
+  // that model a launch appearance hard-coded their own `false`.
+  //
+  // What that buys, precisely: the *name and payload* of the launch event now
+  // have one definition, so a spec cannot model the launch appearance as a
+  // deliberate open by writing the wrong boolean. What it does **not** buy —
+  // and an earlier version of this comment claimed it did — is any check on the
+  // call site: flipping `window::open(app.handle(), false)` to `true` in
+  // `lib.rs` still passes every gate, because no browser spec executes a
+  // `#[tauri::command]` and no Rust test observes that argument.
+  // `src-tauri/src/window.rs` states that limit correctly; this comment used to
+  // contradict it two files away.
   launch: windowEvents.launch,
 };
 
@@ -56,6 +63,21 @@ export const CAPTURE_EVENT = windowEvents.capture;
 export const UPDATE_EVENT = windowEvents.update;
 /** The catch engine's one channel for a capture it could not save. */
 export const PROBLEM_EVENT = windowEvents.problem;
+/**
+ * The hide event, exported for the same reason as the three above.
+ *
+ * It was left inside the un-exported `WINDOW_EVENTS` while the other three were
+ * exported, so five specs wrote `"shelf://hidden"` by hand — and renaming both
+ * `window::HIDDEN_EVENT` and this fixture, leaving `main.ts` on the old name,
+ * passed 142 Rust tests, 126 browser tests and all three script gates. That is
+ * exactly the drift the fixture exists to prevent, and exactly the criticism
+ * this file already makes of `launch` one comment up.
+ *
+ * `opened` needs no export: every spec reaches it through `openBrowse` or
+ * `launchAppearance`, so its name already flows from the fixture. Exporting it
+ * as well would be an unread symbol, which `knip` correctly refuses.
+ */
+export const HIDDEN_EVENT = windowEvents.hidden;
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 

@@ -95,10 +95,21 @@ const ROAMING_CALLER = "src-tauri/src/settings.rs";
  * name as the thing that must never roam, into `%APPDATA%` with this script at
  * exit 0 *and* clippy green.
  *
- * So this stops matching spellings. [`silencedIn`] finds attributes by balancing
- * brackets, strips whitespace, and reads the lint names out of the ones that are
- * an `allow` or an `expect` — which is decidable, where "did I list every way to
- * write this attribute" is not.
+ * The fifth was subtler and is worth stating, because the fix for the fourth
+ * claimed to have ended this and had not: `#[rustfmt::skip]` above a statement
+ * carrying a mid-line `#[allow]`. The parser balanced brackets correctly but
+ * still only *found* attributes that began a line, which is a spelling — and one
+ * that held only because `cargo fmt --check` moves attributes onto their own
+ * line. `rustfmt::skip` is itself an attribute the scan read and discarded, so
+ * the single attribute that switches off that normalisation was the one thing
+ * hiding from it.
+ *
+ * So this stops matching spellings, for real this time. [`codeOnly`] blanks the
+ * comments and strings — which is what the line anchor was standing in for —
+ * and then [`silencedIn`] finds attributes *anywhere*, balances brackets, strips
+ * whitespace, and reads the lint names out of the ones that are an `allow` or an
+ * `expect`. That is decidable, where "did I list every way to write this
+ * attribute" is not, and it depends on no formatter.
  *
  * Names, not a count. A count is substitutable: `src-tauri/src/imaging/compare.rs` is entitled
  * to three cast allowances, and with a bare `3` one of them could become
@@ -106,8 +117,8 @@ const ROAMING_CALLER = "src-tauri/src/settings.rs";
  *
  * The consequence is that *any* clippy allowance needs a line here, not only the
  * ones touching `clippy.toml`. That is the point — an allowance is a decision,
- * and the four cast ones below are decisions too. They are cheap to add and the
- * diff is the record.
+ * and the cast ones below are decisions too. They are cheap to add and the diff
+ * is the record. No count is quoted, here or anywhere: the table is the count.
  */
 const ALLOWANCES = new Map([
   // Resolves every root; one per resolving statement, never file-scope.
@@ -119,11 +130,20 @@ const ALLOWANCES = new Map([
   // The watch list and the clipboard folder.
   ["src-tauri/src/catch/mod.rs", ["clippy::disallowed_methods"]],
   // Caches Shotshelf writes itself.
-  ["src-tauri/src/poster.rs", ["clippy::disallowed_methods"]],
   ["src-tauri/src/edit.rs", ["clippy::disallowed_methods"]],
   // The one permitted reach into the roaming profile.
   ["src-tauri/src/settings.rs", ["clippy::disallowed_methods"]],
   // Casts whose range is guarded at the call site, not root resolution.
+  //
+  // These were dead until `Cargo.toml` turned the two lints on. They named
+  // `clippy::cast_*`, which are `pedantic` and so allow-by-default, and nothing
+  // in the crate enabled pedantic — so all four could be deleted with
+  // `cargo clippy -- -D warnings` at exit 0, and this table documented a
+  // decision no tool would ever have raised. The lints are switched on now, the
+  // attributes are load-bearing, and the guard each one names is real:
+  // a `clamp`, a `max(0.0)`, or a comparison immediately above.
+  ["src-tauri/src/imaging/export.rs", ["clippy::cast_sign_loss"]],
+  ["src-tauri/src/poster.rs", ["clippy::cast_sign_loss", "clippy::disallowed_methods"]],
   ["src-tauri/src/enrich/foreground.rs", ["clippy::cast_sign_loss"]],
   ["src-tauri/src/imaging/compare.rs", [
     "clippy::cast_precision_loss",
@@ -133,32 +153,127 @@ const ALLOWANCES = new Map([
 ]);
 
 /**
+ * The source with every comment, string and character literal blanked out.
+ *
+ * Same length as the input — each removed character becomes a space, and
+ * newlines survive — so offsets and line numbers still line up.
+ *
+ * This exists because the alternative was matching a spelling. [`silencedIn`]
+ * used to find attributes with `/^[^\S\r\n]*#!?\[/`, which requires one to be
+ * the first thing on its line. Rust does not: an attribute may sit mid-line on
+ * a statement. That anchor was really an unstated dependency on `cargo fmt`
+ * having moved every attribute onto its own line — and `#[rustfmt::skip]` is
+ * itself an attribute, which the scan read, found no `allow(` in, and threw
+ * away. So the one attribute that switches off the normalisation the whole rule
+ * leaned on was invisible to it, and a reviewer used exactly that to route the
+ * diagnostic log into `%APPDATA%` with all four gates green.
+ *
+ * Blanking the comments is what the anchor was really for — keeping the files
+ * that *warn* about these attributes in prose from counting as users of them —
+ * and doing it directly costs the dependency on a formatter. Strings go too, so
+ * an attribute quoted inside a Rust string cannot be mistaken for a real one.
+ *
+ * @param {string} source
+ * @returns {string}
+ */
+function codeOnly(source) {
+  let out = "";
+  let i = 0;
+
+  /** Blank `count` characters from `i`, keeping newlines so lines still align. */
+  const blank = (count) => {
+    for (let k = 0; k < count && i < source.length; k += 1, i += 1) {
+      out += source[i] === "\n" ? "\n" : " ";
+    }
+  };
+
+  while (i < source.length) {
+    const pair = source.slice(i, i + 2);
+
+    if (pair === "//") {
+      while (i < source.length && source[i] !== "\n") blank(1);
+      continue;
+    }
+
+    if (pair === "/*") {
+      // Rust's block comments nest, so this counts rather than scanning to the
+      // first `*/`.
+      let depth = 0;
+      while (i < source.length) {
+        const inner = source.slice(i, i + 2);
+        if (inner === "/*") {
+          depth += 1;
+          blank(2);
+          continue;
+        }
+        if (inner === "*/") {
+          depth -= 1;
+          blank(2);
+          if (depth === 0) break;
+          continue;
+        }
+        blank(1);
+      }
+      continue;
+    }
+
+    // `r"…"`, `r#"…"#`, `r##"…"##` — the closing marker carries the same
+    // number of hashes, which is the whole point of the form.
+    const raw = /^r(#*)"/.exec(source.slice(i));
+    if (raw) {
+      const closer = `"${raw[1]}`;
+      const from = i + raw[0].length;
+      const at = source.indexOf(closer, from);
+      blank((at === -1 ? source.length : at + closer.length) - i);
+      continue;
+    }
+
+    // A character literal, before the string branch: `'"'` would otherwise open
+    // a string that never closes. A lifetime (`'a`, `'static`) has no closing
+    // quote in that position and so does not match.
+    const character = /^'(?:\\.|[^'\\])'/.exec(source.slice(i));
+    if (character) {
+      blank(character[0].length);
+      continue;
+    }
+
+    if (source[i] === '"') {
+      blank(1);
+      while (i < source.length && source[i] !== '"') blank(source[i] === "\\" ? 2 : 1);
+      blank(1);
+      continue;
+    }
+
+    out += source[i] ?? "";
+    i += 1;
+  }
+
+  return out;
+}
+
+/**
  * The lints an attribute silences, in source order.
  *
- * Anchored to the start of a line so the files that *warn* about these forms in
- * prose are not counted as using them, then balanced across brackets so a
- * `cfg_attr` wrapper, a `reason = "…"`, or several lints in one attribute are
- * all read rather than missed. String literals are skipped, so a `)` inside a
- * reason cannot end the attribute early.
+ * Found anywhere in the code — not at the start of a line — because Rust puts
+ * attributes wherever it likes and [`codeOnly`] has already removed the prose
+ * and strings that the old line anchor was standing in for. Balanced across
+ * brackets, so a `cfg_attr` wrapper, a `reason = "…"`, or several lints in one
+ * attribute are all read rather than missed.
  *
  * @param {string} source
  * @returns {string[]}
  */
 function silencedIn(source) {
+  const code = codeOnly(source);
   const found = [];
 
-  for (const start of source.matchAll(/^[^\S\r\n]*#!?\[/gm)) {
+  for (const start of code.matchAll(/#!?\[/g)) {
     const open = start.index + start[0].length - 1;
     let depth = 0;
     let end = -1;
 
-    for (let i = open; i < source.length; i += 1) {
-      const char = source[i];
-      if (char === '"') {
-        i += 1;
-        while (i < source.length && source[i] !== '"') i += source[i] === "\\" ? 2 : 1;
-        continue;
-      }
+    for (let i = open; i < code.length; i += 1) {
+      const char = code[i];
       if (char === "[" || char === "(") depth += 1;
       else if (char === "]" || char === ")") {
         depth -= 1;
@@ -173,7 +288,7 @@ function silencedIn(source) {
     // Whitespace gone, so `clippy :: disallowed_methods` reads the same as the
     // ordinary spelling. The prefix class keeps identifiers that merely end in
     // `allow` from counting.
-    const body = source.slice(open + 1, end).replace(/\s+/g, "");
+    const body = code.slice(open + 1, end).replace(/\s+/g, "");
     if (!/(?:^|[(,])(?:allow|expect)\(/.test(body)) continue;
 
     found.push(...[...body.matchAll(/clippy::[a-z_]+/g)].map((lint) => lint[0]));

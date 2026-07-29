@@ -17,6 +17,7 @@ import {
   openBrowse,
   test,
   CAPTURE_EVENT,
+  HIDDEN_EVENT,
   PROBLEM_EVENT,
   UPDATE_EVENT,
 } from "../harness/app.ts";
@@ -535,7 +536,7 @@ test("a shelf the user dismissed is not put back by an alert", async ({ page }) 
   await land(page, FIXTURE.wide);
   await expect(page.locator(".tile")).toHaveCount(1);
 
-  await page.evaluate(() => window.__shotshelf__.emit("shelf://hidden", null));
+  await page.evaluate((event) => window.__shotshelf__.emit(event, null), HIDDEN_EVENT);
   await page.evaluate(() => window.__shotshelf__.clearCalls());
 
   // The app's own update notice, which needs no failure to reach.

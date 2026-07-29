@@ -22,6 +22,7 @@ import {
   bootShelf,
   expect,
   FIXTURE,
+  HIDDEN_EVENT,
   land,
   launchAppearance,
   openBrowse,
@@ -45,7 +46,7 @@ test("adopting a hide does not ask Rust to hide again", async ({ page }) => {
   await bootShelf(page);
   await page.evaluate(() => window.__shotshelf__.clearCalls());
 
-  await page.evaluate(() => window.__shotshelf__.emit("shelf://hidden", null));
+  await page.evaluate((event) => window.__shotshelf__.emit(event, null), HIDDEN_EVENT);
   await page.waitForTimeout(250);
 
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
@@ -57,7 +58,7 @@ test("closing from the tray leaves the shelf ready to pop again", async ({ page 
   // Open it deliberately, then close it the way the tray icon does — a route
   // that never passes through the front-end.
   await openBrowse(page);
-  await page.evaluate(() => window.__shotshelf__.emit("shelf://hidden", null));
+  await page.evaluate((event) => window.__shotshelf__.emit(event, null), HIDDEN_EVENT);
   await page.evaluate(() => window.__shotshelf__.clearCalls());
 
   await land(page, FIXTURE.wide);
@@ -353,4 +354,33 @@ test("removing one card of several shrinks the peeked column", async ({ page }) 
     .locator("#shelf-alert")
     .evaluate((el: HTMLElement) => (el.hasAttribute("hidden") ? 0 : el.offsetHeight));
   expect(asked).toBe(2 * CARD_HEIGHT + CARD_GAP + COLUMN_PADDING + strip);
+});
+
+test("the front end adopts hidden from the event Rust really emits", async ({ page }) => {
+  // The `hidden` half of the events fixture was a half-join.
+  //
+  // Five specs emitted `"shelf://hidden"` as a literal, and every assertion
+  // about hiding counted `callsTo("hide_shelf")` — so nothing observed the
+  // event itself. Renaming `window::HIDDEN_EVENT` *and* the fixture together,
+  // leaving `main.ts` listening for the old name, passed 142 Rust tests, 126
+  // browser tests and all three script gates. `lib.rs` spells out the cost: the
+  // front end goes on believing the shelf is open, so every later capture is
+  // filed away silently instead of popping the column.
+  //
+  // This drives the round trip instead — a real `hide_shelf`, which the mock
+  // answers by emitting `EVENTS.hidden` from the fixture, exactly as Rust does
+  // — and then asserts on the consequence a user would notice: the next capture
+  // pops the column again.
+  await bootShelf(page);
+  await openBrowse(page);
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "browse");
+
+  await page.keyboard.press("Escape");
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length))
+    .toBe(1);
+
+  // Adopted: the shelf is no longer browsing, so a capture pops the column.
+  await land(page, FIXTURE.wide);
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
 });

@@ -90,9 +90,18 @@ pub fn for_handoff(image: DynamicImage, long_edge: u32) -> Sized {
 /// agreeing and the third describing a mechanism that was never here.
 fn scale_edge(edge: u32, scale: f64) -> u32 {
     let scaled = (f64::from(edge) * scale).round();
-    // `as u32` saturates at zero for negatives and at u32::MAX above the
-    // range, and both are unreachable here — scale is in (0, 1].
-    (scaled as u32).max(1)
+    // Clamped into range *before* the conversion rather than relying on `as` to
+    // saturate. It does saturate, and both ends are unreachable while scale is
+    // in (0, 1] — but "unreachable given a caller that behaves" is exactly the
+    // reasoning that stops being true when a second caller appears, and it read
+    // as a licence for the next float conversion to skip the question.
+    let clamped = scaled.clamp(1.0, f64::from(u32::MAX));
+    // The clamp above is the guard; clippy cannot see through it. Accountable
+    // in `check-dirs.mjs`'s table, and load-bearing — `cast_sign_loss` is
+    // switched on in `Cargo.toml`, so removing this attribute fails the build.
+    #[allow(clippy::cast_sign_loss)]
+    let edge = clamped as u32;
+    edge
 }
 
 /// Read a capture, size it for hand-off, and return PNG bytes.

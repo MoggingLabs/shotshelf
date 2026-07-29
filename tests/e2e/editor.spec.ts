@@ -6,7 +6,15 @@
  * redaction destroys what it covers rather than drawing over it.
  */
 
-import { bootShelf, expect, FIXTURE, land, openBrowse, test } from "../harness/app.ts";
+import {
+  bootShelf,
+  expect,
+  FIXTURE,
+  HIDDEN_EVENT,
+  land,
+  openBrowse,
+  test,
+} from "../harness/app.ts";
 
 async function openEditor(
   page: import("@playwright/test").Page,
@@ -440,7 +448,7 @@ test("hiding the shelf takes the editor with it", async ({ page }) => {
   await openEditor(page);
   await page.evaluate(() => window.__shotshelf__.clearCalls());
 
-  await page.evaluate(() => window.__shotshelf__.emit("shelf://hidden", null));
+  await page.evaluate((event) => window.__shotshelf__.emit(event, null), HIDDEN_EVENT);
   await expect(page.locator(".editor")).toHaveCount(0);
 
   // And it must not ask for the window back on the way out — the user just
@@ -465,7 +473,7 @@ test("hiding the shelf takes the quick look with it", async ({ page }) => {
   await page.keyboard.press(" ");
   await expect(page.locator(".preview")).toHaveCount(1);
 
-  await page.evaluate(() => window.__shotshelf__.emit("shelf://hidden", null));
+  await page.evaluate((event) => window.__shotshelf__.emit(event, null), HIDDEN_EVENT);
   await expect(page.locator(".preview")).toHaveCount(0);
 });
 

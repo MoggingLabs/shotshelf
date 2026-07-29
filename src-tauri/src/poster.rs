@@ -329,7 +329,19 @@ fn parse_duration(stderr: &str) -> Option<u64> {
     let minutes: u64 = parts.next()?.trim().parse().ok()?;
     let seconds: f64 = parts.next()?.trim().parse().ok()?;
 
-    Some(((hours * 3600 + minutes * 60) as f64 + seconds).max(0.0) as u64 * 1000)
+    // Whole seconds stay in `u64` and only the fraction goes through `f64`,
+    // so nothing depends on a 52-bit mantissa holding an hour count. The old
+    // form converted `hours * 3600 + minutes * 60` to `f64` and back, which is
+    // exact for any duration ffmpeg will ever report but for no stated reason.
+    let whole = hours * 3600 + minutes * 60;
+    let fraction = seconds.max(0.0);
+    // `max(0.0)` is the guard, and clippy cannot see through it either.
+    #[allow(clippy::cast_sign_loss)]
+    let extra = fraction as u64;
+    // Whole seconds, as before: the badge reads "1:23", so the sub-second part
+    // has never been shown and the test below pins the truncation. What changed
+    // is only that the hour count no longer makes a round trip through `f64`.
+    Some((whole + extra) * 1000)
 }
 
 fn cached(dir: &Path, key: &str) -> Option<(PathBuf, Option<u64>)> {

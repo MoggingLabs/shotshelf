@@ -209,7 +209,10 @@ mod platform {
             return None;
         }
 
-        let mut buffer = vec![0_u16; length as usize + 1];
+        // `try_from`, not `as`: the guard above proves this is positive, but
+        // proving it to the compiler costs one conversion and removes the need
+        // to silence a lint that is now switched on.
+        let mut buffer = vec![0_u16; usize::try_from(length).ok()? + 1];
         let written = unsafe { GetWindowTextW(window, &mut buffer) };
         if written <= 0 {
             return None;

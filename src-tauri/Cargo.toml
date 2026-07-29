@@ -121,3 +121,23 @@ windows = { version = "0.61", features = [
     "Globalization",        # it follows the user's own language list
 ] }
 
+
+# Casts are checked, so the allowances that name them mean something.
+#
+# `cast_sign_loss`, `cast_precision_loss` and `cast_possible_truncation` are
+# clippy `pedantic` lints — allow-by-default. Four `#[allow(clippy::cast_*)]`
+# attributes sat in this crate silencing lints nothing had ever enabled: dead
+# attributes, whose inline comments ("Guarded non-negative above.") read as
+# though a tool had demanded the guard, and whose entries in `check-dirs.mjs`'s
+# allowance table documented a decision no tool would ever have raised. Deleting
+# all four left `cargo clippy -- -D warnings` at exit 0.
+#
+# Turning them on is the half that was missing. This crate converts between
+# `u32`, `i32`, `f64` and `usize` constantly — screen coordinates, scale
+# factors, image dimensions, byte counts — and a wrong one is a window placed
+# off-screen or an allocation computed from a negative number. Now the four
+# allowances are load-bearing, the table is honest, and the *next* unguarded
+# cast has to be argued for rather than merely written.
+[lints.clippy]
+cast_sign_loss = "warn"
+cast_precision_loss = "warn"
