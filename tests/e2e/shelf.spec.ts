@@ -460,7 +460,7 @@ test("the watching indicator is not green when nothing is being watched", async 
 
 test("the watching indicator is green when a folder really is watched", async ({ page }) => {
   await page.addInitScript(() => {
-    window.__shotshelfStubs__ = { catch_watch_dirs: ["/home/someone/Pictures"] };
+    window.__shotshelfStubs__ = { catch_watch_dirs: { dirs: ["/home/someone/Pictures"], clipboard: true } };
   });
   await bootShelf(page);
 
@@ -503,7 +503,7 @@ test("a shelf that asks before the catch engine is up waits rather than reportin
       catch_watch_dirs: {
         __rejectsTimes__: 3,
         because: starting,
-        then: ["/home/someone/Pictures"],
+        then: { dirs: ["/home/someone/Pictures"], clipboard: true },
       },
       catch_backfill: {
         __rejectsTimes__: 3,

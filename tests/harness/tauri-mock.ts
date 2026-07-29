@@ -151,7 +151,10 @@ export function installTauriMock(EVENTS: WindowEvents): void {
    * noticing shows up as a failure rather than as `undefined`.
    */
   const defaults: Record<string, unknown> = {
-    "catch_watch_dirs": [],
+    // The shape Rust returns: the folders, and whether the clipboard
+    // watcher is actually running. It used to be a bare list, and the
+    // front end filled the clipboard half in from nothing.
+    "catch_watch_dirs": { dirs: [], clipboard: true },
     // Captures from before this launch. Empty by default: a spec that wants
     // them says so, and every other spec asserts against a shelf it filled.
     "catch_backfill": [],

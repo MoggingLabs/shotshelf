@@ -275,10 +275,12 @@ both are re-derivable and safe to delete.
 If either settings file is ever unreadable, Shotshelf sets it aside as `<name>.corrupt` (then
 `.corrupt.1`, up to five) rather than overwriting it, and says so in the log. Both are
 hand-repairable, and what losing one costs differs: `settings.json` holds your preferences,
-while `pinned.json` holds the pins — so only that one, and only its `.corrupt` copies, name
-captures. Delete those along with `pinned.json` if you are removing Shotshelf's data. The
-preferences file never contains a capture path, by construction: pins are blanked before it is
-written, which is the whole point of keeping the two apart.
+while `pinned.json` holds the pins. A live `settings.json` never contains a capture path, by
+construction — pins are blanked before it is written, which is the whole point of keeping the two
+apart — but a `settings.json.corrupt` can, because it is a copy of the file *as it was*, and on an
+install that predates the split that file still carried a `pinned` array. So delete the `.corrupt`
+copies of both, in both locations, if you are removing Shotshelf's data: the preferences ones sit
+in the roaming profile, which is the one place a capture path must never persist.
 
 **On Linux, a shortcut can look registered without being.** The library behind it grabs keys
 through X11 only, and its register call returns success even when the grab never happened — so
@@ -313,7 +315,7 @@ clearing that folder is your call and not the app's. `posters` holds one frame p
 `handoff` holds smaller copies made for sending, and only if you turned that setting on; it keeps
 the 60 most recent. Both are caches and are safe to delete at any time.
 
-Deleting `edits`, `posters` and `compare` costs you saved edits, poster frames and any comparisons you have not dragged out
+Deleting `edits`, `posters` and `handoff` costs you saved edits (comparisons are written there too), poster frames and sized copies you have not dragged out
 yet. `clipboard` is the exception and the one to leave alone: Win+Shift+S and ⌘⌃⇧4 captures exist nowhere else, so deleting that folder destroys them. Everything else Shotshelf shows lives wherever the OS put it, and Shotshelf never moves or deletes it.
 
 ---
@@ -356,6 +358,11 @@ Then, if you want its leftovers gone too:
 - **Safe to delete, and you lose your preferences** — `settings.json`. Delete the *file*, not the
   folder, and nothing else goes with it. Your pins are in `pinned.json` in the local-data root,
   so they survive; delete that too for a genuinely clean start.
+- **Delete these as well, in both places** — any `*.corrupt` neighbours of those two files.
+  Shotshelf keeps one whenever a settings file will not read, so it is repairable by hand rather
+  than overwritten. A `pinned.json.corrupt` names captures by definition; a `settings.json.corrupt`
+  can too, because it is the file *as it was*, and on an install predating the split it still
+  carried a `pinned` array — and that one sits in the roaming profile.
 - **Read this before deleting** — `clipboard` and `edits`. `clipboard` holds captures taken with
   Win+Shift+S or ⌘⇧⌃4, which never touched your disk anywhere else — **these are originals, and
   Shotshelf is the only place they exist.** `edits` holds the annotated copies and comparisons you

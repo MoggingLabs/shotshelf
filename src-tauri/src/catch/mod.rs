@@ -104,7 +104,14 @@ pub struct CaptureSink {
     recent: Mutex<HashMap<PathBuf, Instant>>,
     /// Set when a folder image is emitted, cleared when a clipboard capture
     /// claims it as its own echo. See [`CaptureSink::take_folder_echo`].
-    folder_echo: Mutex<Option<Instant>>,
+    ///
+    /// The *shape* is kept with the moment, because "an image landed in a
+    /// folder recently" was never enough to prove the clipboard is holding a
+    /// copy of it. Win+PrtSc is the only thing that writes both; a Game Bar
+    /// clip, a save-only ShareX profile or a sync client dropping a screenshot
+    /// in armed the same silencer, and the next Win+Shift+S inside four seconds
+    /// was destroyed — the one capture with no other copy.
+    folder_echo: Mutex<Option<(Instant, (u32, u32))>>,
     /// Set when Shotshelf itself writes to the clipboard, so copying a capture
     /// out doesn't shelve a second copy of it. See
     /// [`CaptureSink::take_own_clipboard_write`].
@@ -124,7 +131,10 @@ impl CaptureSink {
         }
 
         if source == Source::Folder && kind == CaptureKind::Image {
-            *lock(&self.folder_echo) = Some(Instant::now());
+            // Only the header is read: `image_dimensions` does not decode.
+            if let Ok(shape) = image::image_dimensions(path) {
+                *lock(&self.folder_echo) = Some((Instant::now(), shape));
+            }
         }
 
         let capture = Capture {
@@ -184,10 +194,13 @@ impl CaptureSink {
     /// one screenshot can only ever silence one clipboard echo. Without that,
     /// a Win+PrtSc followed straight away by a genuine Win+Shift+S would lose
     /// the second capture.
-    pub fn take_folder_echo(&self, window: Duration) -> bool {
+    pub fn take_folder_echo(&self, window: Duration, shape: (u32, u32)) -> bool {
         let mut echo = lock(&self.folder_echo);
         match *echo {
-            Some(seen) if seen.elapsed() < window => {
+            // Same shape as well as recent. Two captures of different sizes are
+            // two captures, whatever their timing, and dropping the second cost
+            // the user a screenshot that existed nowhere else.
+            Some((seen, folder_shape)) if seen.elapsed() < window && folder_shape == shape => {
                 *echo = None;
                 true
             }
@@ -264,6 +277,15 @@ pub struct CatchEngine {
     /// true exactly of files whose last write landed at or after this moment,
     /// and false — permanently — of everything before it.
     watching_since: Mutex<Option<Vec<(PathBuf, SystemTime)>>>,
+    /// Whether the clipboard monitor is actually running.
+    ///
+    /// `None` until `start` finishes. Recorded because the status line was
+    /// asserting it: `describeWatch` appended "+ the clipboard" whatever had
+    /// happened, so a monitor that failed to start left the dot green and the
+    /// tooltip claiming a watcher that was not there — the same defect the
+    /// folder half was fixed for, left standing on the other watcher, on the
+    /// path `docs/USAGE.md` sends the user to first when nothing appears.
+    watching_clipboard: Mutex<Option<bool>>,
     /// Dropping the watch stops the `notify` threads.
     _folders: Mutex<Option<folders::FolderWatch>>,
 }
@@ -288,6 +310,7 @@ pub fn reserve<R: Runtime>(app: &AppHandle<R>) {
     app.manage(CatchEngine {
         watching: Mutex::new(None),
         watching_since: Mutex::new(None),
+        watching_clipboard: Mutex::new(None),
         _folders: Mutex::new(None),
     });
 }
@@ -327,7 +350,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
         .map(|watch| watch.started.clone())
         .unwrap_or_default();
 
-    clipboard::start(app, std::sync::Arc::clone(&sink));
+    let clipboard = clipboard::start(app, std::sync::Arc::clone(&sink));
 
     // The copy-out fallback needs to reach the sink to flag its own clipboard
     // writes, so the shelf doesn't catch what the shelf just copied.
@@ -341,6 +364,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
         // once here. A single moment is wrong in one direction or the other —
         // see the field's own docstring.
         *lock(&engine.watching_since) = Some(started);
+        *lock(&engine.watching_clipboard) = Some(clipboard);
         *lock(&engine._folders) = folders;
     }
 }
@@ -654,7 +678,7 @@ pub fn overrides_from_env() -> Vec<PathBuf> {
 /// Lets the shelf show where it is listening, so "nothing is appearing" has an
 /// answer the user can see rather than a silence they have to guess at.
 #[tauri::command]
-pub fn catch_watch_dirs<R: Runtime>(app: AppHandle<R>) -> Result<Vec<String>, String> {
+pub fn catch_watch_dirs<R: Runtime>(app: AppHandle<R>) -> Result<Watching, String> {
     // An error, not an empty list, while the engine is still coming up.
     //
     // The two are opposite answers: empty means "nothing is being watched, the
@@ -668,10 +692,31 @@ pub fn catch_watch_dirs<R: Runtime>(app: AppHandle<R>) -> Result<Vec<String>, St
 
     // `watching`, not the intended list: reporting what the engine *meant* to
     // watch turned every watcher failure into a green dot. See `folders::start`.
-    engine
+    let dirs = engine
         .watching()
         .map(|dirs| dirs.iter().map(|dir| dir.display().to_string()).collect())
-        .ok_or_else(|| STARTING.to_owned())
+        .ok_or_else(|| STARTING.to_owned())?;
+
+    // Read out before the guard drops with `engine` at the end of this scope.
+    let clipboard = *lock(&engine.watching_clipboard);
+
+    Ok(Watching {
+        dirs,
+        // Same rule as the folders: what is running, not what was attempted.
+        clipboard: clipboard.unwrap_or(false),
+    })
+}
+
+/// What the status line is told: the folders, and whether the clipboard watcher
+/// is running.
+///
+/// A struct rather than the bare list it used to be, because the front end was
+/// filling in the second half from nothing — see `CatchEngine::watching_clipboard`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Watching {
+    pub dirs: Vec<String>,
+    pub clipboard: bool,
 }
 
 /// What both commands say while the catch engine is still starting.
@@ -1238,26 +1283,49 @@ mod tests {
         );
     }
 
+    /// A screen-sized capture, and something plainly different.
+    const FULL_SCREEN: (u32, u32) = (2560, 1440);
+    const A_REGION: (u32, u32) = (612, 337);
+
     #[test]
     fn one_screenshot_silences_exactly_one_clipboard_echo() {
         let sink = CaptureSink::default();
-        *lock(&sink.folder_echo) = Some(Instant::now());
+        *lock(&sink.folder_echo) = Some((Instant::now(), FULL_SCREEN));
 
         assert!(
-            sink.take_folder_echo(Duration::from_secs(4)),
+            sink.take_folder_echo(Duration::from_secs(4), FULL_SCREEN),
             "the clipboard copy of a Win+PrtSc is an echo"
         );
         // Win+PrtSc followed straight away by a real Win+Shift+S must still be
         // caught, so the marker is consumed rather than left standing.
-        assert!(!sink.take_folder_echo(Duration::from_secs(4)));
+        assert!(!sink.take_folder_echo(Duration::from_secs(4), FULL_SCREEN));
+    }
+
+    #[test]
+    fn a_clipboard_capture_of_a_different_shape_is_not_an_echo() {
+        // "An image landed in a folder recently" was the whole test, and it is
+        // not evidence that the clipboard holds a copy of it. Win+PrtSc is the
+        // only thing that writes both; a Game Bar clip, a save-only ShareX
+        // profile or a sync client dropping a screenshot in armed the same
+        // silencer, and the next Win+Shift+S inside four seconds was destroyed
+        // — silently, and it is the one capture with no other copy.
+        let sink = CaptureSink::default();
+        *lock(&sink.folder_echo) = Some((Instant::now(), FULL_SCREEN));
+
+        assert!(
+            !sink.take_folder_echo(Duration::from_secs(4), A_REGION),
+            "a region grab was swallowed by an unrelated full-screen file"
+        );
+        // And the marker is still standing for the capture it really belongs to.
+        assert!(sink.take_folder_echo(Duration::from_secs(4), FULL_SCREEN));
     }
 
     #[test]
     fn a_stale_echo_marker_does_not_swallow_a_later_capture() {
         let sink = CaptureSink::default();
-        *lock(&sink.folder_echo) = Some(Instant::now() - Duration::from_secs(30));
+        *lock(&sink.folder_echo) = Some((Instant::now() - Duration::from_secs(30), FULL_SCREEN));
 
-        assert!(!sink.take_folder_echo(Duration::from_secs(4)));
+        assert!(!sink.take_folder_echo(Duration::from_secs(4), FULL_SCREEN));
     }
 
     #[test]

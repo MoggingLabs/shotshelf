@@ -105,12 +105,23 @@ function hush(): void {
  * the list here is what is genuinely being watched — which is also how you
  * find out that the folder you expected is not among them.
  */
-function describeWatch(dirs: readonly string[]): string {
-  if (dirs.length === 0) return "Watching the clipboard only";
-  return [
-    `Watching ${dirs.length} folder${dirs.length === 1 ? "" : "s"} + the clipboard`,
-    ...dirs,
-  ].join("\n");
+function describeWatch(dirs: readonly string[], clipboard: boolean): string {
+  // The clipboard half is reported, not assumed.
+  //
+  // This appended "+ the clipboard" whatever had happened, so a monitor that
+  // failed to start left the dot green and the tooltip naming a watcher that
+  // was not running, with Win+Shift+S producing nothing at all. That is the
+  // same defect the folder half was fixed for — "the dot was turned green
+  // unconditionally" — left standing on the other watcher, on the indicator
+  // `docs/USAGE.md` sends the user to first when nothing appears.
+  if (dirs.length === 0) {
+    return clipboard ? "Watching the clipboard only" : "Watching nothing";
+  }
+
+  const also = clipboard ? " + the clipboard" : "";
+  return [`Watching ${dirs.length} folder${dirs.length === 1 ? "" : "s"}${also}`, ...dirs].join(
+    "\n",
+  );
 }
 
 /**
@@ -141,10 +152,22 @@ export function noteScanUnavailable(): void {
  * The alert strip was the only honest signal, and it erases itself after
  * twelve seconds; the usage guide points the user at this indicator.
  */
-export function showWatchState(dirs: readonly string[]): void {
-  console.info("[shotshelf] watching", dirs);
-  watch = { live: dirs.length > 0, said: describeWatch(dirs) };
+export function showWatchState(dirs: readonly string[], clipboard: boolean): void {
+  console.info("[shotshelf] watching", dirs, { clipboard });
+  // The dot stays a folder indicator, deliberately.
+  //
+  // "No capture folders are being watched" is a state worth showing even though
+  // the clipboard is still live — that is what the alert below says, and a
+  // green dot beside it would contradict it. The clipboard's own state is
+  // reported in the tooltip and, when *neither* watcher is running, in a
+  // sentence of its own.
+  watch = { live: dirs.length > 0, said: describeWatch(dirs, clipboard) };
   paint();
+
+  if (dirs.length === 0 && !clipboard) {
+    say("Nothing is being watched — no capture will be picked up. See the log for why.");
+    return;
+  }
 
   if (dirs.length === 0) {
     // Not "captures will not be picked up": the clipboard watcher is started

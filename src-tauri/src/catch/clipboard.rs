@@ -44,10 +44,12 @@ const ECHO_GRACE: Duration =
     Duration::from_millis(super::folders::SLOWEST_IMAGE.as_millis() as u64 * 2);
 const ECHO_WINDOW: Duration = Duration::from_secs(4);
 
-pub fn start<R: Runtime>(app: &AppHandle<R>, sink: Arc<CaptureSink>) {
+/// Returns whether the monitor is actually running, which the status line
+/// needs: it used to append "+ the clipboard" whatever happened here.
+pub fn start<R: Runtime>(app: &AppHandle<R>, sink: Arc<CaptureSink>) -> bool {
     if let Err(err) = app.state::<Clipboard>().start_monitor(app.clone()) {
         crate::diag::warn(&format!("could not start the clipboard monitor: {err}"));
-        return;
+        return false;
     }
 
     let (tx, rx) = mpsc::channel::<()>();
@@ -58,6 +60,8 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, sink: Arc<CaptureSink>) {
         // blocked on a clipboard another app is still holding.
         let _ = tx.send(());
     });
+
+    true
 }
 
 fn spawn_worker<R: Runtime>(app: AppHandle<R>, rx: mpsc::Receiver<()>, sink: Arc<CaptureSink>) {
@@ -96,8 +100,19 @@ fn spawn_worker<R: Runtime>(app: AppHandle<R>, rx: mpsc::Receiver<()>, sink: Arc
             // check comes before the write, so an echo never leaves a file
             // behind either.
             std::thread::sleep(ECHO_GRACE);
-            if sink.take_folder_echo(ECHO_WINDOW) {
-                continue;
+            // Only an echo if it is the same *picture*, not merely close in
+            // time. The plugin hands over PNG bytes whatever the OS held, so
+            // the encodings never match byte for byte — the shape is the
+            // cheapest thing both sides can agree on, and it is read from the
+            // header rather than by decoding.
+            let shape = image::ImageReader::new(std::io::Cursor::new(&bytes))
+                .with_guessed_format()
+                .ok()
+                .and_then(|reader| reader.into_dimensions().ok());
+            if let Some(shape) = shape {
+                if sink.take_folder_echo(ECHO_WINDOW, shape) {
+                    continue;
+                }
             }
 
             match write_capture(&app, &bytes) {

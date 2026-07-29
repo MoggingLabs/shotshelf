@@ -181,7 +181,7 @@ test("a failing credential probe is not reported as the catch engine failing", a
   // exact regression it exists to guard.
   await page.addInitScript(() => {
     window.__shotshelfStubs__ = {
-      catch_watch_dirs: ["/pictures/Screenshots"],
+      catch_watch_dirs: { dirs: ["/pictures/Screenshots"], clipboard: true },
       text_recognition_available: { __rejects__: "no recogniser" },
     };
   });
@@ -202,7 +202,7 @@ test("a failing credential probe is not reported as the catch engine failing", a
 test("the shelf says once when captures are not being checked", async ({ page }) => {
   await page.addInitScript(() => {
     window.__shotshelfStubs__ = {
-      catch_watch_dirs: ["/pictures/Screenshots"],
+      catch_watch_dirs: { dirs: ["/pictures/Screenshots"], clipboard: true },
       // What macOS and Linux report today.
       text_recognition_available: false,
     };

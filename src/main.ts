@@ -352,9 +352,11 @@ void initSettings(() => shelf.applySettings())
     say("Settings could not be loaded — running on defaults.");
   });
 
-void whenEngineIsUp("the watch folders", () => invoke<string[]>("catch_watch_dirs"))
-  .then((dirs) => {
-    showWatchState(dirs);
+void whenEngineIsUp("the watch folders", () =>
+  invoke<{ dirs: string[]; clipboard: boolean }>("catch_watch_dirs"),
+)
+  .then(({ dirs, clipboard }) => {
+    showWatchState(dirs, clipboard);
     // The engine is up, so the asset-protocol scope for capture folders is now
     // open. Anything restored before that — pinned captures, which render as
     // soon as `get_settings` answers — may have failed to load against a scope
