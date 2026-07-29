@@ -73,11 +73,11 @@ pub async fn compare_captures<R: Runtime>(
     // This decodes two capped images and allocates a composite larger than
     // both, so several at once is gigabytes.
     //
-    // Through `share::under_sizing_limit`, which holds the permit outside the
+    // Through `limits::under_sizing_limit`, which holds the permit outside the
     // worker and puts a deadline on it. This used to move the permit in as
     // `let _permit = permit;`, so a decode that never returned kept its permit
     // for the life of the process.
-    let bytes = crate::share::under_sizing_limit("that comparison", move || {
+    let bytes = crate::limits::under_sizing_limit("that comparison", move || {
         let before = imaging::load(&before_path)?;
         let after = imaging::load(&after_path)?;
         let changes = compare::changed_regions(&before, &after, compare::Sensitivity::default());

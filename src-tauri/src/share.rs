@@ -84,7 +84,7 @@ pub async fn prepare_drag<R: Runtime>(
         CaptureKind::Image => {
             let worker_app = app.clone();
             let for_worker = source.clone();
-            under_sizing_limit("that capture for the drag", move || {
+            crate::limits::under_sizing_limit("that capture for the drag", move || {
                 handoff::file_for(&worker_app, &for_worker, downscale)
             })
             .await?
@@ -197,74 +197,6 @@ const SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// How long one sizing job may run before the caller gives up on it.
 ///
-/// Generous — a Lanczos3 resize of a 4K screenshot is real work, and a
-/// comparison composites two of them. It exists so a decode that never returns
-/// costs one drag rather than the feature.
-const SIZING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-
-/// Run sizing work on a blocking worker, under the concurrency limit and a
-/// deadline, with the permit released whatever happens.
-///
-/// One function because there were three copies of it — `prepare_drag`,
-/// `copy_capture` and `compare_captures` — and all three made the same mistake
-/// in the same place: the permit was moved *into* the worker.
-///
-/// `describe_capture`, thirty lines above two of them, spends a paragraph on
-/// why that is wrong, and the reasoning transfers exactly. A permit that lives
-/// in the worker is released only when the worker finishes; two jobs that never
-/// finish exhaust a semaphore of two, and every later drag and every later copy
-/// blocks on `acquire_owned` forever. Held out here it is released the moment
-/// this returns, so the cost of a wedge is a leaked thread rather than a
-/// feature that never works again for the rest of the session.
-///
-/// The deadline is the other half, and the sizing path did not have it at all:
-/// it awaited the `JoinHandle` bare, so a wedged decode hung its caller as well
-/// as its permit.
-pub(crate) async fn under_sizing_limit<T, W>(what: &str, work: W) -> Result<T, String>
-where
-    W: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-{
-    under_limit(sizing_limit().clone(), SIZING_TIMEOUT, what, work).await
-}
-
-/// The rule itself, with the pool and the deadline passed in.
-///
-/// Split out for one reason: "a wedged job gives its permit back" is the
-/// property that was wrong at all three call sites, and stating it needs a job
-/// that never finishes and a deadline measured in milliseconds rather than the
-/// real minute.
-async fn under_limit<T, W>(
-    limit: Arc<tokio::sync::Semaphore>,
-    deadline: Duration,
-    what: &str,
-    work: W,
-) -> Result<T, String>
-where
-    W: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-{
-    let permit = limit.acquire_owned().await.map_err(|err| err.to_string())?;
-
-    let worker = tauri::async_runtime::spawn_blocking(work);
-    let outcome = match tokio::time::timeout(deadline, worker).await {
-        Ok(joined) => joined.map_err(|err| err.to_string()),
-        Err(_) => Err(format!("preparing {what} took too long")),
-    };
-
-    // Before returning, on every path. `tokio::time::timeout` frees the *task*
-    // and not the thread behind it, so this is the only thing that keeps a
-    // wedged job from costing a permit permanently.
-    drop(permit);
-    outcome
-}
-
-fn sizing_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
-    static LIMIT: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
-        std::sync::OnceLock::new();
-    crate::limits::shared(&LIMIT, crate::limits::SIZING)
-}
-
 /// Identity of a capture's *contents*, through `cache::Version`.
 ///
 /// The same answer the hand-off and poster caches key on, rather than a third
@@ -321,11 +253,12 @@ pub async fn copy_capture<R: Runtime>(
         CaptureKind::Image => {
             let worker_app = app.clone();
             let for_worker = source.clone();
-            let bytes = under_sizing_limit("that capture for the clipboard", move || {
-                let handed_over = handoff::file_for(&worker_app, &for_worker, downscale);
-                read_capture(&handed_over).map_err(|err| err.to_string())
-            })
-            .await??;
+            let bytes =
+                crate::limits::under_sizing_limit("that capture for the clipboard", move || {
+                    let handed_over = handoff::file_for(&worker_app, &for_worker, downscale);
+                    read_capture(&handed_over).map_err(|err| err.to_string())
+                })
+                .await??;
             Payload::Pixels(bytes)
         }
         // A recording pastes as a file, not as pixels.
@@ -535,61 +468,5 @@ mod tests {
         let _ = scan_key(&dir.join("never-existed.png"));
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_job_that_never_finishes_gives_its_permit_back() {
-        // The property all three sizing call sites got wrong, in the same way:
-        // the permit was moved *into* the worker, so it was released only when
-        // the worker finished. With a pool of two, two jobs that never finish
-        // meant every later drag and every later copy blocked on
-        // `acquire_owned` for the rest of the session — the failure
-        // `describe_capture` spends a paragraph avoiding, thirty lines above
-        // two of them.
-        //
-        // Stated with a wedged job and a millisecond deadline, because the real
-        // one is a minute. The thread really does stay stuck: that is the cost
-        // being accepted, and the point is that the *permit* does not stay with
-        // it.
-        tauri::async_runtime::block_on(async {
-            let limit = Arc::new(tokio::sync::Semaphore::new(1));
-            let (release, wait) = std::sync::mpsc::channel::<()>();
-
-            let wedged = under_limit(
-                limit.clone(),
-                Duration::from_millis(50),
-                "a wedge",
-                move || {
-                    // Held until the assertions are done, then let go so the test
-                    // does not leak a thread into the rest of the suite.
-                    let _ = wait.recv_timeout(Duration::from_secs(10));
-                },
-            )
-            .await;
-
-            assert!(wedged.is_err(), "the deadline fired");
-            assert!(
-                wedged.unwrap_err().contains("took too long"),
-                "and says so in terms a caller can show",
-            );
-
-            let regained =
-                tokio::time::timeout(Duration::from_secs(2), limit.clone().acquire_owned()).await;
-            assert!(
-                regained.is_ok(),
-                "the permit must be back even though the thread is still stuck",
-            );
-
-            let _ = release.send(());
-        });
-    }
-
-    #[test]
-    fn work_that_finishes_in_time_returns_its_answer() {
-        tauri::async_runtime::block_on(async {
-            let limit = Arc::new(tokio::sync::Semaphore::new(1));
-            let answer = under_limit(limit, Duration::from_secs(5), "a quick job", || 7).await;
-            assert_eq!(answer, Ok(7));
-        });
     }
 }
