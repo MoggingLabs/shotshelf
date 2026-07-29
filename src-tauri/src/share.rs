@@ -361,6 +361,20 @@ enum Payload {
 /// recordings, whose default names on every platform contain spaces
 /// (`Screen Recording 2026-07-27 at 15.22.33.mov`, `Screencast from ....webm`),
 /// so the one path that needed encoding was the one that always had spaces.
+///
+/// **This rule is not applied on the drag-out path, and cannot be from here.**
+/// Drag-out goes through the `drag` crate, whose GTK backend builds its own
+/// list — `format!("file://{}", path.display())`, with no encoding — and it
+/// takes real paths, so handing it pre-encoded ones would corrupt the paths to
+/// fix the URIs. Every Linux screenshot name has spaces
+/// (`Screenshot from 2026-07-29 10-11-12.png`), so on Linux the dragged
+/// `text/uri-list` is not what this function would have produced.
+///
+/// Written down rather than worked around: the fix belongs upstream, the
+/// alternative is hand-rolling a drag source this project deliberately
+/// adopted a crate for, and whether a given GTK or Qt receiver tolerates a
+/// raw space is not something anyone here has tested on a Linux desktop —
+/// which `docs/USAGE.md` already says of Linux generally.
 fn file_uri(path: &Path) -> String {
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     {

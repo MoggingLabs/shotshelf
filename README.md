@@ -172,7 +172,8 @@ so `Pictures\Screenshots` appears on a machine that has never taken a screenshot
 invented inside a OneDrive folder you do not have. The resolved list is logged at startup. macOS reads
 the screenshot location once per launch, so `defaults write com.apple.screencapture location …`
 takes effect on the next start. Set `SHOTSHELF_WATCH_DIRS` (`;`-separated on Windows, `:`
-elsewhere) to override the list until the settings file lands. Clipboard captures are written
+elsewhere) to override the list. Deliberately an environment variable rather than a setting:
+it is for a test run or an odd layout, not for everyday use. Clipboard captures are written
 into the app data dir — never the repo.
 
 Win+PrtSc saves a file **and** copies to the clipboard, so both watchers see the same
@@ -200,7 +201,9 @@ The aspect ratio is the whole point: a screenshot keeps its meaning at the *top*
 headers, the first line of a terminal — and the shelf's original 3.8:1 tiles cropped a 1080p
 capture to the middle 46%, throwing that away and rendering dark captures as empty holes.
 
-The shelf holds **50** captures and scrolls; the 51st pushes the oldest off the end. Hovering
+The shelf holds **50 unpinned** captures by default and scrolls; the 51st pushes the oldest
+unpinned one off the end. Pinned captures do not count towards it and are capped separately at
+500, and the 50 is `maxItems` in `settings.json`, adjustable between 1 and 200. Hovering
 a tile reveals pin, copy and remove controls — removing takes it off the shelf, and the file
 itself is never touched, moved or deleted. Recordings keep a permanent badge with their length
 and size, because that is identity rather than chrome.

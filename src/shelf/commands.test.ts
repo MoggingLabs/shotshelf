@@ -91,10 +91,14 @@ test("a test naming a command does not count as calling it", () => {
 // ── The other direction: invoked, but not registered ──────────────────────
 //
 // Added late and with a regex that required a type parameter, so it only saw
-// `invoke<T>(...)` and was blind to the seven call sites whose result is
-// discarded — `hide_shelf`, `set_pinned`, `show_shelf` among them. The gate
-// reported "16 registered commands, and 9 invocations" and nobody read it as
-// the admission it was. These are the cases that hole would have passed.
+// `invoke<T>(...)` and was blind to every call site whose result is discarded —
+// `hide_shelf`, `set_pinned`, `show_shelf` among them. The gate printed a
+// registered count far above its invocation count and nobody read that as the
+// admission it was. These are the cases that hole would have passed.
+//
+// The figures that used to be quoted here are gone: this file and
+// `scripts/check-commands.mjs` each carried one, they disagreed, and both were
+// stale. The gate prints the live numbers.
 
 test("a command invoked but never registered fails", () => {
   const result = check({

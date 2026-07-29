@@ -84,6 +84,13 @@ const registered = registeredCommands();
  * an e2e suite stays green against commands that no longer exist.
  *
  * The type parameter is optional in the pattern, and that is the whole point.
+ *
+ * No count is quoted here on purpose. This file and `src/shelf/commands.test.ts`
+ * each carried a tally of how many call sites the old regex missed; they
+ * disagreed with each other and both had drifted from the tree.
+ * `src-tauri/src/webview_path.rs` states the rule they broke — a criterion is
+ * checkable, a tally is just a fact that goes stale. This gate prints the live
+ * numbers on every run.
  * Requiring it — `invoke<T>(` — silently skipped every call whose result is
  * discarded, which is most of the ones that only ever fail: `hide_shelf`,
  * `set_pinned`, `show_shelf`. Six of sixteen call sites were invisible to the

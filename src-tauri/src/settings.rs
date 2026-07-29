@@ -330,8 +330,12 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
 /// Preferences only. Pinned paths live somewhere else — see [`pins_path`].
 /// How many unreadable copies are kept before new ones stop being set aside.
 ///
-/// Small on purpose: these live in the preferences directory beside the file
-/// they came from, and an unbounded set of them is its own kind of mess.
+/// Small on purpose: these live beside the file they came from — which is the
+/// **local** data directory, `dirs::local`, not the preferences one, because
+/// `pinned.json` names captures and nothing naming a capture may roam. An
+/// unbounded set of them is its own kind of mess.
+///
+/// They carry capture paths, so `docs/USAGE.md`'s uninstall list names them.
 const KEPT_CORRUPT: u32 = 5;
 
 /// Move an unreadable file somewhere the next write will not destroy it.

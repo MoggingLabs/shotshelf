@@ -59,7 +59,13 @@ Linux user has did not work when followed verbatim; `.github/workflows/ci.yml` i
 same set.) The tray needs an AppIndicator host — GNOME needs the
 AppIndicator extension; KDE, Xfce and Cinnamon have one already.
 
-One thing works differently there, imposed by the tray protocol rather than by choice: Linux
+Two things work differently there. The first is imposed by the drag protocol: the URIs Shotshelf
+advertises when you drag a capture out are built by the drag library, which does not
+percent-encode them, and every Linux screenshot name contains spaces. Whether that matters
+depends on the application you drop onto — most tolerate it, some may not — and nobody has yet
+run Shotshelf on a Linux desktop to find out. Copy still works either way.
+
+The second is imposed by the tray protocol rather than by choice: Linux
 tray icons deliver no click events to the app, so **open the shelf from the icon's menu or the
 hotkey** rather than by clicking the icon.
 
@@ -114,7 +120,7 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
 - **Pick several** — click one, then ctrl-click (⌘-click) others, or shift-click for a range.
   Dragging any one of them carries them all, oldest first.
 - **Quick look** — press space to open the picked capture at readable size, and
-  space or Esc to close it. A 225px card is enough to recognise a screenshot and
+  space or Esc to close it. A 199px card in a 225px panel is enough to recognise a screenshot and
   not enough to read one, which is the whole reason this exists.
 - **Edit** — pick one capture and a button appears in the title strip. Five tools,
   and only five: **crop**, **box**, **arrow**, **number** and **redact**. Saving
@@ -139,7 +145,7 @@ shows rather defeats the point.
 | `↑` `↓` | Move between captures, in the order they are shown |
 | `Space` | Open the picked **image** at readable size, and close it again — recordings have no preview |
 | `Enter` | Copy it to the clipboard |
-| `Delete` | Take it off the shelf — **the file stays on disk** |
+| `Delete` or `Backspace` | Take it off the shelf — **the file stays on disk** |
 | `e` | Mark the picked capture up |
 | `Ctrl+Z` | Undo the last mark, while marking up |
 | `Esc` | Close the editor, then the preview, then the shelf |
@@ -251,6 +257,11 @@ nothing to separate them from and the split buys nothing there.
 relaunch knows not to bring back something you removed. The same local-data folder holds
 `shotshelf.log` and a small `video-drag-preview.png` that Shotshelf writes for drag previews;
 both are re-derivable and safe to delete.
+
+If `pinned.json` is ever unreadable, Shotshelf sets it aside as `pinned.json.corrupt` (then
+`.corrupt.1`, up to five) rather than overwriting it, and says so in the log — the file is
+hand-repairable and losing it loses your pins. Those copies name captures, so delete them
+along with `pinned.json` if you are removing Shotshelf's data.
 
 **About the default hotkey:** a global shortcut takes that combination away from every other
 app. On macOS `⌘⇧S` is Save As almost everywhere, so it's worth changing to something you don't

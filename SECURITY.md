@@ -97,8 +97,8 @@ What that leaves unverified, specifically:
 
 Four more, named because the list above reads as though only Windows chrome is untested:
 
-- **No installer has ever been built, on any machine.** The release workflow triggers on `v*` tags
-  and there are none; CI runs `cargo build`, never `tauri build`. So the whole bundling path —
+- **No installer has ever been built, on any machine.** The release workflow triggers on `v*` tags,
+  of which there are none, and on manual dispatch, which has never been run; CI runs `cargo build`, never `tauri build`. So the whole bundling path —
   `scripts/build-release.mjs`, sidecar packaging, NSIS/MSI/DMG generation, updater artifacts — has
   never executed anywhere. "The bundled ffmpeg sidecar *as packaged*" above implies a package
   exists; none does.
@@ -151,7 +151,10 @@ dependency works. The measured consequences are narrower and specific:
   after the retraction.
 
 None of these can leak a capture off the machine — the network surface is one URL, and the CSP
-that seals the webview is written to allow nothing else. But that policy is itself on the list
+that seals the webview is written to allow nothing else *that it directs*. That qualifier is
+load-bearing: the policy sets `default-src`, and `form-action` and `base-uri` do not fall back
+to it, so a page that could inject markup could still aim a form somewhere. Nothing in the app
+renders untrusted HTML, which is why this is a hardening gap rather than a hole. But that policy is itself on the list
 above: it is verified by inspection, not by having ever been enforced. "It starts and works" is
 not among the things this repository can currently demonstrate.
 

@@ -9,7 +9,6 @@
 
 export type CaptureKind = "image" | "video";
 
-/** Payload of the Rust `capture://new` event. */
 /**
  * What was in front when a capture landed.
  *
@@ -40,14 +39,6 @@ export interface Capture {
 }
 
 /**
- * A capture as the shelf holds it.
- *
- * The element showing it lives in the view's own map rather than here: a tile
- * is one possible presentation of an item, not part of what the item *is*, and
- * hanging a node off the data is how a rebuilt view leaves stale references
- * behind.
- */
-/**
  * Whether a capture can be marked up or looked at full size.
  *
  * A recording can be neither: a still frame blown up is not a preview of a
@@ -72,6 +63,14 @@ export function canPreview(item: Pick<ShelfItem, "kind">): boolean {
   return item.kind === "image";
 }
 
+/**
+ * A capture as the shelf holds it.
+ *
+ * The element showing it lives in the view's own map rather than here: a tile
+ * is one possible presentation of an item, not part of what the item *is*, and
+ * hanging a node off the data is how a rebuilt view leaves stale references
+ * behind.
+ */
 export interface ShelfItem extends Capture {
   readonly id: string;
   /** Pinned captures ignore retention and the item cap, and survive a restart. */

@@ -14,9 +14,10 @@ Thanks for taking the time to contribute!
    that does *not* mean: the packaged app has never been launched on any platform — see
    [SECURITY.md](./SECURITY.md#what-has-not-been-verified).
 4. **Local-only, always.** No telemetry, no cloud, and exactly one network call: the launch-time
-   update *check*, which installs nothing. It carries the running version, the OS and the CPU
-   architecture — the feed URL is built from all three — and nothing else. See `SECURITY.md` for the
-   exact wording; if you change what that request contains, change that section in the same commit.
+   update *check*, which installs nothing. The feed URL is built from the running version, the OS
+   and the CPU architecture; the request also carries the updater's own `User-Agent` and, as any
+   HTTPS request does, your IP. "And nothing else" used to end that sentence, which `SECURITY.md`
+   had already retracted in the same words. See `SECURITY.md` for the exact wording; if you change what that request contains, change that section in the same commit.
    If a change would send a capture anywhere off the device, it doesn't belong here.
 5. **Be kind.** See the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
