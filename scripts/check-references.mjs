@@ -261,7 +261,7 @@ function unwrap(block) {
 }
 
 /**
- * Every **tracked** file, by basename.
+ * Every file git would keep, by basename — tracked, plus untracked ones it does not ignore.
  *
  * `git ls-files`, not a glob of the working tree, and the difference is the
  * whole point. Globbing resolved references against files git does not

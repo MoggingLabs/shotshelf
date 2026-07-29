@@ -136,14 +136,8 @@ fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
     //
     // `settle` filters what is not there, so naming a folder that does not
     // exist costs nothing; naming none costs the user every screenshot.
-    let pictures = path
-        .picture_dir()
-        .ok()
-        .or_else(|| home.as_ref().map(|home| home.join("Pictures")));
-    let videos = path
-        .video_dir()
-        .ok()
-        .or_else(|| home.as_ref().map(|home| home.join("Videos")));
+    let pictures = under_home(path.picture_dir().ok(), home.as_deref(), "Pictures");
+    let videos = under_home(path.video_dir().ok(), home.as_deref(), "Videos");
 
     if let Some(pictures) = pictures {
         dirs.push(pictures.join("Screenshots"));
@@ -171,6 +165,22 @@ fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
         screencapture_location(home.as_deref()),
         home.map(|home| home.join("Desktop")),
     )
+}
+
+/// A known folder, or the same-named folder under `$HOME` when the OS will not
+/// say where it is.
+///
+/// Not `cfg`-gated, so it has a test on every platform — the same reason
+/// [`macos_candidates`] and `settle` were pulled out of platform-specific code,
+/// with the same history behind it: while the Windows fallback was eight lines
+/// inline in `cfg(windows)` `defaults`, deleting it left every test green.
+///
+/// `settle` filters what is not there, so naming a folder that does not exist
+/// costs nothing; naming none costs the user every screenshot.
+// Compiled everywhere, called from the Windows and Linux branches.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn under_home(known: Option<PathBuf>, home: Option<&Path>, name: &str) -> Option<PathBuf> {
+    known.or_else(|| home.map(|home| home.join(name)))
 }
 
 /// The macOS candidate list: the configured location if it is really there,
@@ -304,6 +314,33 @@ fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_known_folder_falls_back_to_the_same_name_under_home() {
+        // The Windows fallback, testable on every platform.
+        //
+        // While it was eight lines inline in `cfg(windows)` `defaults`, deleting
+        // it left all 144 tests green — and its own comment credited Windows
+        // with a fallback it did not have, which is what prompted adding one.
+        // The failure it covers is a known folder the OS will not resolve: three
+        // of the four Windows candidates vanish and the user gets "clipboard
+        // watch only" on the primary platform.
+        let home = PathBuf::from("/home/someone");
+        let known = PathBuf::from("/mnt/media/Pictures");
+
+        assert_eq!(
+            under_home(Some(known.clone()), Some(&home), "Pictures"),
+            Some(known),
+            "a known folder the OS did resolve is used as it is"
+        );
+        assert_eq!(
+            under_home(None, Some(&home), "Pictures"),
+            Some(home.join("Pictures")),
+            "and one it would not resolve falls back under $HOME"
+        );
+        // No home either is not an error; the caller simply has no candidate.
+        assert_eq!(under_home(None, None, "Pictures"), None);
+    }
+
     #[test]
     fn the_macos_desktop_fallback_survives_a_stale_preference() {
         // `configured.or(desktop)` branched on `Option`-ness, so a

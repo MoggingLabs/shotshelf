@@ -264,12 +264,86 @@ export function silencedIn(source) {
     const body = code.slice(open + 1, end).replace(/\s+/g, "");
     if (!/(?:^|[(,])(?:allow|expect)\(/.test(body)) continue;
 
+    const before = found.length;
     found.push(...[...body.matchAll(/clippy::[a-z_]+/g)].map((lint) => lint[0]));
     // `warnings` is every lint at once, clippy's included, and names no group.
     if (/(?:^|[(,])warnings(?=[,)])/.test(body)) found.push("warnings");
+
+    // An allowance whose lint name cannot be read is reported, not ignored.
+    //
+    // This is bypass nine, and it is the one the "decidable" claim above was
+    // wrong about. `silencedIn` recognises the attribute and then harvests
+    // *names*; a macro composes the name from tokens it never sees —
+    // `macro_rules! quiet { ($lint:ident, …) => { #[allow(clippy::$lint)] … } }`
+    // — so the harvest came back empty and the allowance table read the file as
+    // silencing nothing. A reviewer routed the diagnostic log into `%APPDATA%`
+    // that way with `clippy.toml` and `Cargo.toml` untouched.
+    //
+    // Naming a lint this can never read is a decision like any other, so it
+    // fails closed: an unreadable name is reported as `clippy::<unreadable>`,
+    // which no table entry matches until someone writes one and says why.
+    // Only when it *names* a clippy lint this could not read — a bare
+    // `#[allow(dead_code)]` names a rustc lint and switches off nothing here.
+    const namesClippy = body.includes("clippy::") || body.includes("$");
+    if (before === found.length && namesClippy) found.push("clippy::<unreadable>");
   }
 
   return found;
 }
 
+/**
+ * A TOML file with its comments blanked, the way [`codeOnly`] does for Rust.
+ *
+ * `check-dirs.mjs` read `clippy.toml` and `Cargo.toml` as raw text and asked
+ * whether a rule's path appeared in them. Commenting every rule out leaves all
+ * of those strings present, so the gate passed over a `clippy.toml` that was
+ * semantically empty — the same "prose counted as code" bypass `codeOnly` was
+ * written to end, applied to the Rust side and not to the TOML side added in
+ * the same commit.
+ *
+ * A `#` starts a comment unless it is inside a string. Same length out as in,
+ * so offsets still line up.
+ *
+ * @param {string} source
+ * @returns {string}
+ */
+export function tomlWithoutComments(source) {
+  let out = "";
+  let inString = false;
+  let quote = "";
 
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i] ?? "";
+
+    if (inString) {
+      out += char;
+      if (char === "\\") {
+        out += source[i + 1] ?? "";
+        i += 1;
+      } else if (char === quote) {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      inString = true;
+      quote = char;
+      out += char;
+      continue;
+    }
+
+    if (char === "#") {
+      while (i < source.length && source[i] !== "\n") {
+        out += " ";
+        i += 1;
+      }
+      i -= 1;
+      continue;
+    }
+
+    out += char;
+  }
+
+  return out;
+}

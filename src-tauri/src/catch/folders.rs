@@ -92,6 +92,36 @@ pub struct FolderWatch {
     _debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
 }
 
+/// Take each directory in turn, stamping when each one actually went live.
+///
+/// Extracted so the stamping can be tested, which is the whole point of it.
+/// While this was a loop inside `start` it had no gate at all: hoisting a
+/// single `SystemTime::now()` above the loop — the exact engine-wide stamp the
+/// per-directory design exists to replace — left every test green, because the
+/// only test of the rule drives `to_backfill`, which takes the list as a
+/// parameter and cannot see how it was built. `macos_candidates` and `settle`
+/// were pulled out of `cfg`-gated code for the same reason, with the same
+/// comment: unreachable from a test is how it ships wrong.
+///
+/// A directory that fails to register appears in neither list, so nothing later
+/// pairs a file with a watcher that is not running.
+fn register(
+    dirs: &[PathBuf],
+    mut watch: impl FnMut(&Path) -> Result<(), String>,
+) -> Vec<(PathBuf, SystemTime)> {
+    let mut started = Vec::with_capacity(dirs.len());
+
+    for dir in dirs {
+        match watch(dir) {
+            // Stamped as each one is taken, not once for the loop.
+            Ok(()) => started.push((dir.clone(), SystemTime::now())),
+            Err(err) => crate::diag::warn(&format!("cannot watch {}: {err}", dir.display())),
+        }
+    }
+
+    started
+}
+
 pub fn start<R: Runtime>(
     app: &AppHandle<R>,
     dirs: &[PathBuf],
@@ -110,20 +140,14 @@ pub fn start<R: Runtime>(
     // usage guide tells the user to check that line when nothing appears, so
     // the one diagnostic offered for the app's central failure was the one
     // thing that could not report it.
-    let mut watching = Vec::with_capacity(dirs.len());
-    let mut started = Vec::with_capacity(dirs.len());
-    for dir in dirs {
-        // Non-recursive on purpose: capture folders are flat, and recursing a
-        // whole Pictures tree would be a lot of churn for nothing.
-        match debouncer.watch(dir, RecursiveMode::NonRecursive) {
-            Ok(()) => {
-                // Stamped as each one is taken, not once for the loop.
-                started.push((dir.clone(), SystemTime::now()));
-                watching.push(dir.clone());
-            }
-            Err(err) => crate::diag::warn(&format!("cannot watch {}: {err}", dir.display())),
-        }
-    }
+    // Non-recursive on purpose: capture folders are flat, and recursing a whole
+    // Pictures tree would be a lot of churn for nothing.
+    let started = register(dirs, |dir| {
+        debouncer
+            .watch(dir, RecursiveMode::NonRecursive)
+            .map_err(|err| err.to_string())
+    });
+    let watching: Vec<PathBuf> = started.iter().map(|(dir, _)| dir.clone()).collect();
 
     spawn_settler(app.clone(), rx, sink);
 
@@ -448,6 +472,64 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(shot);
+    }
+
+    #[test]
+    fn each_directory_is_stamped_as_it_is_taken() {
+        // The producer half of the per-directory boundary, which had no gate.
+        //
+        // Hoisting a single `SystemTime::now()` above the loop — the engine-wide
+        // stamp the whole design exists to replace — left all 144 tests green,
+        // because the only test of the rule drives `to_backfill`, which takes
+        // the list as a parameter and cannot see how it was built.
+        //
+        // Two registrations with a real pause between them: their stamps must
+        // differ, and each must fall after its own `watch` call rather than all
+        // sharing one moment.
+        let dirs = vec![PathBuf::from("/first"), PathBuf::from("/second")];
+        let mut before_second = None;
+        let started = register(&dirs, |dir| {
+            if dir == Path::new("/second") {
+                before_second = Some(SystemTime::now());
+            } else {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Ok(())
+        });
+
+        assert_eq!(started.len(), 2);
+        assert_eq!(started[0].0, PathBuf::from("/first"));
+        assert_eq!(started[1].0, PathBuf::from("/second"));
+        assert!(
+            started[1].1 > started[0].1,
+            "both directories share one moment, so the stamp is engine-wide"
+        );
+        assert!(
+            started[1].1 >= before_second.expect("the second watch ran"),
+            "the second stamp was taken before its own watch call"
+        );
+    }
+
+    #[test]
+    fn a_directory_that_will_not_register_is_in_neither_list() {
+        // It must not be paired with a watcher that is not running: backfill
+        // would then hand it over to a watcher that can never emit it.
+        let dirs = vec![PathBuf::from("/ok"), PathBuf::from("/denied")];
+        let started = register(&dirs, |dir| {
+            if dir == Path::new("/denied") {
+                Err("permission denied".to_owned())
+            } else {
+                Ok(())
+            }
+        });
+
+        assert_eq!(
+            started
+                .iter()
+                .map(|(dir, _)| dir.clone())
+                .collect::<Vec<_>>(),
+            vec![PathBuf::from("/ok")]
+        );
     }
 
     #[test]

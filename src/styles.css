@@ -319,8 +319,11 @@ body {
 }
 
 /* A recording says so wherever the card is not being acted on: that is identity, not chrome.
- * It does fade on hover, with the rest of the badge row, so the action buttons that
- * appear there are readable — the word "permanently" was wrong and README said it too. */
+ * It does fade on hover, because `.tile__label` — the filename and context line,
+ * a full-width gradient across the bottom — fades *in* over the same corner. Not
+ * for the action buttons: those are in the opposite corner and never overlap it.
+ * The word "permanently" was wrong here and in README, and the first correction
+ * gave the wrong reason. */
 .tile__badge {
   position: absolute;
   bottom: 6px;

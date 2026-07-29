@@ -184,7 +184,7 @@ const ALLOWANCES = new Map([
   ["src-tauri/src/catch/folders.rs", ["clippy::cast_possible_truncation"]],
 ]);
 
-import { grantsIn, silencedIn } from "./rust-source.mjs";
+import { grantsIn, silencedIn, tomlWithoutComments } from "./rust-source.mjs";
 /**
  * The modules whose asset-protocol grants are whole folders on purpose.
  *
@@ -223,7 +223,11 @@ const DIRECTORY_GRANTERS = new Set([
 const CLIPPY_RULES = JSON.parse(readFileSync("tests/fixtures/clippy-rules.json", "utf8"));
 
 {
-  const clippyToml = readFileSync("src-tauri/clippy.toml", "utf8");
+  // Comments blanked first. Read as raw text, commenting every rule out left
+  // all of their paths present in the file and this check green over a
+  // `clippy.toml` that was semantically empty — the same defect `codeOnly`
+  // exists to prevent, one file type over.
+  const clippyToml = tomlWithoutComments(readFileSync("src-tauri/clippy.toml", "utf8"));
   for (const path of CLIPPY_RULES.disallowed) {
     if (!clippyToml.includes(`"${path}"`)) {
       problemsWithConfig.push(
@@ -236,7 +240,7 @@ const CLIPPY_RULES = JSON.parse(readFileSync("tests/fixtures/clippy-rules.json",
 
   // The `[lints.clippy]` table only, so a level set elsewhere in the manifest
   // cannot be mistaken for this one.
-  const manifest = readFileSync("src-tauri/Cargo.toml", "utf8");
+  const manifest = tomlWithoutComments(readFileSync("src-tauri/Cargo.toml", "utf8"));
   const table = /\[lints\.clippy\]([\s\S]*?)(?=\n\[|$)/.exec(manifest)?.[1] ?? "";
   // Nothing in this table may be set to `allow`.
   //
@@ -245,7 +249,17 @@ const CLIPPY_RULES = JSON.parse(readFileSync("tests/fixtures/clippy-rules.json",
   // the `clippy.toml` rules off, which is the bypass this whole check exists
   // for. An `allow` here is the escape hatch spelled as configuration, and it
   // gets the same treatment as the attribute form — argue for it in a diff.
-  for (const [, lint] of table.matchAll(/^\s*([a-z_:]+)\s*=\s*"allow"/gm)) {
+  // Both spellings Cargo accepts, and either quote.
+  //
+  // The first version matched `name = "allow"` only. Cargo also takes
+  // `name = { level = "allow", priority = 1 }`, and TOML takes single quotes and
+  // a quoted key — so `disallowed_methods = { level = 'allow' }` switched the
+  // rule off with this check green, which is verbatim the bypass it was added
+  // to close.
+  for (const allowed of table.matchAll(
+    /^\s*"?([a-z_:]+)"?\s*=\s*(?:['"]allow['"]|\{[^}]*level\s*=\s*['"]allow['"][^}]*\})/gm,
+  )) {
+    const lint = allowed[1] ?? "a lint";
     problemsWithConfig.push(
       `  src-tauri/Cargo.toml: [lints.clippy] sets \`${lint}\` to "allow". ` +
         `That switches a clippy rule off for the whole crate with no attribute ` +

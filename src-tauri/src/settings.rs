@@ -233,6 +233,21 @@ pub fn load<R: Runtime>(app: &AppHandle<R>) -> SettingsStore {
     load_from(settings_path(app), pins_path(app))
 }
 
+/// The file's text, `None` if it is simply not there, `Err` if it is there and
+/// cannot be read.
+///
+/// The three states have to stay apart. `read_to_string(..).ok()` collapses the
+/// last two into "absent", and "absent" is the one state this module answers by
+/// *overwriting* — which turned a momentarily locked file into permanent data
+/// loss.
+fn read_if_present(path: &std::path::Path) -> std::io::Result<Option<String>> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => Ok(Some(raw)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
 /// The file half, with the two locations passed in.
 ///
 /// Split out so the migration can be tested. It is the one path in this module
@@ -240,13 +255,20 @@ pub fn load<R: Runtime>(app: &AppHandle<R>) -> SettingsStore {
 /// what happens when either is unreadable — and it had no test, because
 /// everything it did was behind an `AppHandle`.
 fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
-    // Whether the file exists but will not parse — distinct from "absent", which
-    // is an ordinary first run. Only the first deserves a `.corrupt` copy.
+    // Whether the file is there but unusable — distinct from "absent", which is
+    // an ordinary first run. Only the first deserves a `.corrupt` copy.
     let mut settings_unreadable = false;
 
     let current = path
         .as_ref()
-        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|path| match read_if_present(path) {
+            Ok(raw) => raw,
+            Err(err) => {
+                crate::diag::warn(&format!("settings file could not be read: {err}"));
+                settings_unreadable = true;
+                None
+            }
+        })
         // This file is meant to be hand-edited, and plenty of editors —
         // Notepad, PowerShell's `Set-Content -Encoding utf8` — write a UTF-8
         // BOM that serde_json rejects outright. Losing someone's settings over
@@ -320,17 +342,33 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
     // everything else — and parsed three times over the same bytes, under a
     // comment further down claiming "One read now." That comment described the
     // second half only; this is the deduplication it was talking about.
-    let raw_local = pins
-        .as_ref()
-        .and_then(|path| std::fs::read_to_string(path).ok());
+    let mut pins_unopenable = false;
+    let raw_local = pins.as_ref().and_then(|path| match read_if_present(path) {
+        Ok(raw) => raw,
+        Err(err) => {
+            crate::diag::warn(&format!("pinned captures could not be read: {err}"));
+            pins_unopenable = true;
+            None
+        }
+    });
     let parsed = raw_local
         .as_deref()
         .map(|raw| read_local_state(strip_bom(raw)));
 
-    // "There is a file and it will not parse" — which is the difference between
-    // "restore nothing and say so" and "migrate", and is exactly
-    // `raw_local.is_some() && parse failed`.
-    let unreadable = matches!(parsed, Some(Err(_)));
+    // "There is a file and it is not usable" — the difference between "restore
+    // nothing and say so" and "migrate".
+    //
+    // This used to be parse failure alone, because the read above swallowed an
+    // `Err` into `None`. A `pinned.json` that exists but cannot be *opened* —
+    // locked by a backup or sync agent, on an offline redirected profile, owned
+    // by another account after one elevated launch — therefore looked absent:
+    // no `.corrupt` copy was kept, the stale roaming list was presented as
+    // current, and the first capture of the session wrote that list straight
+    // over the real file. Every pin gone, permanently, with nothing on screen.
+    // That is exactly what the `.corrupt` machinery exists to prevent, and what
+    // `docs/USAGE.md` promises happens "if either settings file is ever
+    // unreadable".
+    let unreadable = pins_unopenable || matches!(parsed, Some(Err(_)));
 
     let watermark = parsed
         .as_ref()
@@ -752,6 +790,97 @@ mod tests {
         assert!(
             !roamed.contains("still-pinned"),
             "a capture path reached the roaming file: {roamed}",
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_pins_file_that_cannot_be_opened_is_not_treated_as_absent() {
+        // "Absent" is the one state this module answers by *overwriting*, so a
+        // file that exists and cannot be read must never look absent.
+        //
+        // `read_to_string(..).ok()` collapsed the two. A `pinned.json` locked by
+        // a backup or sync agent, on an offline redirected profile, or owned by
+        // another account after one elevated launch, therefore took the "no
+        // local file, migrate from roaming" branch: no `.corrupt` copy was kept,
+        // the stale roaming list was presented as current, and the first capture
+        // of the session wrote it straight over the real file.
+        //
+        // A directory named `pinned.json` is the portable way to make
+        // `read_to_string` fail on a path that exists.
+        let dir = workspace("unopenable-pins");
+        let roaming = dir.join("settings.json");
+        let local = dir.join("pinned.json");
+
+        std::fs::write(
+            &roaming,
+            serde_json::to_string(&Settings {
+                pinned: vec![pin(&somewhere("stale-from-before-the-split.png"))],
+                ..Settings::default()
+            })
+            .expect("serialises"),
+        )
+        .expect("a settings file");
+        std::fs::create_dir(&local).expect("a pins path that cannot be read");
+
+        let store = load_from(Some(roaming), Some(local));
+
+        assert!(
+            store.get().pinned.is_empty(),
+            "the stale roaming list was presented as the live one: {:?}",
+            store.get().pinned
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_readable_settings_file_keeps_the_update_check_it_asks_for() {
+        // The other direction of the fail-closed field, which had no assertion:
+        // `if true || settings_unreadable` — the check forced off for every
+        // user on every launch, and then persisted by the first-run write —
+        // left every test green. Losing update notices permanently, with no
+        // panel control to restore them, is a real cost too.
+        let dir = workspace("readable-update-check");
+        let roaming = dir.join("settings.json");
+        let local = dir.join("pinned.json");
+
+        std::fs::write(
+            &roaming,
+            serde_json::to_string(&Settings {
+                check_for_updates: true,
+                ..Settings::default()
+            })
+            .expect("serialises"),
+        )
+        .expect("a settings file");
+
+        let store = load_from(Some(roaming), Some(local));
+
+        assert!(
+            store.get().check_for_updates,
+            "a perfectly readable settings file had its update check switched off"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unopenable_settings_file_does_not_switch_the_update_check_back_on() {
+        // The sibling of the test below, through the door it does not cover:
+        // the file is there and cannot be *read*, rather than there and
+        // unparseable. `SECURITY.md`'s promise is the same either way.
+        let dir = workspace("unopenable-settings");
+        let roaming = dir.join("settings.json");
+        let local = dir.join("pinned.json");
+        std::fs::create_dir(&roaming).expect("a settings path that cannot be read");
+
+        let store = load_from(Some(roaming), Some(local));
+
+        assert!(
+            !store.get().check_for_updates,
+            "an unopenable settings file re-enabled the update check"
         );
 
         let _ = std::fs::remove_dir_all(&dir);

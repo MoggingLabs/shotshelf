@@ -143,11 +143,11 @@ impl CaptureSink {
             // too, so with retention off it filed under a day the user was not
             // looking at.
             //
-            // The duplicate is real but it is narrow — the watchers go live one
-            // directory at a time and `watching_since` is stamped after the
-            // last of them — and it is fixed where it belongs, in the front
-            // end's backfill merge, which is the one place that can see both
-            // answers at once.
+            // The duplicate that motivated it is fixed where the timing is
+            // known: `to_backfill` hands each file over at its own folder's
+            // watcher-start moment, so the two paths cannot both claim one
+            // capture. The front-end merge that stood here briefly is gone —
+            // it could see only one of the two routes a live capture takes.
             ts: now_ms(),
             context: crate::enrich::foreground::current(),
         };
@@ -357,6 +357,16 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
 /// folder for.
 const BACKFILL_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// How recently a file may have been written and still count as finished.
+///
+/// Not a hand-off boundary — `watching_since` is that, per directory — but a
+/// liveness one. A backfill gets a single look at the folder and cannot tell a
+/// finished file from one mid-write, where the watcher's settle loop can.
+/// Comfortably longer than the ffmpeg silence `VIDEO_STABLE_TICKS` is sized
+/// for, so a recording that is merely stalled is never mistaken for a finished
+/// one.
+const BACKFILL_SETTLED: Duration = Duration::from_secs(5);
+
 /// The most captures a launch will bring back.
 ///
 /// A hard bound, because the alternative is a first run on a machine with four
@@ -399,12 +409,14 @@ pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Capture
         .await
         .unwrap_or_default();
 
-    // `watching()` answered `Some` above, so this cannot be missing — but
-    // falling back to "now" rather than unwrapping keeps the worst case at
-    // "behaves as the old five-second rule did", not a panic in the launch path.
-    // `watching()` answered `Some` above, so this cannot be missing. An empty
-    // list means nothing is watched, and `to_backfill` then admits nothing —
-    // which is the right answer when there is no watcher to hand over to.
+    // `watching()` answered `Some` above, so in practice this is never empty.
+    //
+    // If it ever were, every file in the window would be handed over —
+    // `took_over` finds no watcher and `is_none_or` yields `true`, which is the
+    // right answer for a folder nothing is watching, because backfill is then
+    // the only way in. An earlier comment here claimed the opposite ("admits
+    // nothing"), and a third above it described a `now` fallback that no longer
+    // exists.
     let watching_since = engine.watching_since().unwrap_or_default();
     let chosen = to_backfill(found, SystemTime::now(), since, &watching_since);
 
@@ -526,7 +538,26 @@ fn to_backfill(
         let watchers_yet =
             took_over(path, watching_since).is_none_or(|started| *modified < started);
 
-        as_ms(*modified) > since_ms && *modified >= cutoff && watchers_yet
+        // And a file still being written is the watcher's whatever the boundary
+        // says.
+        //
+        // The per-directory boundary answers "could a live event have been
+        // produced for this?"; it does not answer "is this file finished?". At
+        // a real launch the watcher started a fraction of a second ago, and a
+        // recording that was already running has its last flush *before* that —
+        // `VIDEO_STABLE_TICKS` is sized for an ffmpeg stall of about 2.8
+        // seconds with the file untouched. So the boundary alone handed over a
+        // partially written container, whose length and size cannot be read and
+        // whose drag-out is a truncated clip, and the watcher then shelved the
+        // finished file again under a different `ts`.
+        //
+        // Backfill gets one look at the folder and cannot run a settle loop.
+        // The watcher can, so anything written this recently is left to it.
+        let settled = now
+            .duration_since(*modified)
+            .is_ok_and(|age| age >= BACKFILL_SETTLED);
+
+        as_ms(*modified) > since_ms && *modified >= cutoff && watchers_yet && settled
     });
 
     // Newest first to apply the cap, so the cap keeps the most recent...
@@ -920,6 +951,39 @@ mod tests {
     }
 
     #[test]
+    fn a_recording_still_being_written_at_launch_is_left_to_the_watcher() {
+        // The boundary answers "could a live event have been produced for
+        // this?"; it does not answer "is this file finished?".
+        //
+        // At a real launch the watcher started a fraction of a second ago, and a
+        // recording that was already running has its last flush *before* that —
+        // `VIDEO_STABLE_TICKS` is sized for an ffmpeg stall of about 2.8
+        // seconds with the file untouched. So the boundary alone handed the
+        // shelf a partially written container: a card whose length and size
+        // cannot be read, whose drag-out is a truncated clip, and which the
+        // watcher then shelved again under a different `ts` when it finished.
+        let watching = vec![(
+            PathBuf::new(),
+            SystemTime::UNIX_EPOCH + Duration::from_millis(NOW_SECS * 1000 - 200),
+        )];
+
+        // Last flush two seconds ago: before the watcher started, and well
+        // inside the stall `VIDEO_STABLE_TICKS` allows for.
+        let mid_write = seen(2, "recording-in-progress.mp4");
+        assert!(
+            to_backfill(vec![mid_write], now(), 0, &watching).is_empty(),
+            "a partially written recording was handed to the shelf"
+        );
+
+        // And one that really has finished still comes back.
+        let finished = seen(30, "yesterdays-clip.mp4");
+        assert_eq!(
+            names(&to_backfill(vec![finished], now(), 0, &watching)),
+            vec!["yesterdays-clip.mp4"]
+        );
+    }
+
+    #[test]
     fn each_folder_hands_over_at_its_own_watchers_start() {
         // Why the boundary is per directory rather than one moment.
         //
@@ -937,19 +1001,21 @@ mod tests {
         // the early folder's file is the watcher's, the late folder's is not.
         let early = PathBuf::from("/early");
         let late = PathBuf::from("/late");
+        // Both starts well past `BACKFILL_SETTLED`, so this measures the
+        // hand-over boundary rather than the liveness one.
         let started = vec![
             (
                 early.clone(),
-                SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 2),
+                SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 9),
             ),
             (
                 late.clone(),
-                SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 1),
+                SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 7),
             ),
         ];
 
-        // Written 1.5 s ago: after `early`'s watcher, before `late`'s.
-        let between = SystemTime::UNIX_EPOCH + Duration::from_millis(NOW_SECS * 1000 - 1500);
+        // Written eight seconds ago: after `early`'s watcher, before `late`'s.
+        let between = SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 8);
         let found = vec![
             (between, early.join("seen-live.png"), CaptureKind::Image),
             (between, late.join("nobody-saw-it.png"), CaptureKind::Image),
@@ -990,9 +1056,11 @@ mod tests {
         // not started yet, so nothing had it.
         let started_just_now = vec![(
             PathBuf::new(),
-            SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 1),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 6),
         )];
-        let during_launch = seen(2, "taken-during-launch.png");
+        // Older than `BACKFILL_SETTLED`, so it is finished — and older than the
+        // watcher's start, so nothing live can ever have seen it.
+        let during_launch = seen(7, "taken-during-launch.png");
         let chosen = to_backfill(vec![during_launch], now(), 0, &started_just_now);
         assert_eq!(
             names(&chosen),

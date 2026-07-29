@@ -313,8 +313,8 @@ clearing that folder is your call and not the app's. `posters` holds one frame p
 `handoff` holds smaller copies made for sending, and only if you turned that setting on; it keeps
 the 60 most recent. Both are caches and are safe to delete at any time.
 
-Deleting these folders costs you saved edits, poster frames and any comparisons you have not dragged out
-yet. Your captures live wherever the OS put them and Shotshelf never moves or deletes them.
+Deleting `edits`, `posters` and `compare` costs you saved edits, poster frames and any comparisons you have not dragged out
+yet. `clipboard` is the exception and the one to leave alone: Win+Shift+S and ⌘⌃⇧4 captures exist nowhere else, so deleting that folder destroys them. Everything else Shotshelf shows lives wherever the OS put it, and Shotshelf never moves or deletes it.
 
 ---
 
