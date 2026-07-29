@@ -12,6 +12,7 @@
 
 mod cache;
 mod catch;
+mod diag;
 mod edit;
 mod enrich;
 mod handoff;
@@ -92,6 +93,10 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            // First, so everything below has somewhere to report to. A
+            // packaged Windows build has no console at all.
+            diag::init(app.handle());
+
             tray::init(app.handle())?;
 
             // Everything below reads settings, so they load first.
@@ -102,7 +107,7 @@ pub fn run() {
             // A shortcut another app already owns is worth saying out loud —
             // the shelf still works, it just can't be summoned that way.
             if let Err(err) = hotkey::register(app.handle(), &current.hotkey) {
-                eprintln!("shotshelf: {err}");
+                crate::diag::warn(&err.to_string());
             }
 
             // The one and only network call Shotshelf makes: "is there a newer

@@ -45,7 +45,7 @@ pub fn allow_reading_edits<R: Runtime>(app: &AppHandle<R>) {
         return;
     };
     if let Err(err) = app.asset_protocol_scope().allow_directory(&dir, false) {
-        eprintln!("shotshelf: saved edits may not display ({err})");
+        crate::diag::warn(&format!("saved edits may not display ({err})"));
     }
 }
 

@@ -41,7 +41,7 @@ pub fn rebind<R: Runtime>(app: &AppHandle<R>, previous: &str, next: &str) -> Res
 
     register(app, next).inspect_err(|_| {
         if let Err(err) = register(app, previous) {
-            eprintln!("shotshelf: could not restore the previous shortcut: {err}");
+            crate::diag::warn(&format!("could not restore the previous shortcut: {err}"));
         }
     })
 }

@@ -42,7 +42,7 @@ pub fn file_for<R: Runtime>(app: &AppHandle<R>, source: &Path, downscale: bool) 
         Ok(Some(copy)) => copy,
         Ok(None) => source.to_path_buf(),
         Err(why) => {
-            eprintln!("shotshelf: handing over the original ({why})");
+            crate::diag::warn(&format!("handing over the original ({why})"));
             source.to_path_buf()
         }
     }

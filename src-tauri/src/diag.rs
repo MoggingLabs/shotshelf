@@ -1,0 +1,166 @@
+//! Diagnostics that can actually be read.
+//!
+//! `main.rs` sets `windows_subsystem = "windows"` for release builds, which is
+//! correct — a tray utility must not open a console window — and means a
+//! packaged Windows build has no stdout or stderr attached to anything. Every
+//! `eprintln!` in this crate went nowhere, including the ones that explain the
+//! failures the UI cannot: "no capture folders found", "cannot watch {dir}",
+//! "could not save the clipboard image", "{accelerator} could not be
+//! registered", "could not save settings". The usage guide said to run the
+//! installed binary from a terminal to see them; on Windows that produces
+//! nothing at all.
+//!
+//! So these go to a file as well as to stderr. A file is readable on every
+//! platform, survives the session, and is something a user can attach to a bug
+//! report — which is the only reason any of this is written down.
+//!
+//! Hand-rolled rather than adopting `tauri-plugin-log`, and that is a
+//! compromise rather than a preference. The plugin is the right answer and the
+//! standing rule is to adopt rather than hand-roll; it cannot be added here,
+//! because any edit to `Cargo.toml` forces Cargo to relink its build script and
+//! Windows Smart App Control refuses the freshly-linked binary, breaking the
+//! Rust build on the development machine (see SECURITY.md). Thirty lines with
+//! no dependency is the honest way to close the gap from inside that
+//! constraint, and the plugin should replace this the moment the manifest can
+//! be touched.
+//!
+//! **Nothing sensitive goes through here.** The same rule the emit path already
+//! follows: file *names*, never paths, never window titles, never recognised
+//! text. A capture's path carries client and project names, and this writes to
+//! a file that outlives the session.
+
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+
+use tauri::{AppHandle, Manager, Runtime};
+
+/// Where the log goes, once the app handle is available.
+///
+/// `OnceLock` because diagnostics start before `setup` runs — `settings::load`
+/// and `hotkey::register` both report — and a log that only works after
+/// start-up would miss the failures most worth having.
+static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// One writer, so two threads cannot interleave half-lines.
+fn writer() -> &'static Mutex<()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    &LOCK
+}
+
+/// How large the log may get before it is started over.
+///
+/// This is a tray app expected to run for weeks: an append-only file with a
+/// line per capture is a slow leak. Restarted rather than rotated — one
+/// previous generation is not worth the complexity when the whole point is the
+/// last few minutes before something went wrong.
+const MAX_LOG_BYTES: u64 = 512 * 1024;
+
+/// Point diagnostics at the app's own data directory. Called once, at start-up.
+///
+/// Local app data, not `%APPDATA%`: this file names what the app was doing,
+/// and the roaming profile is copied to a network share at logoff. Same rule
+/// `catch/clipboard.rs` states for captures themselves.
+pub fn init<R: Runtime>(app: &AppHandle<R>) {
+    let Ok(dir) = app.path().app_local_data_dir() else {
+        return;
+    };
+    init_in(&dir);
+}
+
+/// The directory half, so the behaviour can be tested without an app handle.
+fn init_in(dir: &std::path::Path) {
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let _ = LOG_PATH.set(dir.join("shotshelf.log"));
+}
+
+/// Something went wrong that a user might need to know about.
+pub fn warn(message: &str) {
+    record("WARN", message);
+}
+
+/// Something happened that is worth following in a bug report.
+pub fn info(message: &str) {
+    record("INFO", message);
+}
+
+fn record(level: &str, message: &str) {
+    // Still to stderr: a dev build has a console, and that is where anyone
+    // running `npm run tauri dev` is looking.
+    eprintln!("shotshelf: {message}");
+
+    let Some(path) = LOG_PATH.get() else {
+        return;
+    };
+    let Ok(_guard) = writer().lock() else {
+        return;
+    };
+
+    if std::fs::metadata(path).is_ok_and(|meta| meta.len() > MAX_LOG_BYTES) {
+        let _ = std::fs::remove_file(path);
+    }
+
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    // No timestamp: formatting one needs a date library this crate does not
+    // have, and ordering within the file already answers "what happened
+    // before what", which is what these lines are read for.
+    let _ = writeln!(file, "[{level}] {message}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One test, because `LOG_PATH` is a `OnceLock` and can only be set once
+    /// per process. The three properties it covers are each load-bearing.
+    #[test]
+    fn diagnostics_reach_a_file_and_that_file_stays_bounded() {
+        // 1. Safe before `init`. Diagnostics start before `setup` runs —
+        //    `settings::load` and `hotkey::register` both report — so writing
+        //    with nowhere to write must be a no-op, not a panic.
+        assert!(LOG_PATH.get().is_none(), "not initialised yet");
+        warn("a warning with nowhere to go");
+
+        let dir = std::env::temp_dir().join(format!("shotshelf-diag-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        init_in(&dir);
+        let path = LOG_PATH.get().expect("initialised");
+
+        // 2. It actually lands. This is the whole point: on a packaged Windows
+        //    build there is no console, so a diagnostic that only reaches
+        //    stderr reaches nobody.
+        warn("cannot watch a folder");
+        info("caught Image shot.png");
+        let written = std::fs::read_to_string(path).expect("the log exists");
+        assert!(written.contains("[WARN] cannot watch a folder"));
+        assert!(written.contains("[INFO] caught Image shot.png"));
+
+        // 3. It is bounded. A tray app runs for weeks and writes a line per
+        //    capture; an append-only file is a slow leak. Started over rather
+        //    than rotated, because what is worth keeping is the last few
+        //    minutes before something went wrong.
+        std::fs::write(
+            path,
+            vec![b'x'; usize::try_from(MAX_LOG_BYTES).unwrap() + 1],
+        )
+        .expect("a large log");
+        warn("the line that triggers the restart");
+        let after = std::fs::read_to_string(path).expect("the log still exists");
+        assert!(
+            after.len() < usize::try_from(MAX_LOG_BYTES).unwrap(),
+            "the log was not restarted: {} bytes",
+            after.len(),
+        );
+        assert!(after.contains("the line that triggers the restart"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

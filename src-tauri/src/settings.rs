@@ -80,7 +80,10 @@ impl Default for Settings {
 /// In-memory copy of the file, so placement and the hotkey can be read without
 /// touching the disk on every window event.
 pub struct SettingsStore {
+    /// Preferences. May roam.
     path: PathBuf,
+    /// Pinned capture paths. Must not roam — see [`pins_path`].
+    pins: PathBuf,
     current: Mutex<Settings>,
 }
 
@@ -111,9 +114,21 @@ impl SettingsStore {
         self.persist(&snapshot);
     }
 
+    /// Write both files.
+    ///
+    /// Two files, because they have different rules about leaving the machine.
+    /// The preferences file carries everything except `pinned`; the pins file
+    /// carries only `pinned`, and lives where nothing syncs it.
     fn persist(&self, settings: &Settings) {
-        if let Err(err) = write(&self.path, settings) {
-            eprintln!("shotshelf: could not save settings: {err}");
+        let preferences = Settings {
+            pinned: Vec::new(),
+            ..settings.clone()
+        };
+        if let Err(err) = write(&self.path, &preferences) {
+            crate::diag::warn(&format!("could not save settings: {err}"));
+        }
+        if let Err(err) = write(&self.pins, &settings.pinned) {
+            crate::diag::warn(&format!("could not save pins: {err}"));
         }
     }
 
@@ -141,33 +156,76 @@ pub fn load<R: Runtime>(app: &AppHandle<R>) -> SettingsStore {
             |raw| match serde_json::from_str::<Settings>(strip_bom(&raw)) {
                 Ok(settings) => Some(settings),
                 Err(err) => {
-                    eprintln!("shotshelf: settings file unreadable, using defaults: {err}");
+                    crate::diag::warn(&format!("settings file unreadable, using defaults: {err}"));
                     None
                 }
             },
         )
         .unwrap_or_default();
 
+    let pins = pins_path(app);
+
+    // Pins from their own file, falling back to whatever the preferences file
+    // still carries.
+    //
+    // That fallback is the migration: an install from before the split has its
+    // pins in `settings.json`, and they are read once, then written to the new
+    // file by the `persist` below. Nothing is deleted from the old file by
+    // hand — the next write of `settings.json` omits `pinned` anyway, because
+    // `persist` blanks it.
+    let mut current = current;
+    let stored_pins = pins
+        .as_ref()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|raw| serde_json::from_str::<Vec<PinnedItem>>(strip_bom(&raw)).ok());
+    if let Some(from_own_file) = stored_pins {
+        current.pinned = from_own_file;
+    }
+
     let store = SettingsStore {
         path: path.unwrap_or_default(),
+        pins: pins.unwrap_or_default(),
         current: Mutex::new(sanitise(current)),
     };
 
-    // Write the defaults out on first run so the file is there to be found and
-    // hand-edited, rather than appearing only once something is changed.
-    if !store.path.as_os_str().is_empty() && !store.path.exists() {
+    // Write both out on first run so the files are there to be found and
+    // hand-edited, rather than appearing only once something is changed — and
+    // so a migrated set of pins lands in its new home immediately.
+    let missing = |path: &PathBuf| !path.as_os_str().is_empty() && !path.exists();
+    if missing(&store.path) || missing(&store.pins) {
         store.persist(&store.get());
     }
 
     store
 }
 
-/// Where the file lives: `%APPDATA%\com.mogginglabs.shotshelf\settings.json` on
-/// Windows, `~/Library/Application Support/com.mogginglabs.shotshelf/settings.json`
-/// on macOS.
+/// Where the preferences file lives: `%APPDATA%\com.mogginglabs.shotshelf\`
+/// on Windows, `~/Library/Application Support/com.mogginglabs.shotshelf/` on
+/// macOS.
+///
+/// Preferences only. Pinned paths live somewhere else — see [`pins_path`].
 fn settings_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     let dir = app.path().app_config_dir().ok()?;
     Some(dir.join("settings.json"))
+}
+
+/// Where pinned capture paths live: **local** app data, never roaming.
+///
+/// Split out from the preferences file, which is in `app_config_dir` — and on
+/// Windows that is `%APPDATA%`, the *roaming* profile, which a domain roaming
+/// profile or Enterprise State Roaming copies to a network share at logoff.
+///
+/// A hotkey and an item cap can roam; up to `MAX_PINNED` absolute capture
+/// paths cannot. This codebase already says so twice, in two other places:
+/// `catch/clipboard.rs` rejects that exact directory for clipboard captures in
+/// exactly those words, and `catch/mod.rs` refuses to log capture paths because
+/// "a capture's path carries client and project names just as readily" as a
+/// window title. SECURITY.md's promise is that nothing a capture touches leaves
+/// the machine, and five hundred of their paths syncing to a file share is that
+/// promise broken by the settings file.
+fn pins_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
+    let dir = app.path().app_local_data_dir().ok()?;
+    Some(dir.join("pinned.json"))
 }
 
 fn strip_bom(raw: &str) -> &str {
@@ -186,11 +244,11 @@ fn strip_bom(raw: &str) -> &str {
 /// guarded by a single writer thread and a grace window, `share.rs`'s drag
 /// preview is an idempotent icon, and `edit.rs` uses `create_new` — which
 /// cannot overwrite — and removes a half-written file itself.
-fn write(path: &PathBuf, settings: &Settings) -> std::io::Result<()> {
+fn write<T: Serialize>(path: &PathBuf, value: &T) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let json = serde_json::to_string_pretty(settings)?;
+    let json = serde_json::to_string_pretty(value)?;
 
     let staged = path.with_extension("json.part");
     std::fs::write(&staged, json)?;
@@ -274,6 +332,45 @@ mod tests {
         } else {
             format!("/home/someone/Pictures/{name}")
         }
+    }
+
+    #[test]
+    fn pinned_paths_are_never_written_to_the_roaming_file() {
+        // On Windows `app_config_dir` is `%APPDATA%` — the roaming profile,
+        // which a domain roaming profile or Enterprise State Roaming copies to
+        // a network share at logoff. Up to `MAX_PINNED` absolute capture paths
+        // were going there, and a capture's path carries client and project
+        // names as readily as a window title does. This codebase rejects that
+        // directory for captures in `catch/clipboard.rs` and refuses to log
+        // capture paths in `catch/mod.rs`; the settings file was doing both.
+        let dir = std::env::temp_dir().join(format!("shotshelf-pins-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+
+        let roaming = dir.join("settings.json");
+        let local = dir.join("pinned.json");
+        let secret = somewhere("acme-migration-plan.png");
+
+        let store = SettingsStore {
+            path: roaming.clone(),
+            pins: local.clone(),
+            current: Mutex::new(Settings::default()),
+        };
+        store.set_pinned(vec![pin(&secret)]);
+
+        let roamed = std::fs::read_to_string(&roaming).expect("preferences were written");
+        assert!(
+            !roamed.contains("acme-migration-plan"),
+            "a capture path reached the roaming file: {roamed}",
+        );
+        // And the preferences really are still there — the split must not cost
+        // the user their settings.
+        assert!(roamed.contains("hotkey"));
+
+        let kept = std::fs::read_to_string(&local).expect("pins were written");
+        assert!(kept.contains("acme-migration-plan"), "the pin was not kept");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

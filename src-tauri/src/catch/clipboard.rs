@@ -36,7 +36,7 @@ const ECHO_WINDOW: Duration = Duration::from_secs(4);
 
 pub fn start<R: Runtime>(app: &AppHandle<R>, sink: Arc<CaptureSink>) {
     if let Err(err) = app.state::<Clipboard>().start_monitor(app.clone()) {
-        eprintln!("shotshelf: could not start the clipboard monitor: {err}");
+        crate::diag::warn(&format!("could not start the clipboard monitor: {err}"));
         return;
     }
 
@@ -71,7 +71,7 @@ fn spawn_worker<R: Runtime>(app: AppHandle<R>, rx: mpsc::Receiver<()>, sink: Arc
                 Ok(Some(bytes)) => bytes,
                 Ok(None) => continue, // text, files, or nothing at all
                 Err(err) => {
-                    eprintln!("shotshelf: could not read the clipboard: {err}");
+                    crate::diag::warn(&format!("could not read the clipboard: {err}"));
                     continue;
                 }
             };
@@ -92,7 +92,9 @@ fn spawn_worker<R: Runtime>(app: AppHandle<R>, rx: mpsc::Receiver<()>, sink: Arc
 
             match write_capture(&app, &bytes) {
                 Ok(path) => sink.emit(&app, &path, CaptureKind::Image, Source::Clipboard),
-                Err(err) => eprintln!("shotshelf: could not save the clipboard image: {err}"),
+                Err(err) => {
+                    crate::diag::warn(&format!("could not save the clipboard image: {err}"))
+                }
             }
         }
     });

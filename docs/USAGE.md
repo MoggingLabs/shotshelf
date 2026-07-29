@@ -302,11 +302,20 @@ it creates there is an empty capture folder that was missing, and those are left
 
 | Symptom | Likely cause |
 | :-- | :-- |
-| Nothing appears when you take a screenshot | The folder isn't being watched — check the status line. On macOS, the folder permission prompt may have been declined |
+| Nothing appears when you take a screenshot | The folder isn't being watched — check the status line, which now reports the folders actually being watched rather than the ones Shotshelf meant to watch. On macOS, the folder permission prompt may have been declined. `shotshelf.log` says which folder failed and why |
 | The hotkey does nothing | Another app already owns that combination; change it in settings |
+| Nothing appeared after a reboot | Shotshelf does not start itself — add it to your startup items. A launch brings back captures from the previous 24 hours, so the recent ones are still there |
 | A recording shows a film glyph, not a frame | ffmpeg couldn't decode that file. The tile still drags out |
 | A tile shows ⚠ | The file has been moved or deleted since it was caught |
 | The shelf is nowhere to be seen | It's a popover — click the tray/menu-bar icon, or press the hotkey |
 | It closes while you're still using it | Hover it to hold it open; it only auto-closes a peek |
 
-Shotshelf logs to standard output. To see it, run the installed binary from a terminal.
+Shotshelf writes diagnostics to `shotshelf.log` in its local app data directory —
+`%LOCALAPPDATA%\com.mogginglabs.shotshelf\` on Windows,
+`~/Library/Application Support/com.mogginglabs.shotshelf/` on macOS,
+`~/.local/share/com.mogginglabs.shotshelf/` on Linux. Attach it to a bug report.
+
+It used to say "run the installed binary from a terminal", which on Windows produces nothing at
+all: a release build sets `windows_subsystem = "windows"` so the app has no console, and every
+diagnostic went nowhere. The log holds file *names* and never paths, window titles or recognised
+text, and it restarts itself once it passes 512 KB.

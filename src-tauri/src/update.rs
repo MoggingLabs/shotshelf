@@ -38,7 +38,7 @@ const CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 /// is offline, and it must never stop the shelf from doing its job.
 pub fn check_on_launch<R: Runtime>(app: &AppHandle<R>, wanted: bool) {
     if !wanted {
-        println!("shotshelf: update check is off");
+        crate::diag::info("update check is off");
         return;
     }
 
@@ -62,10 +62,10 @@ pub fn check_on_launch<R: Runtime>(app: &AppHandle<R>, wanted: bool) {
                     // downloaded and nothing is replaced.
                     let _ = app.emit(UPDATE_EVENT, update.version.clone());
                 }
-                Ok(None) => println!("shotshelf: already up to date"),
-                Err(err) => eprintln!("shotshelf: update check failed: {err}"),
+                Ok(None) => crate::diag::info("already up to date"),
+                Err(err) => crate::diag::warn(&format!("update check failed: {err}")),
             },
-            Err(err) => eprintln!("shotshelf: updater unavailable: {err}"),
+            Err(err) => crate::diag::warn(&format!("updater unavailable: {err}")),
         }
     });
 }

@@ -40,8 +40,11 @@ instead of fixing our filing habits.
 
 ## ✨ What it does
 
-- **Catches** every new screenshot and screen recording automatically (watches the OS capture
-  locations + clipboard).
+- **Catches** every new screenshot and screen recording while it is running (watches the OS
+  capture locations + clipboard), and brings back anything from the last 24 hours it was not
+  running to see. Shotshelf does **not** add itself to startup — see
+  [Run it](#-run-it) — so after a reboot you launch it yourself, and the backfill is what stops
+  that costing you the morning's captures.
 - **Holds** them in a popover in the corner of your screen, newest first, as thumbnails.
 - **Drags out** — grab an item off the shelf and drop it straight into an email, editor, or chat. No
   Finder/Explorer spelunking, no 4-second window. Pick several and they go together, in order.
@@ -96,6 +99,15 @@ npx playwright install chromium # once per clone; the browser gates need it
 npm run tauri dev               # dev build, frontend hot-reloads
 npm run tauri build             # release bundle (.msi/.exe on Windows, .dmg/.app on macOS)
 ```
+
+**Starting it automatically is a manual step, and deliberately not automated here.** Shotshelf
+registers no login item and writes nothing to a startup folder — an app that adds itself to
+startup without being asked is a bad neighbour, and doing it properly needs a platform plugin
+this build cannot currently add (`Cargo.toml` cannot be edited on the development machine; see
+[SECURITY.md](./SECURITY.md#what-has-not-been-verified)). Until then: on Windows put a shortcut
+in `shell:startup`, on macOS add it under System Settings → General → Login Items, on Linux drop
+a `.desktop` file in `~/.config/autostart`. A launch picks up anything from the previous 24
+hours, so a late start is not a lost morning.
 
 Identical commands on every OS. The shelf is a popover that rests in the bottom-right corner of
 the screen and has **no taskbar or Dock entry** by design — the tray icon (Windows, Linux) /

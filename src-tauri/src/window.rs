@@ -72,7 +72,7 @@ fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
         Ok(Some(monitor)) => monitor,
         Ok(None) => return,
         Err(err) => {
-            eprintln!("shotshelf: could not read the monitor layout: {err}");
+            crate::diag::warn(&format!("could not read the monitor layout: {err}"));
             return;
         }
     };
@@ -85,7 +85,7 @@ fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
     let y = area.position.y + area.size.height as i32 - to_physical(size.1 + SCREEN_MARGIN);
 
     if let Err(err) = shelf.set_position(tauri::PhysicalPosition::new(x, y)) {
-        eprintln!("shotshelf: could not place the shelf: {err}");
+        crate::diag::warn(&format!("could not place the shelf: {err}"));
     }
 }
 
@@ -235,7 +235,7 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) {
     match shelf.is_visible() {
         Ok(true) if is_opened() => hide(app),
         Ok(_) => open(app),
-        Err(err) => eprintln!("shotshelf: could not read shelf visibility: {err}"),
+        Err(err) => crate::diag::warn(&format!("could not read shelf visibility: {err}")),
     }
 }
 
@@ -249,7 +249,9 @@ pub fn apply_material<R: Runtime>(shelf: &WebviewWindow<R>) {
 
     #[cfg(target_os = "windows")]
     if let Err(err) = window_vibrancy::apply_acrylic(shelf, Some((16, 18, 26, 190))) {
-        eprintln!("shotshelf: no acrylic backdrop ({err}) — falling back to a solid panel");
+        crate::diag::warn(&format!(
+            "no acrylic backdrop ({err}) — falling back to a solid panel"
+        ));
     }
 
     // Must follow the acrylic: it is the backdrop that needs clipping.
@@ -263,7 +265,9 @@ pub fn apply_material<R: Runtime>(shelf: &WebviewWindow<R>) {
         None,
         Some(14.0),
     ) {
-        eprintln!("shotshelf: no vibrancy backdrop ({err}) — falling back to a solid panel");
+        crate::diag::warn(&format!(
+            "no vibrancy backdrop ({err}) — falling back to a solid panel"
+        ));
     }
 }
 

@@ -66,10 +66,10 @@ pub fn allow_reading_posters<R: Runtime>(app: &AppHandle<R>) {
     match poster_dir(app) {
         Ok(dir) => {
             if let Err(err) = app.asset_protocol_scope().allow_directory(&dir, false) {
-                eprintln!("shotshelf: poster frames will not display: {err}");
+                crate::diag::warn(&format!("poster frames will not display: {err}"));
             }
         }
-        Err(err) => eprintln!("shotshelf: no poster cache directory: {err}"),
+        Err(err) => crate::diag::warn(&format!("no poster cache directory: {err}")),
     }
 }
 
@@ -192,12 +192,13 @@ async fn extract_frame<R: Runtime>(
                 }
             }
             Err(err) => {
-                eprintln!(
-                    "shotshelf: no poster frame for {}: {err}",
-                    // The filename only, for the reason `catch/mod.rs` gives:
-                    // stderr lands in the same journal as stdout.
+                // The filename only, for the reason `catch/mod.rs` gives: a
+                // capture's path carries client and project names, and this
+                // now goes to a file that outlives the session.
+                crate::diag::warn(&format!(
+                    "no poster frame for {}: {err}",
                     source.file_name().unwrap_or_default().to_string_lossy()
-                );
+                ));
                 return duration_ms;
             }
         }

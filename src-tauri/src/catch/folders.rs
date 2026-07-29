@@ -49,6 +49,9 @@ const SETTLE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// Dropping this stops the watcher and its settle thread.
 pub struct FolderWatch {
+    /// The directories the watcher really took, which is what the status line
+    /// must report — see `start`.
+    pub watching: Vec<PathBuf>,
     _debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
 }
 
@@ -61,17 +64,29 @@ pub fn start<R: Runtime>(
 
     let mut debouncer = new_debouncer(DEBOUNCE, None, move |result| queue(result, &tx))?;
 
+    // Which directories are genuinely being watched, not which were asked for.
+    //
+    // A per-directory failure was logged and the directory left in the list —
+    // and the status line reads that list, so an exhausted inotify limit, a
+    // macOS permission denial or a folder redirected to an offline share all
+    // left the dot green and the tooltip claiming "Watching 3 folders". The
+    // usage guide tells the user to check that line when nothing appears, so
+    // the one diagnostic offered for the app's central failure was the one
+    // thing that could not report it.
+    let mut watching = Vec::with_capacity(dirs.len());
     for dir in dirs {
         // Non-recursive on purpose: capture folders are flat, and recursing a
         // whole Pictures tree would be a lot of churn for nothing.
-        if let Err(err) = debouncer.watch(dir, RecursiveMode::NonRecursive) {
-            eprintln!("shotshelf: cannot watch {}: {err}", dir.display());
+        match debouncer.watch(dir, RecursiveMode::NonRecursive) {
+            Ok(()) => watching.push(dir.clone()),
+            Err(err) => crate::diag::warn(&format!("cannot watch {}: {err}", dir.display())),
         }
     }
 
     spawn_settler(app.clone(), rx, sink);
 
     Ok(FolderWatch {
+        watching,
         _debouncer: debouncer,
     })
 }
@@ -83,7 +98,7 @@ fn queue(result: DebounceEventResult, tx: &mpsc::Sender<Candidate>) {
         Ok(events) => events,
         Err(errors) => {
             for err in errors {
-                eprintln!("shotshelf: watch error: {err}");
+                crate::diag::warn(&format!("watch error: {err}"));
             }
             return;
         }
