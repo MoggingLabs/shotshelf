@@ -7,6 +7,25 @@
  */
 
 import { maybeEl } from "./dom.ts";
+
+/**
+ * What `catch_watch_dirs` answers with.
+ *
+ * Declared here rather than inline at the `invoke` in `main.ts`, so the names
+ * the front end reads have one home and `tests/fixtures/watch-state-fields.json`
+ * can join them to Rust's `Watching`. Nothing joined the two before: renaming
+ * a field on either side compiles, keeps every Rust test green, and lands
+ * `undefined` here. `undefined` is falsy, so `showWatchState` would raise
+ * "Clipboard captures are not being picked up" on every healthy launch, on the
+ * indicator `docs/USAGE.md` sends the user to first.
+ */
+export interface WatchState {
+  /** Where the engine is really listening — not where it meant to. */
+  dirs: string[];
+  /** Whether the clipboard monitor is really running. */
+  clipboard: boolean;
+}
+
 /** How long a message stays on the strip before it takes itself down. */
 const ALERT_MS = 12_000;
 
@@ -164,8 +183,20 @@ export function showWatchState(dirs: readonly string[], clipboard: boolean): voi
   watch = { live: dirs.length > 0, said: describeWatch(dirs, clipboard) };
   paint();
 
-  if (dirs.length === 0 && !clipboard) {
-    say("Nothing is being watched — no capture will be picked up. See the log for why.");
+  // A dead clipboard watcher is said out loud, whatever the folders are doing.
+  //
+  // The first version raised this only when the folders were dead *too*, so the
+  // ordinary case — folders healthy, monitor failed — left a green dot, no
+  // message, and Win+Shift+S doing nothing at all. The only signal was the
+  // *absence* of three words from a tooltip nobody has a baseline for, and
+  // `docs/USAGE.md` sends the user to that indicator with a cause that is wrong
+  // in exactly this state.
+  if (!clipboard) {
+    say(
+      dirs.length === 0
+        ? "Nothing is being watched — no capture will be picked up. See the log for why."
+        : "Clipboard captures are not being picked up — Win+Shift+S and ⌘⌃⇧4 will do nothing. See the log for why.",
+    );
     return;
   }
 

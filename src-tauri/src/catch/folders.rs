@@ -61,6 +61,32 @@ pub(super) const SLOWEST_IMAGE: Duration = Duration::from_millis(
 /// capture caught mid-write drags out truncated, so this errs slow: ~2.8s of
 /// genuine silence before a recording counts as done.
 const VIDEO_STABLE_TICKS: u32 = 8;
+
+/// The longest the watcher can take to believe a capture of this kind is done.
+///
+/// Derived from the settle loop's own budgets, so the two cannot drift: raising
+/// `VIDEO_STABLE_TICKS` moves this with it.
+///
+/// `to_backfill` needs it because it gets one look at a folder and cannot run a
+/// settle loop. A file written more recently than this may still be growing,
+/// and — crucially — a file that *is* still growing will produce more write
+/// events, all of them after the watcher registered, so the watcher will emit
+/// it properly. Leaving it to the watcher therefore loses nothing, while
+/// shelving it hands over a truncated container.
+///
+/// This replaced `is_readable` as backfill's answer. That signal is real but it
+/// is Windows-only — an exclusive lock is not a thing on macOS or Linux, where
+/// `File::open` succeeds on a file its writer still holds — so it answered
+/// "finished" for every in-flight recording on two of the three platforms while
+/// being presented as the general rule.
+#[must_use]
+pub(super) fn settle_budget(kind: CaptureKind) -> Duration {
+    let ticks = match kind {
+        CaptureKind::Image => IMAGE_STABLE_TICKS,
+        CaptureKind::Video => VIDEO_STABLE_TICKS,
+    };
+    DEBOUNCE + SETTLE_TICK * ticks
+}
 /// How long a vanished file is kept around before being forgotten.
 const GONE_GRACE: Duration = Duration::from_secs(5);
 /// A file that is still empty this long after its first event is not a capture

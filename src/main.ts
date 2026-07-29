@@ -32,6 +32,7 @@ import {
   onAlertChange,
   say,
   showWatchState,
+  type WatchState,
 } from "./status.ts";
 
 // Windows rounds the window through DWM at a fixed 8px, so the panel's own
@@ -352,9 +353,7 @@ void initSettings(() => shelf.applySettings())
     say("Settings could not be loaded — running on defaults.");
   });
 
-void whenEngineIsUp("the watch folders", () =>
-  invoke<{ dirs: string[]; clipboard: boolean }>("catch_watch_dirs"),
-)
+void whenEngineIsUp("the watch folders", () => invoke<WatchState>("catch_watch_dirs"))
   .then(({ dirs, clipboard }) => {
     showWatchState(dirs, clipboard);
     // The engine is up, so the asset-protocol scope for capture folders is now

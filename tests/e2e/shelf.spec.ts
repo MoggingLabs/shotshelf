@@ -973,3 +973,27 @@ test("a lost-capture message raised during the launch appearance reshapes the sh
 // recorded here. What is missing is a way to hold `#dragging` true across the
 // hide from a spec, which the drag harness does not currently offer.
 
+
+test("a clipboard watcher that did not start is said out loud", async ({ page }) => {
+  // The whole clipboard half of the status line had no gate: every stub in the
+  // tree answered `clipboard: true`, so the false branch was unreachable and
+  // ignoring the flag entirely left all 135 browser specs green.
+  //
+  // The state that matters is folders healthy and the monitor dead — the
+  // ordinary Windows failure. Before this it produced a green dot, no message,
+  // and Win+Shift+S doing nothing, with the only signal being three words
+  // missing from a tooltip.
+  await page.addInitScript(() => {
+    window.__shotshelfStubs__ = {
+      catch_watch_dirs: { dirs: ["/home/someone/Pictures"], clipboard: false },
+    };
+  });
+  await bootShelf(page);
+
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+  await expect(page.locator("#shelf-alert")).toContainText(/clipboard captures are not being/i);
+  // The folders are fine, so the dot still says so.
+  await expect(page.locator("#shelf-mark")).toHaveClass(/shelf__mark--live/);
+  // And the tooltip does not claim a watcher that is not running.
+  await expect(page.locator("#shelf-mark")).not.toHaveAttribute("title", /\+ the clipboard/);
+});

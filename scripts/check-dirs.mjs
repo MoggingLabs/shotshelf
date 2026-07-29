@@ -184,7 +184,7 @@ const ALLOWANCES = new Map([
   ["src-tauri/src/catch/folders.rs", ["clippy::cast_possible_truncation"]],
 ]);
 
-import { grantsIn, silencedIn, tomlWithoutComments } from "./rust-source.mjs";
+import { clippyLevelsIn, disallowedIn, grantsIn, silencedIn } from "./rust-source.mjs";
 /**
  * The modules whose asset-protocol grants are whole folders on purpose.
  *
@@ -222,77 +222,75 @@ const DIRECTORY_GRANTERS = new Set([
  */
 const CLIPPY_RULES = JSON.parse(readFileSync("tests/fixtures/clippy-rules.json", "utf8"));
 
+/** Clippy's lint levels, weakest first, so "or stronger" is an index comparison. */
+const STRENGTH = ["allow", "warn", "deny", "forbid"];
+
 {
-  // Comments blanked first. Read as raw text, commenting every rule out left
-  // all of their paths present in the file and this check green over a
-  // `clippy.toml` that was semantically empty — the same defect `codeOnly`
-  // exists to prevent, one file type over.
-  const clippyToml = tomlWithoutComments(readFileSync("src-tauri/clippy.toml", "utf8"));
-  for (const path of CLIPPY_RULES.disallowed) {
-    if (!clippyToml.includes(`"${path}"`)) {
+  // Read as arrays, not as one long string.
+  //
+  // Comments go first — read as raw text, commenting every rule out left all of
+  // their paths present in the file and this check green over a `clippy.toml`
+  // that was semantically empty. But blanking them was only half of it: this
+  // asked whether the *file* contained `"tauri::path::BaseDirectory"` anywhere
+  // at all, and moving that path out of `disallowed-types` — the one array
+  // where clippy matches a type — into the methods list, or down into a
+  // neighbouring `reason = "…"`, left the substring present and the rule gone.
+  // A whole-file `includes` is not an assertion that a rule is in force; it is
+  // an assertion that some characters exist somewhere.
+  const disallowed = disallowedIn(readFileSync("src-tauri/clippy.toml", "utf8"));
+  for (const [array, paths] of Object.entries(CLIPPY_RULES.disallowed)) {
+    for (const path of paths) {
+      if (!(disallowed.get(array) ?? []).includes(path)) {
+        problemsWithConfig.push(
+          `  src-tauri/clippy.toml: \`${array}\` no longer holds \`${path}\`. ` +
+            `Clippy resolves paths, so it is the only thing here that sees UFCS ` +
+            `and module aliases.`,
+        );
+      }
+    }
+  }
+
+  // What each lint is set to, under its resolved key rather than its spelling.
+  //
+  // The ways TOML lets you write one setting — an indented header, spaces inside
+  // the brackets, the `[lints.clippy.x]` sub-table, a fully dotted key with no
+  // table at all, `x.level = "allow"`, and `{ level = "allow" }` in place of
+  // `"allow"` — were separate bypasses of this check, found and closed one at a
+  // time over five rounds, each fix a new pattern beside the last.
+  // `clippyLevelsIn` resolves the key instead, so a spelling nobody has thought
+  // of yet arrives at the same name, and `scripts/rust-source.test.mjs` holds
+  // every form as a row.
+  const levels = clippyLevelsIn(readFileSync("src-tauri/Cargo.toml", "utf8"));
+
+  // Nothing here may be switched off, whether or not the fixture names it.
+  //
+  // Requiring the four `warn` lines is not enough on its own: appending
+  // `disallowed_methods = "allow"` leaves all four present and still switches
+  // the `clippy.toml` rules off, which is the bypass this whole check exists
+  // for. An `allow` here is the escape hatch spelled as configuration, and it
+  // gets the same treatment as the attribute form — argue for it in a diff.
+  for (const [lint, level] of levels) {
+    if (level === "allow") {
       problemsWithConfig.push(
-        `  src-tauri/clippy.toml: no longer disallows \`${path}\`. ` +
-          `Clippy resolves paths, so it is the only thing here that sees UFCS ` +
-          `and module aliases.`,
+        `  src-tauri/Cargo.toml: [lints.clippy] sets \`${lint}\` to "allow". ` +
+          `That switches a clippy rule off for the whole crate with no attribute ` +
+          `anywhere for the allowance table to see.`,
       );
     }
   }
 
-  // The `[lints.clippy]` table only, so a level set elsewhere in the manifest
-  // cannot be mistaken for this one.
-  const manifest = tomlWithoutComments(readFileSync("src-tauri/Cargo.toml", "utf8"));
-  // Every `[lints.clippy…]` table, not only the one headed exactly that.
-  //
-  // Slicing to the next `\n[` put `[lints.clippy.disallowed_methods]` — Cargo's
-  // sub-table spelling, which it honours — entirely *outside* the text being
-  // scanned, so the strongest form of this bypass did not need the allow
-  // pattern to be wrong at all. Two seats found it independently.
-  //
-  // A sub-table's own name is the lint, so `[lints.clippy.x]` + `level = "allow"`
-  // is rewritten into the `x = { level = "allow" }` form the scan below reads.
-  // `$(?![\s\S])` rather than `$`: under `m` the bare anchor matches the end of
-  // every *line*, so each table body came back empty and the required-levels
-  // check below reported all four missing on a correct manifest.
-  const table = [...manifest.matchAll(/^\[lints\.clippy([^\]]*)\]([\s\S]*?)(?=^\[|$(?![\s\S]))/gm)]
-    .map((found) => {
-      const lint = (found[1] ?? "").replace(/^\./, "");
-      const body = found[2] ?? "";
-      return lint ? `${lint} = { ${body} }` : body;
-    })
-    .join("\n");
-  // Nothing in this table may be set to `allow`.
-  //
-  // Requiring the four `warn` lines is not enough on its own: appending
-  // `disallowed_methods = "allow"` leaves them all present and still switches
-  // the `clippy.toml` rules off, which is the bypass this whole check exists
-  // for. An `allow` here is the escape hatch spelled as configuration, and it
-  // gets the same treatment as the attribute form — argue for it in a diff.
-  // Both spellings Cargo accepts, and either quote.
-  //
-  // The first version matched `name = "allow"` only. Cargo also takes
-  // `name = { level = "allow", priority = 1 }`, and TOML takes single quotes and
-  // a quoted key — so `disallowed_methods = { level = 'allow' }` switched the
-  // rule off with this check green, which is verbatim the bypass it was added
-  // to close.
-  for (const allowed of table.matchAll(
-    // A key may be bare, double-quoted or single-quoted, and may be dotted:
-    // `disallowed_methods.level = "allow"` says the same as the table form.
-    // All of those are one rule switched off.
-    /^\s*['"]?([a-z_:.]+)['"]?\s*=\s*(?:['"]allow['"]|\{[^}]*level\s*=\s*['"]allow['"][^}]*\})/gm,
-  )) {
-    const lint = allowed[1] ?? "a lint";
-    problemsWithConfig.push(
-      `  src-tauri/Cargo.toml: [lints.clippy] sets \`${lint}\` to "allow". ` +
-        `That switches a clippy rule off for the whole crate with no attribute ` +
-        `anywhere for the allowance table to see.`,
-    );
-  }
-
-  for (const [lint, level] of Object.entries(CLIPPY_RULES.denied)) {
-    if (!new RegExp(String.raw`^\s*${lint}\s*=\s*"${level}"`, "m").test(table)) {
+  // The lints the tree's `#[allow]` attributes depend on, at the fixture's level
+  // or stronger. Raising one to `deny` is a hardening and passes; lowering or
+  // deleting one returns every `#[allow(clippy::cast_*)]` in the tree to
+  // silencing a lint nothing enables, which is the dead-attribute defect that
+  // block was added to end.
+  for (const [lint, wanted] of Object.entries(CLIPPY_RULES.denied)) {
+    const set = levels.get(lint);
+    if (STRENGTH.indexOf(set ?? "allow") < STRENGTH.indexOf(wanted)) {
       problemsWithConfig.push(
-        `  src-tauri/Cargo.toml: [lints.clippy] no longer sets \`${lint} = "${level}"\`. ` +
-          `Every \`#[allow(clippy::${lint})]\` in the tree silences nothing without it.`,
+        `  src-tauri/Cargo.toml: [lints.clippy] no longer sets \`${lint}\` to "${wanted}" or ` +
+          `stronger (it is ${set === undefined ? "unset" : `"${set}"`}). Every ` +
+          `\`#[allow(clippy::${lint})]\` in the tree silences nothing without it.`,
       );
     }
   }

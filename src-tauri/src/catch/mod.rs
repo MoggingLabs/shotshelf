@@ -131,10 +131,7 @@ impl CaptureSink {
         }
 
         if source == Source::Folder && kind == CaptureKind::Image {
-            // Only the header is read: `image_dimensions` does not decode.
-            if let Ok(shape) = image::image_dimensions(path) {
-                *lock(&self.folder_echo) = Some((Instant::now(), shape));
-            }
+            self.note_folder_image(path);
         }
 
         let capture = Capture {
@@ -190,10 +187,41 @@ impl CaptureSink {
         }
     }
 
-    /// `true` if a folder image landed within `window` — and consumes it, so
-    /// one screenshot can only ever silence one clipboard echo. Without that,
-    /// a Win+PrtSc followed straight away by a genuine Win+Shift+S would lose
-    /// the second capture.
+    /// Arm the echo marker for a folder image that has just been emitted.
+    ///
+    /// Split from `emit` so it can be tested: `emit` needs an `AppHandle`, which
+    /// no test in this crate can build, so the whole *producer* of the marker
+    /// was unreachable — deleting it left all 153 tests green while every
+    /// Win+PrtSc shelved twice and left an unpruned PNG in a folder the app
+    /// never prunes. `folders.rs` records that exact outcome as a defect it
+    /// already shipped once.
+    ///
+    /// Only the header is read: `image_dimensions` does not decode. A file that
+    /// cannot be read arms nothing, which fails safe — an unarmed marker means
+    /// a clipboard capture is kept.
+    ///
+    /// Failing safe is not the same as failing silently, so it is logged. A
+    /// screenshot that lands mid-write, or in a format `image` cannot read a
+    /// header for, shelves twice from then on and leaves an unpruned PNG in a
+    /// folder the app never prunes — visible to the user, and previously with
+    /// nothing anywhere saying why.
+    pub fn note_folder_image(&self, path: &Path) {
+        match image::image_dimensions(path) {
+            Ok(shape) => *lock(&self.folder_echo) = Some((Instant::now(), shape)),
+            // The filename only, like every other line this module writes: a
+            // capture's path names client and project work as readily as a
+            // window title does.
+            Err(err) => crate::diag::warn(&format!(
+                "could not measure {}, so its clipboard copy will shelve as a second capture: {err}",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            )),
+        }
+    }
+
+    /// `true` if a folder image of this exact shape landed within `window` — and
+    /// consumes it, so one screenshot can only ever silence one clipboard echo.
+    /// Without that, a Win+PrtSc followed straight away by a genuine
+    /// Win+Shift+S would lose the second capture.
     pub fn take_folder_echo(&self, window: Duration, shape: (u32, u32)) -> bool {
         let mut echo = lock(&self.folder_echo);
         match *echo {
@@ -263,42 +291,61 @@ impl CaptureSink {
 /// exists from the start and says which of the two things it means:
 /// `None` is "still starting", `Some` is an answer.
 pub struct CatchEngine {
-    /// Where the engine actually is listening, once it knows.
+    /// What `start` resolved, or `None` while it is still running.
+    started: Mutex<Option<Started>>,
+    /// Dropping the watch stops the `notify` threads.
+    _folders: Mutex<Option<folders::FolderWatch>>,
+}
+
+/// Everything `start` works out, in one value.
+///
+/// Three `Mutex<Option<_>>` fields before this, written in three consecutive
+/// lines of `start` and read in pairs — so "is the engine up yet" was three
+/// separate questions with three separate answers, and any pair of them could
+/// disagree. One of the three answered it wrongly: the clipboard flag was read
+/// with `unwrap_or(false)`, which reports "the clipboard watcher is not running"
+/// for "nobody has asked it yet" — the exact conflation the `Option` was added
+/// to prevent, on the indicator `docs/USAGE.md` points the user at first, and
+/// reachable because the other two fields carried the `STARTING` answer and this
+/// one silently did not.
+///
+/// One `Option` makes that unrepresentable: either `start` has finished and all
+/// three are known, or it has not and no caller gets any of them.
+#[derive(Clone)]
+struct Started {
+    /// Where the engine actually is listening.
     ///
-    /// `None` until `start` finishes. Only the resolved list is kept — the
-    /// *intended* one was stored beside it and became unread the moment the
-    /// status line stopped reporting it, and two lists with no way to tell
-    /// which answers "is it working" is worse than one.
-    watching: Mutex<Option<Vec<PathBuf>>>,
+    /// Only the resolved list is kept — the *intended* one was stored beside it
+    /// and became unread the moment the status line stopped reporting it, and
+    /// two lists with no way to tell which answers "is it working" is worse
+    /// than one.
+    dirs: Vec<PathBuf>,
     /// When each watched directory's watcher started — the boundary backfill needs.
     ///
     /// `notify` reports events, not history: it can only tell us about writes
     /// that happen after it registers. So "the watcher will emit this one" is
     /// true exactly of files whose last write landed at or after this moment,
     /// and false — permanently — of everything before it.
-    watching_since: Mutex<Option<Vec<(PathBuf, SystemTime)>>>,
+    since: Vec<(PathBuf, SystemTime)>,
     /// Whether the clipboard monitor is actually running.
     ///
-    /// `None` until `start` finishes. Recorded because the status line was
-    /// asserting it: `describeWatch` appended "+ the clipboard" whatever had
-    /// happened, so a monitor that failed to start left the dot green and the
-    /// tooltip claiming a watcher that was not there — the same defect the
-    /// folder half was fixed for, left standing on the other watcher, on the
-    /// path `docs/USAGE.md` sends the user to first when nothing appears.
-    watching_clipboard: Mutex<Option<bool>>,
-    /// Dropping the watch stops the `notify` threads.
-    _folders: Mutex<Option<folders::FolderWatch>>,
+    /// Recorded because the status line was asserting it: `describeWatch`
+    /// appended "+ the clipboard" whatever had happened, so a monitor that
+    /// failed to start left the dot green and the tooltip claiming a watcher
+    /// that was not there — the same defect the folder half was fixed for, left
+    /// standing on the other watcher.
+    clipboard: bool,
 }
 
 impl CatchEngine {
-    /// The resolved watch list, or `None` while the engine is still starting.
-    fn watching(&self) -> Option<Vec<PathBuf>> {
-        lock(&self.watching).clone()
-    }
-
-    /// When the watcher registered. `None` while the engine is still starting.
-    fn watching_since(&self) -> Option<Vec<(PathBuf, SystemTime)>> {
-        lock(&self.watching_since).clone()
+    /// What `start` resolved, or `None` while the engine is still starting.
+    ///
+    /// Cloned out rather than handed a reference: every caller is a
+    /// `#[tauri::command]` that goes on to do slow work — a `read_dir` across
+    /// network shares, in `catch_backfill`'s case — and holding this lock across
+    /// that would block `start` itself.
+    fn started(&self) -> Option<Started> {
+        lock(&self.started).clone()
     }
 }
 
@@ -308,9 +355,7 @@ impl CatchEngine {
 /// then hand the slow half to a worker.
 pub fn reserve<R: Runtime>(app: &AppHandle<R>) {
     app.manage(CatchEngine {
-        watching: Mutex::new(None),
-        watching_since: Mutex::new(None),
-        watching_clipboard: Mutex::new(None),
+        started: Mutex::new(None),
         _folders: Mutex::new(None),
     });
 }
@@ -341,11 +386,14 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
     // What is actually being watched, not what was asked for. With the whole
     // watcher dead this is empty, and the shelf says so rather than showing a
     // green dot over nothing.
-    let watching = folders
+    let dirs = folders
         .as_ref()
         .map(|watch| watch.watching.clone())
         .unwrap_or_default();
-    let started = folders
+    // Recorded by `folders::start` as each directory was taken, not stamped once
+    // here. A single moment is wrong in one direction or the other — see the
+    // field's own docstring.
+    let since = folders
         .as_ref()
         .map(|watch| watch.started.clone())
         .unwrap_or_default();
@@ -359,12 +407,12 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
     // Filled in, not managed: `reserve` put this in place before the window
     // was shown, precisely so the commands below never see it missing.
     if let Some(engine) = app.try_state::<CatchEngine>() {
-        *lock(&engine.watching) = Some(watching);
-        // Recorded by `folders::start` as each directory was taken, not stamped
-        // once here. A single moment is wrong in one direction or the other —
-        // see the field's own docstring.
-        *lock(&engine.watching_since) = Some(started);
-        *lock(&engine.watching_clipboard) = Some(clipboard);
+        // One write, so no caller can see two of these three and not the third.
+        *lock(&engine.started) = Some(Started {
+            dirs,
+            since,
+            clipboard,
+        });
         *lock(&engine._folders) = folders;
     }
 }
@@ -410,7 +458,8 @@ pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Capture
     let engine = app
         .try_state::<CatchEngine>()
         .ok_or_else(|| STARTING.to_owned())?;
-    let dirs = engine.watching().ok_or_else(|| STARTING.to_owned())?;
+    let started = engine.started().ok_or_else(|| STARTING.to_owned())?;
+    let dirs = started.dirs;
     let since = app
         .try_state::<crate::settings::SettingsStore>()
         .map_or(0, |store| store.last_capture_ms());
@@ -423,21 +472,27 @@ pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Capture
         .await
         .unwrap_or_default();
 
-    // `watching()` answered `Some` above, so in practice this is never empty.
+    // Empty exactly when the folder watcher failed outright, because this and
+    // `dirs` are now written together and read from one clone.
     //
-    // If it ever were, every file in the window would be handed over —
-    // `took_over` finds no watcher and `is_none_or` yields `true`, which is the
-    // right answer for a folder nothing is watching, because backfill is then
-    // the only way in. An earlier comment here claimed the opposite ("admits
-    // nothing"), and a third above it described a `now` fallback that no longer
-    // exists.
-    let watching_since = engine.watching_since().unwrap_or_default();
+    // In that case every file in the window is handed over — `took_over` finds
+    // no watcher and `is_none_or` yields `true`, which is the right answer for a
+    // folder nothing is watching, because backfill is then the only way in. An
+    // earlier comment here claimed the opposite ("admits nothing"), and a third
+    // above it described a `now` fallback that no longer exists.
     let chosen = to_backfill(
         found,
         SystemTime::now(),
         since,
-        &watching_since,
-        folders::is_readable,
+        &started.since,
+        |path, kind, modified| {
+            // Both signals, not either. The budget is the portable one; the
+            // lock is a stronger answer where the OS offers it.
+            SystemTime::now()
+                .duration_since(modified)
+                .is_ok_and(|age| age >= folders::settle_budget(kind))
+                && folders::is_readable(path)
+        },
     );
 
     // Move the watermark past what is being handed over.
@@ -524,7 +579,7 @@ fn to_backfill(
     now: SystemTime,
     since_ms: u64,
     watching_since: &[(PathBuf, SystemTime)],
-    finished: impl Fn(&Path) -> bool,
+    finished: impl Fn(&Path, CaptureKind, SystemTime) -> bool,
 ) -> Vec<Capture> {
     let cutoff = now - BACKFILL_WINDOW;
 
@@ -540,7 +595,7 @@ fn to_backfill(
             .map(|(_, started)| *started)
     }
 
-    found.retain(|(modified, path, _)| {
+    found.retain(|(modified, path, kind)| {
         // Newer than the newest capture the shelf has already seen.
         //
         // Without this, backfill undoes `Remove`. Taking a capture off the
@@ -559,28 +614,26 @@ fn to_backfill(
         let watchers_yet =
             took_over(path, watching_since).is_none_or(|started| *modified < started);
 
-        // And a file the writer still holds open is the watcher's, whatever the
+        // And a file that may still be growing is the watcher's, whatever the
         // boundary says.
         //
-        // This was a clock — "written more than five seconds ago" — ANDed with
-        // the boundary, and the conjunction lost captures. `watchers_yet` means
-        // "written before this folder's watcher registered, so backfill is the
-        // only way in"; a file in the band between those two answers yes to
-        // that and no to the clock, so backfill refused it and `notify`, which
-        // reports no history, never saw it. Permanently: `catch_backfill` runs
-        // once, and the first live capture moves the watermark past the dropped
-        // file's mtime. On an ordinary launch the watcher registers a fraction
-        // of a second in, so the band is nearly the whole five seconds — and
-        // `resolve_watch_dirs` can take seconds on a redirected profile, which
-        // widens it to the whole of start-up.
+        // Two wrong answers were tried here. A flat five-second clock ANDed with
+        // the boundary lost captures outright: `watchers_yet` already means "no
+        // live event can ever come for this", so anything the clock then refused
+        // was refused by both paths and gone for good. `is_readable` lost
+        // nothing but is a Windows signal — an exclusive lock is not a thing on
+        // macOS or Linux, where `File::open` succeeds on a file its writer still
+        // holds — so on two platforms it answered "finished" for every in-flight
+        // recording while being written as the general rule.
         //
-        // The real question was never "how old is this file" but "is anyone
-        // still writing it", and the watcher already has a signal for that:
-        // Windows keeps an exclusive lock on a file being written, so being
-        // able to open it means the writer has let go. A partially written
-        // recording is refused by that, and a screenshot finished two seconds
-        // before launch is not.
-        let done = finished(path);
+        // The honest question is "could the watcher still be about to emit
+        // this?", and it has a portable answer derived from the settle loop's
+        // own budgets. A file younger than its kind's budget may still be
+        // growing — and if it is, its remaining writes all land after the
+        // watcher registered, so the watcher emits it properly. Leaving it
+        // therefore loses nothing, where shelving it hands over a truncated
+        // container. An image's budget is 750 ms; a recording's is 3.2 s.
+        let done = finished(path, *kind, *modified);
 
         as_ms(*modified) > since_ms && *modified >= cutoff && watchers_yet && done
     });
@@ -690,20 +743,24 @@ pub fn catch_watch_dirs<R: Runtime>(app: AppHandle<R>) -> Result<Watching, Strin
         .try_state::<CatchEngine>()
         .ok_or_else(|| STARTING.to_owned())?;
 
-    // `watching`, not the intended list: reporting what the engine *meant* to
-    // watch turned every watcher failure into a green dot. See `folders::start`.
-    let dirs = engine
-        .watching()
-        .map(|dirs| dirs.iter().map(|dir| dir.display().to_string()).collect())
-        .ok_or_else(|| STARTING.to_owned())?;
-
-    // Read out before the guard drops with `engine` at the end of this scope.
-    let clipboard = *lock(&engine.watching_clipboard);
+    // One read for both halves, so the clipboard flag cannot answer "not
+    // running" on a launch where the folder half is still answering "starting".
+    // It could: read separately, it was unwrapped with `unwrap_or(false)`, which
+    // spells "we do not know yet" as "it is not working" — and the front end
+    // reports that as `Win+Shift+S` and `⌘⌃⇧4` doing nothing at all.
+    let started = engine.started().ok_or_else(|| STARTING.to_owned())?;
 
     Ok(Watching {
-        dirs,
+        // `dirs`, not the intended list: reporting what the engine *meant* to
+        // watch turned every watcher failure into a green dot. See
+        // `folders::start`.
+        dirs: started
+            .dirs
+            .iter()
+            .map(|dir| dir.display().to_string())
+            .collect(),
         // Same rule as the folders: what is running, not what was attempted.
-        clipboard: clipboard.unwrap_or(false),
+        clipboard: started.clipboard,
     })
 }
 
@@ -711,7 +768,7 @@ pub fn catch_watch_dirs<R: Runtime>(app: AppHandle<R>) -> Result<Watching, Strin
 /// is running.
 ///
 /// A struct rather than the bare list it used to be, because the front end was
-/// filling in the second half from nothing — see `CatchEngine::watching_clipboard`.
+/// filling in the second half from nothing — see `Started::clipboard`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Watching {
@@ -740,6 +797,13 @@ pub const STARTING: &str = "the catch engine is still starting";
 /// `settings-bounds.json` already are for their rules.
 #[cfg(test)]
 const STARTING_FIXTURE: &str = include_str!("../../../tests/fixtures/engine-starting.json");
+
+/// The names [`Watching`] puts on the wire, as the front end reads them.
+///
+/// The other half of the same problem the sentinel above has: two hand-typed
+/// lists of field names in two languages with nothing joining them.
+#[cfg(test)]
+const WATCH_STATE_FIXTURE: &str = include_str!("../../../tests/fixtures/watch-state-fields.json");
 
 /// A watcher thread dying mid-update should not take the whole engine with it;
 /// the worst a poisoned lock costs here is one stale timestamp.
@@ -800,7 +864,7 @@ mod tests {
     ) -> Vec<Capture> {
         // Everything in these fixtures is a finished file; the one test that
         // cares about a half-written one supplies its own predicate.
-        to_backfill(found, now, since_ms, &watcher_started(), |_| true)
+        to_backfill(found, now, since_ms, &watcher_started(), |_, _, _| true)
     }
 
     /// Written before the watcher was listening, and inside the window.
@@ -878,6 +942,49 @@ mod tests {
             shared["starting"].as_str(),
             Some(STARTING),
             "the sentinel and the fixture the front end reads have drifted",
+        );
+    }
+
+    #[test]
+    fn the_watch_state_fields_are_the_ones_the_front_end_reads() {
+        // The other hand-maintained cross-language pair in this module. These
+        // two field names are all that connect `Watching` to what `main.ts`
+        // destructures out of `catch_watch_dirs`. Renaming either compiles and
+        // leaves every test here green, while the front end reads `undefined` —
+        // which is falsy, so `showWatchState` raises "Clipboard captures are not
+        // being picked up" on every healthy launch, and points the user at the
+        // one indicator `docs/USAGE.md` tells them to check.
+        //
+        // The names, not their casing: both are one lowercase word, so the
+        // struct's `rename_all` does not touch them and this would not notice
+        // its removal. It stays for the next field that does need it.
+        //
+        // Same join as `VideoDetails`', one crate over: the fixture is the
+        // shared statement and `src/status.test.ts` asserts the other half.
+        // Sorted on both sides — `serde_json` hands an object's keys back
+        // alphabetically out of a `BTreeMap`, `Object.keys` yields declaration
+        // order, and what is being joined is the set of names.
+        let mut expected: Vec<String> =
+            serde_json::from_str(WATCH_STATE_FIXTURE).expect("the shared field fixture parses");
+        expected.sort();
+
+        let serialised = serde_json::to_value(Watching {
+            dirs: Vec::new(),
+            clipboard: false,
+        })
+        .expect("the watch state serialises");
+
+        let mut fields: Vec<String> = serialised
+            .as_object()
+            .expect("the watch state serialises as an object")
+            .keys()
+            .cloned()
+            .collect();
+        fields.sort();
+
+        assert_eq!(
+            fields, expected,
+            "the wire fields have drifted from tests/fixtures/watch-state-fields.json",
         );
     }
 
@@ -1021,21 +1128,34 @@ mod tests {
             PathBuf::new(),
             SystemTime::UNIX_EPOCH + Duration::from_millis(NOW_SECS * 1000 - 200),
         )];
-        let mid_write = PathBuf::from("recording-in-progress.mp4");
-        let still_open = |path: &Path| path != mid_write;
+        // The real predicate, not a stand-in: a file younger than its kind's
+        // settle budget may still be growing.
+        let settled = |_: &Path, kind: CaptureKind, modified: SystemTime| {
+            now()
+                .duration_since(modified)
+                .is_ok_and(|age| age >= folders::settle_budget(kind))
+        };
 
         // Two seconds ago: before the watcher started, so the boundary admits
         // it, and the writer still has it open.
-        let running = seen(2, "recording-in-progress.mp4");
+        // Two seconds old: inside a recording's 3.2 s budget, so it may still
+        // be growing — and if it is, the watcher will emit it when it stops.
+        let running = (
+            SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 2),
+            PathBuf::from("recording-in-progress.mp4"),
+            CaptureKind::Video,
+        );
         assert!(
-            to_backfill(vec![running], now(), 0, &watching, still_open).is_empty(),
+            to_backfill(vec![running], now(), 0, &watching, settled).is_empty(),
             "a partially written recording was handed to the shelf"
         );
 
         // The same age, finished. This is the case the clock lost.
+        // The same age, but an image — well past its 750 ms budget. This is
+        // the case the flat five-second clock lost.
         let done = seen(2, "taken-two-seconds-ago.png");
         assert_eq!(
-            names(&to_backfill(vec![done], now(), 0, &watching, still_open)),
+            names(&to_backfill(vec![done], now(), 0, &watching, settled)),
             vec!["taken-two-seconds-ago.png"],
             "a capture no watcher could ever emit was dropped by backfill too"
         );
@@ -1079,7 +1199,7 @@ mod tests {
             (between, late.join("nobody-saw-it.png"), CaptureKind::Image),
         ];
 
-        let chosen = to_backfill(found, now(), 0, &started, |_| true);
+        let chosen = to_backfill(found, now(), 0, &started, |_, _, _| true);
         assert_eq!(
             names(&chosen),
             vec!["/late\nobody-saw-it.png"]
@@ -1124,7 +1244,13 @@ mod tests {
         )];
         // Older than the watcher's start, so nothing live can ever have seen it.
         let during_launch = seen(7, "taken-during-launch.png");
-        let chosen = to_backfill(vec![during_launch], now(), 0, &started_just_now, |_| true);
+        let chosen = to_backfill(
+            vec![during_launch],
+            now(),
+            0,
+            &started_just_now,
+            |_, _, _| true,
+        );
         assert_eq!(
             names(&chosen),
             vec!["taken-during-launch.png"],
@@ -1136,7 +1262,7 @@ mod tests {
         // registration, and still growing.
         let after = seen(0, "still-being-written.mp4");
         assert!(
-            to_backfill(vec![after], now(), 0, &started_just_now, |_| true).is_empty(),
+            to_backfill(vec![after], now(), 0, &started_just_now, |_, _, _| true).is_empty(),
             "a file written after the watcher came up is the watcher's to emit"
         );
     }
@@ -1299,6 +1425,40 @@ mod tests {
         // Win+PrtSc followed straight away by a real Win+Shift+S must still be
         // caught, so the marker is consumed rather than left standing.
         assert!(!sink.take_folder_echo(Duration::from_secs(4), FULL_SCREEN));
+    }
+
+    #[test]
+    fn a_folder_image_arms_the_marker_with_its_own_shape() {
+        // The producer, which had no test because `emit` needs an `AppHandle`
+        // no test here can build. Deleting the arming left all 153 tests green
+        // while every Win+PrtSc shelved twice and left an unpruned PNG behind.
+        let dir = std::env::temp_dir().join("shotshelf-echo-arm-test");
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        let shot = dir.join("screenshot.png");
+
+        // A real 3x2 PNG, so the header carries a shape to read.
+        let image = image::RgbaImage::new(3, 2);
+        image.save(&shot).expect("a png");
+
+        let sink = CaptureSink::default();
+        sink.note_folder_image(&shot);
+
+        assert!(
+            !sink.take_folder_echo(Duration::from_secs(4), (9, 9)),
+            "the marker matched a shape the file does not have"
+        );
+        assert!(
+            sink.take_folder_echo(Duration::from_secs(4), (3, 2)),
+            "the marker did not carry the image's own shape"
+        );
+
+        // A file that cannot be read arms nothing, which keeps the clipboard
+        // capture rather than swallowing it.
+        let sink = CaptureSink::default();
+        sink.note_folder_image(&dir.join("not-there.png"));
+        assert!(!sink.take_folder_echo(Duration::from_secs(4), (3, 2)));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -19,7 +19,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { codeOnly, grantsIn, silencedIn, tomlWithoutComments } from "./rust-source.mjs";
+import {
+  clippyLevelsIn,
+  codeOnly,
+  disallowedIn,
+  grantsIn,
+  silencedIn,
+  tomlWithoutComments,
+} from "./rust-source.mjs";
 
 /** Wrap a fragment in enough Rust that it reads like a real file. */
 const file = (fragment) => `use crate::dirs;\n\n${fragment}\n\nfn other() {}\n`;
@@ -262,4 +269,132 @@ void test("a TOML literal string ends at its quote, backslash and all", () => {
     !tomlWithoutComments(source).includes("app_data_dir"),
     "a comment after a literal string ending in a backslash survived",
   );
+});
+
+void test("every way of switching a clippy lint off is read as the same setting", () => {
+  // Six spellings of one setting, each a live bypass of the `Cargo.toml` half of
+  // the directory gate, found and closed one at a time over five rounds because
+  // the rule was written as a shape rather than as a key. Cargo honours all of
+  // them, so they belong in one table.
+  //
+  // Whole manifests rather than lines appended to a prelude, because where a
+  // dotted key sits is part of what it means: under `[package]`,
+  // `lints.clippy.x` is `package.lints.clippy.x` and switches nothing off.
+  const head = ["[package]", 'name = "shotshelf"', ""];
+  const off = [
+    [...head, "[lints.clippy]", 'disallowed_methods = "allow"'],
+    // Cargo takes a level table, and TOML takes either quote.
+    [...head, "[lints.clippy]", "disallowed_methods = { level = 'allow', priority = 1 }"],
+    // A dotted key inside the table says the same as the table form.
+    [...head, "[lints.clippy]", 'disallowed_methods.level = "allow"'],
+    // A header need not sit at column 0, and may have spaces in its brackets.
+    [...head, " [lints.clippy]", ' disallowed_methods = "allow"'],
+    [...head, "[ lints.clippy ]", 'disallowed_methods = "allow"'],
+    // The sub-table spelling: the header itself names the lint.
+    [...head, "[lints.clippy.disallowed_methods]", 'level = "allow"'],
+    [...head, " [lints.clippy.disallowed_methods]", ' level = "allow"'],
+    // And no table at all — which has to come before every header to mean this.
+    ['lints.clippy.disallowed_methods = "allow"', ...head],
+    ['lints.clippy.disallowed_methods = { level = "allow" }', ...head],
+    ['lints.clippy."disallowed_methods" = "allow"', ...head],
+    ["lints . clippy . disallowed_methods = 'allow'", ...head],
+  ];
+
+  for (const lines of off) {
+    assert.equal(
+      clippyLevelsIn([...lines, ""].join("\n")).get("disallowed_methods"),
+      "allow",
+      `this switches the lint off and was not read as "allow": ${lines.join(" / ")}`,
+    );
+  }
+
+  // The same characters under another table are another key and switch nothing
+  // off. Reading the manifest as one flat text called this a bypass and failed a
+  // manifest that was correct.
+  assert.equal(
+    clippyLevelsIn([...head, 'lints.clippy.disallowed_methods = "allow"', ""].join("\n")).get(
+      "disallowed_methods",
+    ),
+    undefined,
+    "`package.lints.clippy.x` was read as `lints.clippy.x`",
+  );
+});
+
+void test("a clippy level is read from the clippy table and nowhere else", () => {
+  // `[lints.rust]` holds levels for lints of its own, and a level set under any
+  // other table is not this one. Reading the manifest as one flat text would
+  // take the first `= "warn"` it found wherever it sat.
+  const manifest = [
+    "[lints.rust]",
+    'unsafe_code = "forbid"',
+    'cast_sign_loss = "allow"',
+    "",
+    "[lints.clippy]",
+    'cast_sign_loss = "warn"',
+    "",
+    "[workspace.lints.clippy]",
+    'cast_precision_loss = "allow"',
+    "",
+  ].join("\n");
+  const levels = clippyLevelsIn(manifest);
+
+  assert.equal(levels.get("cast_sign_loss"), "warn", "a rustc lint's level was taken for clippy's");
+  assert.equal(levels.get("unsafe_code"), undefined, "a rustc lint was reported as a clippy one");
+  assert.equal(
+    levels.get("cast_precision_loss"),
+    undefined,
+    "a level under `[workspace.lints.clippy]` is a different table",
+  );
+
+  // A commented-out level is not a level.
+  assert.equal(
+    clippyLevelsIn(["[lints.clippy]", '# cast_sign_loss = "allow"', ""].join("\n")).get(
+      "cast_sign_loss",
+    ),
+    undefined,
+  );
+});
+
+void test("a disallowed path is read from the array it has to be in", () => {
+  // The gate asked whether the file contained the path *anywhere*. Moving
+  // `BaseDirectory` from `disallowed-types` — the only array where clippy
+  // matches a type — into the methods list, or into a neighbouring `reason`,
+  // left every character of the old check's evidence in place with the rule
+  // gone.
+  const toml = [
+    "disallowed-methods = [",
+    '  { path = "tauri::path::PathResolver::app_data_dir", reason = "roaming" },',
+    // The keys of an inline table are unordered, so the path is read by name
+    // rather than by position.
+    '  { reason = "go through `dirs::local`", path = "tauri::path::PathResolver::app_local_data_dir" },',
+    '  "shotshelf_lib::dirs::preferences",',
+    "]",
+    "",
+    "disallowed-types = [",
+    '  { path = "tauri::path::BaseDirectory", reason = "names tauri::path::PathResolver::app_cache_dir" },',
+    "]",
+    "",
+  ].join("\n");
+  const arrays = disallowedIn(toml);
+
+  assert.deepEqual(arrays.get("disallowed-methods"), [
+    "tauri::path::PathResolver::app_data_dir",
+    "tauri::path::PathResolver::app_local_data_dir",
+    "shotshelf_lib::dirs::preferences",
+  ]);
+  assert.deepEqual(arrays.get("disallowed-types"), ["tauri::path::BaseDirectory"]);
+
+  // A path quoted in the prose beside a rule is not a rule. This is the
+  // relocation bypass in its quietest form: the reason above names a method that
+  // is no longer disallowed anywhere.
+  assert.ok(
+    !(arrays.get("disallowed-methods") ?? []).includes("tauri::path::PathResolver::app_cache_dir"),
+    "a path named in a `reason` was counted as a rule",
+  );
+
+  // And a commented-out array holds nothing, however complete it looks.
+  const silenced = disallowedIn(
+    ["disallowed-types = [", '  # { path = "tauri::path::BaseDirectory" },', "]", ""].join("\n"),
+  );
+  assert.deepEqual(silenced.get("disallowed-types"), []);
 });

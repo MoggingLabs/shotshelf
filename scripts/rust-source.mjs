@@ -291,6 +291,198 @@ export function silencedIn(source) {
   return found;
 }
 
+/** One key segment: bare, single-quoted or double-quoted. */
+const SEGMENT = String.raw`(?:'[^']*'|"[^"]*"|[\w-]+)`;
+
+/** `a.b."c" = value`, with the dotted key and the raw value apart. */
+const PAIR = new RegExp(
+  String.raw`^[ \t]*(${SEGMENT}(?:[ \t]*\.[ \t]*${SEGMENT})*)[ \t]*=[ \t]*(.*)$`,
+);
+
+/**
+ * Every `key = value` in a TOML file, under its fully resolved dotted name.
+ *
+ * TOML says the same thing several ways, and the checks built on this were
+ * written against one spelling each. `[lints.clippy]` + `disallowed_methods =
+ * "allow"` was matched; `[lints.clippy.disallowed_methods]` + `level = "allow"`
+ * was not, nor an indented header, nor spaces inside the brackets, nor a fully
+ * dotted `lints.clippy.disallowed_methods = "allow"` with no table at all. Cargo
+ * honours every one of them, so each was a live way to switch a clippy rule off
+ * with the gate green — and each was found and closed one at a time, in five
+ * separate rounds, because the rule was stated as a shape rather than as a key.
+ *
+ * Resolving the key first is what ends that: a header sets a prefix, a dotted
+ * key extends it, and a spelling nobody has thought of yet still arrives at the
+ * same name. It also ends the mirror-image failure, where the same characters
+ * under `[package]` are a *different* key and were being reported as a bypass.
+ *
+ * Inline tables stay whole as their value — TOML requires them on one line — so
+ * `{ level = "allow", priority = 1 }` is the caller's to read.
+ *
+ * Not a TOML parser: no arrays-of-tables, no multi-line values, no type
+ * conversion. It is the smallest thing that answers "what is this key set to",
+ * which is the only question asked of it.
+ *
+ * Not exported: every spelling above is a row in `rust-source.test.mjs` against
+ * [`clippyLevelsIn`], which is the only caller and the only thing the gate asks.
+ * Exporting it for the tests' sake would be a second public surface with no
+ * second consumer.
+ *
+ * @param {string} source
+ * @returns {Map<string, string>}
+ */
+function tomlEntries(source) {
+  const entries = new Map();
+  let prefix = "";
+
+
+  for (const line of tomlWithoutComments(source).split("\n")) {
+    const header = /^[ \t]*\[[ \t]*([^[\]]*?)[ \t]*\][ \t]*$/.exec(line);
+    if (header) {
+      prefix = dotted(header[1] ?? "");
+      continue;
+    }
+
+    const pair = PAIR.exec(line);
+    if (!pair) continue;
+
+    const name = dotted(pair[1] ?? "");
+    entries.set(prefix ? `${prefix}.${name}` : name, (pair[2] ?? "").trim());
+  }
+
+  return entries;
+}
+
+/**
+ * What every `[lints.clippy]` entry sets its lint to, whatever way it is spelled.
+ *
+ * `warn`, `deny`, `allow` — the word Cargo will act on, keyed by the lint. Both
+ * `x = "allow"` and `x = { level = "allow", priority = 1 }` reduce to the same
+ * answer here, so the caller compares levels rather than re-deriving them from
+ * two shapes.
+ *
+ * @param {string} manifest
+ * @returns {Map<string, string>}
+ */
+export function clippyLevelsIn(manifest) {
+  const levels = new Map();
+
+  for (const [key, value] of tomlEntries(manifest)) {
+    // `.level` optional: the sub-table and dotted-key spellings both put the
+    // word one segment deeper than the plain one.
+    const under = /^lints\.clippy\.([\w-]+)(?:\.level)?$/.exec(key);
+    if (!under) continue;
+
+    // `x = "allow"` and `x = { level = "allow" }` say the same thing. The second
+    // form was the bypass that switched `disallowed_methods` off with this gate
+    // green, so it is read rather than pattern-matched away.
+    const level =
+      /^(['"])(.*?)\1/.exec(value)?.[2] ?? /level[ \t]*=[ \t]*(['"])(.*?)\1/.exec(value)?.[2];
+    if (level !== undefined) levels.set(under[1] ?? "", level);
+  }
+
+  return levels;
+}
+
+/**
+ * The paths each `disallowed-*` array in `clippy.toml` actually holds.
+ *
+ * The gate used to ask whether the *file* contained
+ * `"tauri::path::BaseDirectory"` anywhere. Moving that path out of
+ * `disallowed-types` and into `disallowed-methods` — where clippy will never
+ * match a type against it — or down into a neighbouring `reason`, left the
+ * substring present and the rule gone. A whole-file `includes` is not an
+ * assertion that a rule is in force; it is an assertion that some characters
+ * exist somewhere.
+ *
+ * Both entry forms clippy takes are read: a bare path, and the
+ * `{ path = "…", reason = "…" }` table this repo uses so each rule carries its
+ * argument. A `reason` is deliberately *not* returned — quoting a path in the
+ * prose beside a rule must never stand in for the rule.
+ *
+ * @param {string} source
+ * @returns {Map<string, string[]>}
+ */
+export function disallowedIn(source) {
+  const arrays = new Map();
+  const toml = tomlWithoutComments(source);
+
+  for (const start of toml.matchAll(/^[ \t]*(disallowed-[\w-]+)[ \t]*=[ \t]*\[/gm)) {
+    const open = start.index + start[0].length - 1;
+    let depth = 0;
+    let end = -1;
+
+    for (let i = open; i < toml.length; i += 1) {
+      if (toml[i] === "[" || toml[i] === "{") depth += 1;
+      else if (toml[i] === "]" || toml[i] === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end === -1) continue;
+
+    const paths = [];
+    for (const raw of splitAtDepth(toml.slice(open + 1, end))) {
+      // Trimmed first: entries are laid out one per line, so an untrimmed one
+      // starts with the newline before it and no anchored pattern can match.
+      const entry = raw.trim();
+      // By name, not by position — the keys of an inline table are unordered,
+      // and `{ reason = "…", path = "…" }` is the same rule written the other
+      // way round.
+      const table = /^\{[\s\S]*\}$/.test(entry)
+        ? /(?:^|[{,])[ \t]*path[ \t]*=[ \t]*(['"])(.*?)\1/.exec(entry)
+        : undefined;
+      const bare = /^(['"])(.*)\1$/.exec(entry);
+      const path = table?.[2] ?? bare?.[2];
+      if (path !== undefined) paths.push(path);
+    }
+
+    arrays.set(start[1] ?? "", paths);
+  }
+
+  return arrays;
+}
+
+/**
+ * Split a comma-separated list, keeping nested tables and arrays whole.
+ *
+ * @param {string} body
+ * @returns {string[]}
+ */
+function splitAtDepth(body) {
+  const parts = [];
+  let depth = 0;
+  let from = 0;
+
+  for (let i = 0; i < body.length; i += 1) {
+    if (body[i] === "[" || body[i] === "{") depth += 1;
+    else if (body[i] === "]" || body[i] === "}") depth -= 1;
+    else if (body[i] === "," && depth === 0) {
+      parts.push(body.slice(from, i));
+      from = i + 1;
+    }
+  }
+  parts.push(body.slice(from));
+
+  return parts.filter((part) => part.trim() !== "");
+}
+
+/**
+ * A dotted key with its whitespace and per-segment quotes taken off.
+ *
+ * @param {string} key
+ * @returns {string}
+ */
+function dotted(key) {
+  return key
+    .split(".")
+    .map((part) => part.trim().replace(/^(['"])(.*)\1$/, "$2"))
+    .join(".");
+}
+
 /**
  * A TOML file with its comments blanked, the way [`codeOnly`] does for Rust.
  *

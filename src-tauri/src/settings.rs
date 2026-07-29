@@ -414,7 +414,8 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
                     kept.file_name().unwrap_or_default().to_string_lossy()
                 )),
                 None => crate::diag::warn(
-                    "could not set the unreadable pins file aside; it is still in place                      and the next write will overwrite it",
+                    "could not set the unreadable pins file aside; it is still in place \
+                     and the next write will overwrite it",
                 ),
             }
         }
