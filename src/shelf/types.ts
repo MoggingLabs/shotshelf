@@ -64,6 +64,19 @@ export function canPreview(item: Pick<ShelfItem, "kind">): boolean {
 }
 
 /**
+ * Whether two captures can be compared. Same rule again, third question.
+ *
+ * Compare was never one of the sites this rule was extracted to unify, and it
+ * showed: the button keyed on the *count* alone, so picking two recordings
+ * offered it, `compare_captures` handed an `.mp4` to `imaging::load`, and the
+ * user got "Those two captures could not be compared." for doing the thing the
+ * button invited.
+ */
+export function canCompare(items: readonly Pick<ShelfItem, "kind">[]): boolean {
+  return items.length === 2 && items.every((item) => item.kind === "image");
+}
+
+/**
  * A capture as the shelf holds it.
  *
  * The element showing it lives in the view's own map rather than here: a tile

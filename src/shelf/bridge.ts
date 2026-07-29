@@ -4,8 +4,21 @@
  * One reason, and it is enough: command names and argument shapes are a
  * contract with the Rust side, and scattering them through the view means a
  * renamed command fails at runtime in whichever corner happens to call it.
- * `scripts/check-commands.mjs` checks both directions of that contract, and
- * having the call sites in one file is what makes its output readable.
+ * Having the call sites in one file is what makes that reviewable.
+ *
+ * `scripts/check-commands.mjs` checks the **names**, in both directions —
+ * every registered command has a caller, every invoked command is registered.
+ * It does **not** check argument shapes, and this header used to say it checked
+ * "both directions of that contract", which reads as though it did: renaming
+ * `path` to `sourcePath` in a call to `video_details` passes the gate, eslint,
+ * `tsc` and the whole browser suite, and fails at runtime with a serde
+ * missing-field error on every recording tile.
+ *
+ * Nothing here can close that: the argument names live in Rust's function
+ * signatures, and matching them would mean parsing those signatures and the
+ * object literals below. What keeps it honest instead is that the literals are
+ * all in this one file, next to the command they belong to — so a signature
+ * change has one place to look rather than several.
  *
  * **Not a test seam.** This used to claim to be the module a harness replaces;
  * it is not, and never was — `tests/harness/tauri-mock.ts` stubs

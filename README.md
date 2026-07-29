@@ -133,12 +133,12 @@ macos-latest and ubuntu-latest**:
 | Gate | What it catches |
 | :-- | :-- |
 | `npm run lint` | ESLint with type-aware rules — floating promises, unchecked IPC |
-| `npm run deadcode` | knip, plus a check that every registered Tauri command has a caller *and* every invoked command is registered |
+| `npm run deadcode` | knip; every registered Tauri command has a caller and every invoked one is registered; every backticked file and `module::item` in a comment resolves; only `dirs.rs` resolves a data root and only `settings.rs` reaches the roaming one |
 | `npm run test:unit` | the pure rules, in Node with no browser |
 | `npm run build` | `tsc --noEmit` over `src` **and** `tests`, then the bundle |
 | `npm run test:e2e` | the real front-end in a browser with the Tauri runtime stubbed |
 | `npm run test:visual` | geometry and computed style everywhere; pixel goldens on Linux |
-| `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo build` | the Rust half |
+| `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --lib`, `cargo build` | the Rust half (CI runs `--all-targets`; see below) |
 
 `npm run gate` runs the lot locally, with one stated difference: it runs `cargo test --lib`
 where CI runs `cargo test --all-targets`. Every test this crate has is a `#[cfg(test)] mod` in

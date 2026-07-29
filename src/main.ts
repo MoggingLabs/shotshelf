@@ -1,10 +1,16 @@
 /**
- * Wiring, and only wiring.
+ * Wiring, mostly — and the exceptions are named, because `shelf/index.ts`
+ * carried the unqualified version of this sentence until it was retracted there
+ * for the same reason.
  *
- * Every rule this app has lives in a module that can be tested on its own —
- * what the shelf keeps, when the popover is up, what a card looks like. This
- * file exists to introduce them to each other and to the events coming out of
- * Rust, and it should stay boring enough that nothing has to be debugged here.
+ * Most rules live in a module that can be tested on its own — what the shelf
+ * keeps, when the popover is up, what a card looks like — and this file
+ * introduces them to each other and to the events coming out of Rust.
+ *
+ * What it owns outright: the platform sniff that sets `data-os`, the visibility
+ * of the Compare and Edit controls, key normalisation for CapsLock, and the two
+ * retry budgets with the predicate that reads Rust's "still starting" sentinel.
+ * Those are decisions, not wiring, and three of them have had bugs.
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -50,7 +56,7 @@ const shelf = new Shelf(
   {
     onColumnChange: () => popover.onColumnChange(),
     // A comparison of one capture, or of five, is not a thing.
-    onSelectionChange: (picked, editable) => {
+    onSelectionChange: (_picked, editable, comparable) => {
       // Hidden while an overlay is up.
       //
       // The overlay deliberately does not cover the title strip — that is the
@@ -59,7 +65,11 @@ const shelf = new Shelf(
       // silently. The keydown handler has guarded this since the editor
       // existed; the click handlers never did.
       const busyOverlay = shelf.overlayOpen;
-      compareButton.toggleAttribute("hidden", busyOverlay || picked !== 2);
+      // Not `picked !== 2`: two picked *recordings* showed Compare, and
+      // pressing it decoded an `.mp4` as an image and reported that the two
+      // captures could not be compared — for doing exactly what the button
+      // invited. Same shape as the Edit control one line below.
+      compareButton.toggleAttribute("hidden", busyOverlay || !comparable);
       // Not `picked !== 1`: a single picked recording has nothing to mark up,
       // and offering the control for it made the button look broken.
       editButton.toggleAttribute("hidden", busyOverlay || !editable);

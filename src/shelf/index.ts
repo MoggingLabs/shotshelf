@@ -47,7 +47,7 @@ import { columnHeight } from "./geometry.ts";
 import { alertHeight } from "../status.ts";
 import { inHandoverOrder, Selection } from "./selection.ts";
 import { ShelfStore } from "./store.ts";
-import { type Capture, captureId, isEditable, type ShelfItem } from "./types.ts";
+import { canCompare, type Capture, captureId, isEditable, type ShelfItem } from "./types.ts";
 import { ShelfView } from "./view/index.ts";
 import {
   discardPreview,
@@ -83,7 +83,7 @@ export interface ShelfOptions {
    * Reported rather than exposed, so the control that acts on a selection can
    * show itself without anything outside the shelf holding selection state.
    */
-  onSelectionChange(picked: number, editable: boolean): void;
+  onSelectionChange(picked: number, editable: boolean, comparable: boolean): void;
   /**
    * Something the user needs telling about.
    *
@@ -352,6 +352,10 @@ export class Shelf {
     this.#options.onSelectionChange(
       picked.length,
       picked.length === 1 && picked[0] !== undefined && isEditable(picked[0]),
+      // Comparability for the same reason editability is here: the count alone
+      // cannot answer it, and two picked recordings offered a control that
+      // could only fail.
+      canCompare(picked),
     );
   }
 
@@ -420,7 +424,10 @@ export class Shelf {
 
     const picked = this.#pickedItems();
     const [before, after] = picked;
-    if (!before || !after || picked.length !== 2) return;
+    // The same rule the button uses, applied again here. Not belt-and-braces
+    // for its own sake: the keyboard path reaches this without going near the
+    // button, so a count check alone would still let two recordings through.
+    if (!before || !after || !canCompare(picked)) return;
 
     // Guarded because the button stays on screen for the length of a
     // full-resolution decode of two captures, and a second click would run a

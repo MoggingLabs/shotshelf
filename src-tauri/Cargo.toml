@@ -69,9 +69,6 @@ regex = "1"
 # engines. Tauri already runs on tokio, so this is the runtime already present.
 tokio = { version = "1", default-features = false, features = ["sync", "time"] }
 
-# Rounded window corners, which CSS cannot deliver on its own — see
-# `window::round_corners`. Same version Tauri already depends on, so this only
-# turns on an extra feature rather than pulling a second copy of the crate.
 # The frontmost application's name, which needs no permission at all — unlike
 # its window title, which on macOS needs Screen Recording. See enrich/foreground.
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -101,6 +98,9 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
     "NSError",
 ] }
 
+# Rounded window corners, which CSS cannot deliver on its own — see
+# `window::round_corners`. Same version Tauri already depends on, so this only
+# turns on an extra feature rather than pulling a second copy of the crate.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
