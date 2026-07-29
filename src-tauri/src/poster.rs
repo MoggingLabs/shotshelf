@@ -288,15 +288,12 @@ async fn run_ffmpeg<R: Runtime>(
 /// How long one frame grab may take before it is given up on.
 const FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
-/// How many recordings may be decoded at once. Small for the same reason the
-/// scan limit is: this is another program's CPU time on a machine someone is
-/// using for something else.
-const FRAME_CONCURRENCY: usize = 2;
-
+/// How many recordings may be decoded at once — see `limits::FRAMES`, which
+/// holds this bound beside the other two so the set can be read together.
 fn frame_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
     static LIMIT: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
         std::sync::OnceLock::new();
-    LIMIT.get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(FRAME_CONCURRENCY)))
+    crate::limits::shared(&LIMIT, crate::limits::FRAMES)
 }
 
 fn has_frame(target: &Path) -> bool {
@@ -380,7 +377,7 @@ fn cache_key(source: &Path, meta: &std::fs::Metadata) -> String {
 }
 
 fn poster_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    crate::cache::dir(app, "posters")
+    crate::dirs::cache(app, "posters")
 }
 
 #[cfg(test)]

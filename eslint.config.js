@@ -39,6 +39,7 @@ export default defineConfig(
             "eslint.config.js",
             "scripts/check-commands.mjs",
             "scripts/check-references.mjs",
+            "scripts/check-dirs.mjs",
           ],
         },
         tsconfigRootDir: import.meta.dirname,

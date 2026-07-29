@@ -359,16 +359,15 @@ export class Shelf {
    * whose parameter is named for "the order the shelf is showing".
    */
   #visibleIds(): string[] {
-    if (this.#mode === "column") return this.#columnItems().map((item) => item.id);
-    // Read off the DOM, by the thing that drew it.
+    // Whatever the last render drew, in that order — for **both** modes.
     //
-    // This derived the browse order itself — first as `store.items()`, which
-    // was simply the wrong order, then as `groupByDay(store.items())`, which
-    // was the right one computed a second time. Both are the same mistake at
-    // different depths: two places deciding one rule and agreeing by
-    // convention. The view is the authority on what is on screen because the
-    // view is what put it there.
-    return this.#view.visibleOrder();
+    // This derived browse order itself: first as `store.items()`, which was
+    // simply the wrong order, then as `groupByDay(store.items())`, the right
+    // one computed a second time. A first fix asked the view for browse and
+    // left the column re-deriving its own — the same two-places-one-rule shape,
+    // one branch down. The view is the authority for both, because the view is
+    // what put them there.
+    return [...this.#view.visibleOrder()];
   }
 
   /**

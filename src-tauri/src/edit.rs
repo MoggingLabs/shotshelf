@@ -50,9 +50,9 @@ pub fn allow_reading_edits<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn edits_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    // Local, not roaming — `cache::local_dir` states why once, for all five
+    // Local, not roaming — `dirs::local` states why once, for all five
     // places that need it. An edit is a picture of the user's screen.
-    crate::cache::local_dir(app, EDITS_DIR)
+    crate::dirs::local(app, EDITS_DIR)
 }
 
 /// Put two captures side by side, with what changed outlined on the second.

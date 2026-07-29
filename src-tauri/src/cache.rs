@@ -21,8 +21,6 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use tauri::{AppHandle, Manager, Runtime};
-
 /// What one cache entry is.
 ///
 /// The hand-off cache keys a *directory* per capture version, because the copy
@@ -89,53 +87,6 @@ pub fn prune(dir: &Path, limit: usize, kind: Entry) {
             Entry::Directory => std::fs::remove_dir_all(&stale),
         };
     }
-}
-
-/// A named directory under the app's cache root, created if it is not there.
-///
-/// Both caches resolved this themselves, in bodies identical but for the name.
-/// This module exists because "two caches wrote the same rule out themselves,
-/// in shapes different enough that a reader could not tell they were the same
-/// rule" — the pruning and the keying moved here and the *directory* was left
-/// behind in both callers, which is the same observation one level down.
-pub fn dir<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|err| err.to_string())?
-        .join(name);
-    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
-    Ok(dir)
-}
-
-/// A named directory under the app's **local** data root, created if absent.
-///
-/// Local, never roaming, and that is the whole reason this exists as a
-/// function. On Windows `app_data_dir()` is `%APPDATA%` — the roaming profile,
-/// which a domain roaming profile or Enterprise State Roaming copies to a
-/// network share at logoff — and everything routed through here is either a
-/// capture, a path to one, or a record of what the app was doing with them.
-/// SECURITY.md's promise that nothing a capture touches leaves the machine
-/// rests on this one call being the right one.
-///
-/// Five call sites resolved it themselves, and the *reason* was written out
-/// four times in four modules, each pointing at the others — which is exactly
-/// the pattern this module's header describes for the caches. The rule was
-/// held by four people independently remembering four docstrings, and a sixth
-/// module reaching for `app_data_dir()` would have passed every gate in the
-/// repository while syncing capture paths to a file share.
-pub fn local_dir<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<PathBuf, String> {
-    let root = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|err| err.to_string())?;
-    let dir = if name.is_empty() {
-        root
-    } else {
-        root.join(name)
-    };
-    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
-    Ok(dir)
 }
 
 /// Which *version of which file* a piece of derived data belongs to.

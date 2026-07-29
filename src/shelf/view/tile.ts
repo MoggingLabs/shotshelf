@@ -94,10 +94,6 @@ export function buildTile(item: ShelfItem, callbacks: TileCallbacks): HTMLElemen
 
   const tile = document.createElement("article");
   tile.className = "tile";
-  // The card says which capture it is, so "what order is on screen" can be
-  // read off the DOM rather than derived a second time from the store — see
-  // `ShelfView.visibleOrder`.
-  tile.dataset["id"] = item.id;
   tile.title = item.path;
   tile.classList.toggle("tile--pinned", item.pinned);
 

@@ -8,7 +8,8 @@ an always-on-top shelf. This guide takes you from download to first drag-out.
 > running version, the operating system and the CPU architecture — they are part of the feed's URL —
 > plus the updater's User-Agent. No capture, no filename, no metadata, no telemetry, no analytics,
 > and nothing identifying you or the machine. Not now and not later. Everything else it does happens
-> on local disk, and switching the check off in Settings sends nothing at all.
+> on local disk, and switching the check off — `checkForUpdates` in `settings.json`, a hand-edit rather than a
+> control in the panel — sends nothing at all.
 
 ---
 
@@ -17,7 +18,7 @@ an always-on-top shelf. This guide takes you from download to first drag-out.
 ### Windows 11
 
 1. Download `Shotshelf_<version>_x64_en-US.msi` (or `Shotshelf_<version>_x64-setup.exe`).
-2. Run it. The installer is per-user and needs no administrator rights; the **`.msi`** is per-machine and will ask for them.
+2. Run it. The installer comes in two shapes: the **`-setup.exe`** installs per-user and needs no administrator rights, and the **`.msi`** installs per-machine and will ask for them.
 3. Launch **Shotshelf** from the Start menu.
 
 If SmartScreen warns that the publisher is unknown, the build you have is **unsigned** — check
@@ -66,8 +67,9 @@ clear of the taskbar, not a window that sits open all day.
 - **When a capture lands** it peeks for about a minute and closes itself. It never takes
   focus, so it can't swallow what you're typing. Hover it and it stays open for as long as you
   want it.
-- The icon's tooltip tells you how many captures are on the shelf. On macOS the count also sits
-  beside the icon.
+- **Windows:** the icon's tooltip tells you how many captures are on the shelf.
+- **macOS and Linux:** the count sits beside the icon. Linux tooltips are not shown at all — the
+  AppIndicator protocol has no equivalent — so the label is where the count goes there.
 
 **Windows 11 hides new tray icons.** The first time you run Shotshelf its icon goes into the
 overflow flyout behind the **^** chevron, not onto the taskbar itself. That is a deliberate

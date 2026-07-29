@@ -195,28 +195,6 @@ const SCAN_CACHE_LIMIT: usize = 500;
 /// recogniser that never returns costs one tile rather than the feature.
 const SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// A process-wide concurrency limit, created once.
-///
-/// Three verbatim copies of this `OnceLock`/`Arc`/`Semaphore` dance existed —
-/// two of them nine lines apart in this file, one in `poster.rs` — differing
-/// only in the bound. Three copies of a concurrency primitive with no shared
-/// name is the kind of thing that grows a fourth.
-pub(crate) fn limit(
-    cell: &'static std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>>,
-    permits: usize,
-) -> &'static std::sync::Arc<tokio::sync::Semaphore> {
-    cell.get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(permits)))
-}
-
-/// How many captures may be *sized* at once.
-///
-/// `prepare_drag` and `copy_capture` decode, Lanczos3-resize and re-encode a
-/// full-resolution screenshot, and a multi-select drag calls `prepare_drag`
-/// once per capture concurrently — so moving that work to blocking threads
-/// without limiting how many was half the fix. The same ceiling as the scan,
-/// for the same reason.
-const SIZING_CONCURRENCY: usize = 2;
-
 /// How long one sizing job may run before the caller gives up on it.
 ///
 /// Generous — a Lanczos3 resize of a 4K screenshot is real work, and a
@@ -284,14 +262,8 @@ where
 fn sizing_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
     static LIMIT: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
         std::sync::OnceLock::new();
-    limit(&LIMIT, SIZING_CONCURRENCY)
+    crate::limits::shared(&LIMIT, crate::limits::SIZING)
 }
-
-/// How many captures may be read at once.
-///
-/// Small on purpose: this is CPU-bound work on a machine the user is using for
-/// something else, and the shelf is usable the whole time either way.
-const SCAN_CONCURRENCY: usize = 2;
 
 /// Identity of a capture's *contents*, through `cache::Version`.
 ///
@@ -316,7 +288,7 @@ fn scan_cache() -> &'static std::sync::Mutex<std::collections::HashMap<ScanKey, 
 fn scan_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
     static LIMIT: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
         std::sync::OnceLock::new();
-    limit(&LIMIT, SCAN_CONCURRENCY)
+    crate::limits::shared(&LIMIT, crate::limits::SCANNING)
 }
 
 /// Clipboard fallback, for the apps that will take a paste but not a drop.
@@ -403,9 +375,8 @@ fn file_uri(path: &Path) -> String {
 /// Written out once because the drag plugin takes a path to a preview image,
 /// not bytes.
 fn video_preview<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    // Local app data, never roaming — see `cache::local_dir`.
-    let dir = crate::cache::local_dir(app, "")?;
-    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    // Local app data, never roaming — see `dirs::local`.
+    let dir = crate::dirs::local(app, "")?;
 
     let preview = dir.join("video-drag-preview.png");
     if !preview.is_file() {

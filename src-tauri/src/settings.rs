@@ -248,6 +248,27 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
                 crate::diag::warn(&format!(
                     "pinned captures could not be read, so none were restored: {err}"
                 ));
+                // Moved aside, not merely left alone.
+                //
+                // A previous round added this warning and stopped, under a
+                // comment saying the overwrite was fixed. It was not:
+                // `note_capture` fires on the first capture of the session and
+                // `persist_local` then writes an empty list straight over the
+                // only copy the user could have repaired by hand. Leaving the
+                // file in place means the next write destroys it; a `.corrupt`
+                // neighbour is something a person can actually open.
+                if let Some(path) = pins.as_ref() {
+                    let kept = path.with_extension("json.corrupt");
+                    match std::fs::rename(path, &kept) {
+                        Ok(()) => crate::diag::warn(&format!(
+                            "the unreadable file was kept as {}",
+                            kept.file_name().unwrap_or_default().to_string_lossy()
+                        )),
+                        Err(err) => crate::diag::warn(&format!(
+                            "could not set the unreadable pins file aside: {err}"
+                        )),
+                    }
+                }
                 None
             }
         });
@@ -318,14 +339,9 @@ pub struct LocalState {
 /// the machine, and five hundred of their paths syncing to a file share is that
 /// promise broken by the settings file.
 fn pins_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
-    Some(crate::cache::local_dir(app, "").ok()?.join("pinned.json"))
+    Some(crate::dirs::local(app, "").ok()?.join("pinned.json"))
 }
 
-/// The watermark from the local state file, or zero if there is not one yet.
-///
-/// Zero means "offer everything in the window", which is right for a fresh
-/// install and right after a corrupt file: the alternative is a launch that
-/// silently brings nothing back.
 /// Parse the local state file, in either shape it has ever had.
 ///
 /// It shipped for one round as a bare JSON array of pins, then gained an
@@ -574,9 +590,20 @@ mod tests {
 
         assert!(store.get().pinned.is_empty());
         assert_eq!(store.get().max_items, 77, "preferences are unaffected");
-        // The corrupt file is left alone until something actually writes, so a
-        // user still has a copy to repair by hand.
-        assert!(std::fs::read_to_string(&local).is_ok_and(|raw| raw.contains("not json")));
+
+        // The unreadable file survives a session that writes.
+        //
+        // "Left alone until something writes" was the previous claim, and the
+        // first capture of any session writes: `note_capture` calls
+        // `persist_local`, which put an empty list straight over it. Asserting
+        // only that the bytes survive `load` could not see that, so this now
+        // writes the way a session does.
+        store.note_capture(1_700_000_000_000);
+        let kept = dir.join("pinned.json.corrupt");
+        assert!(
+            std::fs::read_to_string(&kept).is_ok_and(|raw| raw.contains("not json")),
+            "the only repairable copy was destroyed",
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

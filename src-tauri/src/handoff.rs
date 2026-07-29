@@ -124,7 +124,7 @@ fn handoff_name(source: &Path) -> String {
 }
 
 fn cache_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    crate::cache::dir(app, CACHE_DIR)
+    crate::dirs::cache(app, CACHE_DIR)
 }
 
 /// A directory name identifying *which version of which file*.

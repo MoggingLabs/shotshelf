@@ -84,10 +84,10 @@ const MAX_LOG_BYTES: u64 = 512 * 1024;
 /// and the roaming profile is copied to a network share at logoff. Same rule
 /// `catch/clipboard.rs` states for captures themselves.
 pub fn init<R: Runtime>(app: &AppHandle<R>) {
-    // Local app data, never roaming — see `cache::local_dir`. This file names
+    // Local app data, never roaming — see `dirs::local`. This file names
     // what the app was doing, and the roaming profile is copied to a network
     // share at logoff.
-    let Ok(dir) = crate::cache::local_dir(app, "") else {
+    let Ok(dir) = crate::dirs::local(app, "") else {
         return;
     };
     init_in(&dir);

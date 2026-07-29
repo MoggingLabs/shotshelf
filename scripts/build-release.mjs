@@ -89,6 +89,15 @@ if (unsigned) {
 // unsigned one is rejected by every installed app. Tauri also refuses to build
 // them without the key, so this is switched on here rather than in the
 // committed config.
+//
+// Committing `createUpdaterArtifacts: true` was tried and reverted, and the
+// reason is worth keeping. With a `pubkey` in the config and no private key in
+// the environment, `tauri build` **fails** — so committing it broke every
+// unsigned build: `npm run release -- --unsigned`, the `npm run tauri build`
+// that `docs/USAGE.md` gives as the only way a Linux user can obtain
+// Shotshelf, and any `v*` tag pushed without the signing secret. The original
+// finding — "no updater payload can ever be emitted" — was mistaken: this line
+// does emit it, and has since `--config` was fixed to actually reach Tauri.
 if (env["TAURI_SIGNING_PRIVATE_KEY"]) {
   configOverride.bundle = { ...configOverride.bundle, createUpdaterArtifacts: true };
   notes.push("Updater: signing update artifacts with TAURI_SIGNING_PRIVATE_KEY");

@@ -13,11 +13,13 @@
 mod cache;
 mod catch;
 mod diag;
+mod dirs;
 mod edit;
 mod enrich;
 mod handoff;
 mod hotkey;
 mod imaging;
+mod limits;
 mod poster;
 mod settings;
 mod share;

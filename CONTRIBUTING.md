@@ -9,9 +9,10 @@ Thanks for taking the time to contribute!
 2. **Reuse before rewriting.** Shotshelf deliberately forks/adopts existing OSS for the hard parts
    (native drag-out, capture-folder watching) where a good option exists.
    Don't hand-roll what a maintained library already does.
-3. **Keep all three platforms working. Windows, macOS and Linux are built and gated in CI, and
-   catch + drag-out are the two features that must never regress on any of them.
-   either OS.
+3. **Keep all three platforms working.** Windows, macOS and Linux are built and gated in CI,
+   and catch + drag-out are the two features that must never regress on any of them. Note what
+   that does *not* mean: the packaged app has never been launched on any platform — see
+   [SECURITY.md](./SECURITY.md#what-has-not-been-verified).
 4. **Local-only, always.** No telemetry, no cloud, and exactly one network call: the launch-time
    update *check*, which installs nothing. It carries the running version, the OS and the CPU
    architecture — the feed URL is built from all three — and nothing else. See `SECURITY.md` for the
@@ -33,7 +34,7 @@ git checkout -b feat/<short-description>
 npm install
 npx playwright install chromium
 
-# 4. Make your change, test on BOTH platforms where possible
+# 4. Make your change, test on every platform you can
 
 # 5. Run every gate CI runs, before you push
 npm run gate

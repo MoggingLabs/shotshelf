@@ -45,7 +45,6 @@
     "copyright": "© MoggingLabs",
     "publisher": "MoggingLabs",
     "externalBin": ["binaries/ffmpeg"],
-    "createUpdaterArtifacts": true,
     "resources": ["binaries/ffmpeg.LICENSE"],
     "shortDescription": "The shelf that catches every capture.",
     "longDescription": "Shotshelf catches every screenshot and screen recording you take and keeps it one drag away on an always-on-top shelf. Local-only: captures never leave the device.",

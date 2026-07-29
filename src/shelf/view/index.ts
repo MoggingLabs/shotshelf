@@ -21,6 +21,8 @@ import { buildTile, emptyState, type TileCallbacks } from "./tile.ts";
 
 export class ShelfView {
   readonly #list: HTMLElement;
+  /** What the last render put on screen, in that order. See `visibleOrder`. */
+  #order: readonly string[] = [];
   readonly #count: HTMLElement;
   readonly #callbacks: TileCallbacks;
   /** Card per capture id, reused across redraws. */
@@ -53,6 +55,7 @@ export class ShelfView {
 
   /** The narrow popup: just what has landed, no day headings, no chrome. */
   renderColumn(items: readonly ShelfItem[]): void {
+    this.#order = items.map((item) => item.id);
     this.#list.dataset["view"] = "column";
     this.#list.dataset["empty"] = "false";
 
@@ -64,33 +67,41 @@ export class ShelfView {
     this.#list.scrollTop = 0;
   }
 
-  /** The full shelf, grouped by day, newest first. */
   /**
    * The ids in the order they are on screen right now.
    *
-   * Asked of the thing that actually drew the DOM, rather than derived a
-   * second time from the same input. Both were computing `groupByDay(items)`
-   * and agreeing by convention — the facade's copy is what walked the wrong
-   * order in the first place, and the next browse-view feature (a pinned-first
-   * section, a filter, a search box) would have changed one and not the other.
+   * Recorded by the renderers as they draw, rather than derived a second time
+   * from the same input — the facade's copy is what walked the wrong order in
+   * the first place, and the next browse-view feature (a pinned-first section,
+   * a filter, a search box) would have changed one and not the other.
+   *
+   * Recorded rather than read back out of the DOM, which was the first attempt:
+   * that wrote each id into a `data-id` attribute and parsed it back, putting
+   * identity in the DOM when the view already knew it. It also only answered
+   * for browse mode, leaving the column re-deriving its own order — the same
+   * two-places-one-rule shape, one branch down.
    */
-  visibleOrder(): string[] {
-    return [...this.#list.querySelectorAll<HTMLElement>(".tile")].flatMap((tile) =>
-      tile.dataset["id"] === undefined ? [] : [tile.dataset["id"]],
-    );
+  visibleOrder(): readonly string[] {
+    return this.#order;
   }
 
+  /** The full shelf, grouped by day, newest first. */
   renderBrowse(items: readonly ShelfItem[]): void {
     this.#list.dataset["view"] = "browse";
 
     if (items.length === 0) {
+      this.#order = [];
       this.#renderEmpty();
       return;
     }
 
+    // Grouped once, and the order that produces is what `visibleOrder` reports.
+    const grouped = groupByDay(items);
+    this.#order = grouped.flatMap((group) => group.items.map((item) => item.id));
+
     this.#list.dataset["empty"] = "false";
     this.#list.replaceChildren(
-      ...groupByDay(items).map((group) => {
+      ...grouped.map((group) => {
         const section = document.createElement("section");
         section.className = "group";
         section.dataset["day"] = group.key;

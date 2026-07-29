@@ -326,8 +326,10 @@ round-trip to Apple's notary service before Gatekeeper will open it.
 
 ### The update feed
 
-Update artifacts (and their `.sig` files) need **both** `bundle.createUpdaterArtifacts` in
-`tauri.conf.json` — which is on — and `TAURI_SIGNING_PRIVATE_KEY` in the environment — an unsigned one is rejected by every installed app, and Tauri refuses to build one
+Update artifacts (and their `.sig` files) are produced **only when `TAURI_SIGNING_PRIVATE_KEY`
+is set** — `scripts/build-release.mjs` turns `createUpdaterArtifacts` on for exactly that case,
+and deliberately not in the committed config, because with a `pubkey` present and no private key
+Tauri refuses to build at all — an unsigned one is rejected by every installed app, and Tauri refuses to build one
 without the key. A build without it still produces perfectly good installers.
 
 The app asks the endpoint in `tauri.conf.json`, with `{{target}}`, `{{arch}}` and
@@ -346,7 +348,7 @@ caller is current. The manifest shape:
   "notes": "What changed",
   "pub_date": "2026-07-27T12:00:00Z",
   "platforms": {
-    "windows-x86_64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf_0.2.0_x64-setup.nsis.zip" },
+    "windows-x86_64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf_0.2.0_x64-setup.exe" },
     "darwin-aarch64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf_0.2.0_aarch64.app.tar.gz" }
   }
 }
@@ -384,7 +386,7 @@ Shotshelf is an internal MoggingLabs utility (not a product). MIT, no warranty.
 
 ## 🤝 Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md). Reuse before rewriting; keep both platforms working; never
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Reuse before rewriting; keep all three platforms working; never
 commit captures or user data.
 
 ## 📄 License

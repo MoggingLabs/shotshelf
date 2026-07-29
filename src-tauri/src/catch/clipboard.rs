@@ -140,9 +140,9 @@ fn digest_of(bytes: &[u8]) -> u64 {
 /// here too, which is why this is shared rather than inlined below.
 pub(super) fn capture_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     // Local app data, never roaming. These files are screen captures and they
-    // are the only copy — see `cache::local_dir`, which is where that rule
+    // are the only copy — see `dirs::local`, which is where that rule
     // lives now rather than in four docstrings pointing at each other.
-    crate::cache::local_dir(app, "clipboard").ok()
+    crate::dirs::local(app, "clipboard").ok()
 }
 
 /// Clipboard captures have no file of their own, so give them one.
