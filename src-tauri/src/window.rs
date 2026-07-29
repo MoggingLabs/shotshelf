@@ -344,7 +344,18 @@ pub fn show_shelf<R: Runtime>(app: AppHandle<R>, focus: bool, height: Option<f64
     if focus {
         open(&app);
     } else {
-        peek(&app, height.unwrap_or(120.0));
+        // No default. Every `focus: false` caller supplies a height —
+        // `popover.ts` is the only one — and the `focus: true` branch above
+        // ignores the argument entirely, so `unwrap_or(120.0)` was
+        // unreachable. It was also wrong: one card needs 136, so had it
+        // ever been reached it would have clipped the single capture the
+        // peeked column exists to show, and it was a fourth copy of card
+        // metrics that `geometry.ts` owns and `layout.spec.ts` joins to the
+        // stylesheet. A missing height is a caller bug; say so.
+        match height {
+            Some(height) => peek(&app, height),
+            None => crate::diag::warn("show_shelf asked for the column with no height"),
+        }
     }
 }
 

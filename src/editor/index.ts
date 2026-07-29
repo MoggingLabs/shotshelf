@@ -63,8 +63,21 @@ const overlay = new Overlay<Live>({
   restore: () => void browseShelf(),
 });
 
-/** Guards the save the same way; a double click wrote two files. */
-let saving = false;
+/**
+ * Which editor session is mid-save, if any.
+ *
+ * A ticket, not a boolean, for the same reason `Overlay` is: a process-wide
+ * flag says "a save is happening", which is not the question. Escaping out of
+ * one editor mid-save and pressing Save in the next one asked "is *this* save
+ * allowed", got the previous editor's answer, and returned in silence — no
+ * write, and no `callbacks.failed`, so the second capture simply did not save.
+ *
+ * This was the last module-global flag in a file whose whole ticket mechanism
+ * exists because module-global flags were the bug.
+ */
+/// The ticket is a number, and `undefined` — not zero — means "no save in
+/// flight", so every comparison here is `===` against a specific ticket.
+let saving: number | undefined;
 
 export function editorIsOpen(): boolean {
   return overlay.isOpen;
@@ -211,7 +224,9 @@ function setTool(tool: Tool): void {
  */
 async function saveEditedCapture(callbacks: EditorHost): Promise<void> {
   const live = overlay.live;
-  if (!live || saving) return;
+  // Identity, not a process-wide "a save is happening": the question is
+  // whether *this* editor already has one in flight.
+  if (!live || saving === overlay.current) return;
   const { item, session, picture } = live;
 
   // The save belongs to *this* editor.
@@ -223,7 +238,7 @@ async function saveEditedCapture(callbacks: EditorHost): Promise<void> {
   // being waited for"; the save was the one async path not asking.
   const ticket = overlay.current;
 
-  saving = true;
+  saving = ticket;
   try {
     const region = session.exportRect();
     const canvas = document.createElement("canvas");
@@ -249,7 +264,9 @@ async function saveEditedCapture(callbacks: EditorHost): Promise<void> {
     console.error("[shotshelf] could not save that edit", error);
     callbacks.failed("That edit could not be saved. Your marks are still here.");
   } finally {
-    saving = false;
+    // Cleared only if this save is still the one being tracked, so an
+    // earlier editor finishing cannot un-mark a later one's save.
+    if (saving === ticket) saving = undefined;
   }
 }
 

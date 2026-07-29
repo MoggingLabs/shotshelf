@@ -24,6 +24,11 @@ const LIB = "src-tauri/src/lib.rs";
  * remove it, and it shows up in review as a diff rather than as silence. An
  * empty list is the goal.
  */
+// Empty, and every line that reads it is therefore unreachable today. That
+// is the intended state and not an oversight: the alternative to a hatch
+// that is currently unused is a hatch added under time pressure, which is
+// how a gate stops biting. It stays because an exception here is a diff in
+// review, and a suppression added in a hurry is not.
 const UNWIRED = new Map();
 
 function registeredCommands() {

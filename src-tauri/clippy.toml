@@ -1,5 +1,5 @@
 # Which directory root a path comes from is a privacy decision, not a filing
-# one — see `src/dirs.rs`. On Windows `app_config_dir` and `app_data_dir` are
+# one — see `src-tauri/src/dirs.rs`. On Windows `app_config_dir` and `app_data_dir` are
 # the same directory (the roaming profile, copied to a network share at logoff
 # under Enterprise State Roaming), and a capture's path names client and
 # project work as readily as a window title does.

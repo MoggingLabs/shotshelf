@@ -272,8 +272,30 @@ for (const file of SOURCE_GLOBS.flatMap((glob) => globSync(glob))) {
 
     if (claimsOurFile) {
       const candidates = files.get(path.basename(named)) ?? [];
+      // A path must resolve from somewhere the referring file can actually
+      // mean: the repo root, or one of its own parent directories.
+      //
+      // `endsWith` accepted anything that finished the same way, from anywhere
+      // at all: a path of the form "totally/made/up/src/dirs.rs" passed as
+      // readily as the real one, because the real one ends with it. A comment
+      // naming a path that does not exist is precisely what this gate is for,
+      // and that form is the shape such a comment takes.
+      //
+      // Parent directories are included because module-relative references are
+      // how this codebase writes them and they are unambiguous in context: a
+      // bare "catch/mod.rs" inside src-tauri/src means exactly one file. What
+      // is excluded is a path that resolves from nowhere in particular.
+      //
+      // Deliberately no backticks on the examples above — they are illustrative
+      // strings, not references, and this check would rightly flag them.
+      const from = [""].concat(
+        relativeParents(file.replaceAll("\\", "/")),
+      );
       const exists = isPath
-        ? candidates.some((found) => found.replaceAll("\\", "/").endsWith(named))
+        ? candidates.some((found) => {
+            const slashed = found.replaceAll("\\", "/");
+            return from.some((base) => (base === "" ? named : `${base}/${named}`) === slashed);
+          })
         : candidates.length > 0;
       if (!exists) report(file, token, "no such file in the repository");
       continue;
@@ -322,3 +344,20 @@ if (problems.length > 0) {
 }
 
 console.info(`Checked comment references across ${SOURCE_GLOBS.length} source trees.`);
+
+/**
+ * Every directory a reference in this file could sensibly be relative to.
+ *
+ * The file's own directory first, then each parent up to the repo root. Used
+ * to resolve a bare "catch/mod.rs" written inside src-tauri/src without accepting
+ * it from anywhere else in the tree.
+ */
+function relativeParents(file) {
+  const parts = file.split("/").slice(0, -1);
+  const bases = [];
+  while (parts.length > 0) {
+    bases.push(parts.join("/"));
+    parts.pop();
+  }
+  return bases;
+}

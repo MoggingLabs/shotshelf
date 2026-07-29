@@ -50,7 +50,7 @@ test.describe("appearance", () => {
 
   test("the editor, open on a capture", async ({ page }) => {
     // The editor is the largest visual feature in the app — 671 lines across
-    // `editor/index.ts` and `editor/draw.ts` — and had **no committed image of
+    // `src/editor/index.ts` and `src/editor/draw.ts` — and had **no committed image of
     // itself**, while the shelf had six. The canvas-pixel tests next door
     // check that two code paths agree with each other; nothing checked that
     // either of them renders what it should. A toolbar that loses its layout,

@@ -559,6 +559,12 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Now, as Unix milliseconds.
+///
+/// Exactly `as_ms(SystemTime::now())`. It used to be that expression written
+/// out a second time eighty lines away, with different saturation — this one
+/// used a wrapping `as` cast where `as_ms` clamps to `u64::MAX` — in the module
+/// that stamps both live captures and backfilled ones.
 pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

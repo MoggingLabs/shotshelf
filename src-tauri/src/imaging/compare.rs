@@ -233,7 +233,12 @@ pub fn side_by_side(
     highlights: &[Region],
 ) -> Option<DynamicImage> {
     // The only place the composite's size is computed, so the ceiling cannot
-    // be bypassed by deriving the dimensions some other way.
+    // be bypassed by deriving the dimensions some other way — including the
+    // `max(1)` below, which is part of the same decision and is why it is
+    // written here rather than inside `composite_size`: a zero-sized pair is
+    // refused by `RgbaImage` rather than by the ceiling, and a canvas is never
+    // smaller than one pixel. Everything else about the size comes from that
+    // one function.
     let (width, height) = composite_size(
         (before.width(), before.height()),
         (after.width(), after.height()),
