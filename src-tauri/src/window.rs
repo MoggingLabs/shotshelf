@@ -490,27 +490,69 @@ fn round_corners<R: Runtime>(shelf: &WebviewWindow<R>) {
     }
 }
 
+/// What `show_shelf`'s two arguments actually ask for.
+///
+/// Three answers from four representable combinations, which is the point:
+/// `focus` and `height` are two booleans-worth of wire and only two of the
+/// four pairs mean anything. Naming the three makes the fourth a value the
+/// caller can be told about rather than a branch that quietly does nothing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Wanted {
+    /// The user asked for the shelf — hotkey, tray, dock. Takes focus.
+    Deliberate,
+    /// A capture landed. Peek at the column, at the height the front end says
+    /// its cards need.
+    Column(f64),
+    /// A column with no height, which is a caller bug and not a state.
+    Unsaid,
+}
+
+/// Read the request out of the pair, so the decision has a test.
+///
+/// Separated from the command because `show_shelf` takes an `AppHandle` and
+/// therefore nothing in this crate can call it, and no browser spec executes a
+/// real `#[tauri::command]` either. Inverting the `focus` branch inside the
+/// command left *every* gate green — clippy, 158 Rust tests, `cargo fmt`, the
+/// whole `deadcode` chain, and all 166 Playwright tests — while shipping a
+/// hotkey that opens nothing and a landed capture that steals focus mid-typing.
+///
+/// The same shape as `catch::settled` and `CaptureSink::note_folder_image`: the
+/// decision was on the untestable side of the IPC boundary, and moving it one
+/// function out is the whole fix.
+pub(crate) fn wanted(focus: bool, height: Option<f64>) -> Wanted {
+    if focus {
+        // `height` is ignored here, deliberately: a deliberate open shows the
+        // browse shape, whose size the window owns.
+        return Wanted::Deliberate;
+    }
+    // No default. Every `focus: false` caller supplies a height — `popover.ts`
+    // is the only one — so `unwrap_or(120.0)` was unreachable. It was also
+    // wrong: one card needs 136, so had it ever been reached it would have
+    // clipped the single capture the peeked column exists to show, and it was a
+    // fourth copy of card metrics that `geometry.ts` owns and `layout.spec.ts`
+    // joins to the stylesheet.
+    height.map_or(Wanted::Unsaid, Wanted::Column)
+}
+
 /// Commands the front-end uses to drive the popover.
 ///
 /// `height` is only meaningful for the column: the front-end knows how many
 /// cards are showing, so it decides how tall the window needs to be.
+///
+/// Where the cover ends, stated rather than implied. [`wanted`] decides, and a
+/// test pins all four combinations. What is left here is the dispatch, and
+/// nothing in the repo can execute it: this takes an `AppHandle`, which no Rust
+/// test can build, and no browser spec runs a real `#[tauri::command]` —
+/// `webview_path.rs` records that limit for the whole IPC tier. So swapping the
+/// two arms below would still pass every gate. It is three lines with no
+/// condition in them, which is as small as that tier gets, and shrinking it
+/// further would only move the same untestable dispatch somewhere else.
 #[tauri::command]
 pub fn show_shelf<R: Runtime>(app: AppHandle<R>, focus: bool, height: Option<f64>) {
-    if focus {
-        open(&app, true);
-    } else {
-        // No default. Every `focus: false` caller supplies a height —
-        // `popover.ts` is the only one — and the `focus: true` branch above
-        // ignores the argument entirely, so `unwrap_or(120.0)` was
-        // unreachable. It was also wrong: one card needs 136, so had it
-        // ever been reached it would have clipped the single capture the
-        // peeked column exists to show, and it was a fourth copy of card
-        // metrics that `geometry.ts` owns and `layout.spec.ts` joins to the
-        // stylesheet. A missing height is a caller bug; say so.
-        match height {
-            Some(height) => peek(&app, height),
-            None => crate::diag::warn("show_shelf asked for the column with no height"),
-        }
+    match wanted(focus, height) {
+        Wanted::Deliberate => open(&app, true),
+        Wanted::Column(height) => peek(&app, height),
+        Wanted::Unsaid => crate::diag::warn("show_shelf asked for the column with no height"),
     }
 }
 
@@ -529,6 +571,31 @@ pub fn preview_shelf<R: Runtime>(app: AppHandle<R>, aspect: f64) -> Result<(), S
 
 #[cfg(test)]
 mod tests {
+    use super::{wanted, Wanted};
+
+    #[test]
+    fn the_two_things_show_shelf_can_be_asked_for_are_told_apart() {
+        // `show_shelf` takes an `AppHandle`, so no test in this crate can call
+        // it, and no browser spec executes a real `#[tauri::command]` either.
+        // Inverting its `focus` branch left *every* gate green — clippy, 158
+        // Rust tests, `cargo fmt`, the whole `deadcode` chain, and 166
+        // Playwright tests — while shipping a hotkey that opens nothing and a
+        // landed capture that steals focus out from under whatever the user is
+        // typing into.
+        assert_eq!(wanted(true, None), Wanted::Deliberate);
+        // A deliberate open ignores the height rather than peeking at it: the
+        // browse shape's size is the window's to decide.
+        assert_eq!(wanted(true, Some(400.0)), Wanted::Deliberate);
+
+        assert_eq!(wanted(false, Some(400.0)), Wanted::Column(400.0));
+
+        // The fourth combination is a caller bug, and is said out loud rather
+        // than defaulted. A default here was unreachable *and* wrong: it was
+        // 120, and one card needs 136, so it would have clipped the single
+        // capture the peeked column exists to show.
+        assert_eq!(wanted(false, None), Wanted::Unsaid);
+    }
+
     #[test]
     fn the_window_events_match_what_the_browser_harness_expects() {
         // Both halves of the open event: the name, and which payload means

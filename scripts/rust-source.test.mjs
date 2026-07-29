@@ -25,7 +25,6 @@ import {
   disallowedIn,
   grantsIn,
   silencedIn,
-  tomlWithoutComments,
   weakeningFlagsIn,
 } from "./rust-source.mjs";
 
@@ -254,31 +253,47 @@ void test("an allowance whose lint name cannot be read fails closed", () => {
   ]);
 });
 
-void test("TOML comments are blanked, and only real comments", () => {
+void test("a commented-out rule is not a rule", () => {
   // The clippy-configuration gate reads `clippy.toml` and `Cargo.toml` as text.
   // Commenting every rule out left all of their paths present, so the gate
   // passed over a `clippy.toml` that was semantically empty.
-  const source = [
+  //
+  // Asserted through the two functions that read the blanked text, rather than
+  // against the blanking directly: that is where it matters, and it is the only
+  // place a caller stands.
+  const toml = [
     "disallowed-methods = [",
-    '  "tauri::path::PathResolver::app_data_dir",  # a note',
+    '  { path = "tauri::path::PathResolver::app_data_dir", reason = "roaming" },  # a note',
     "]",
-    '# disallowed-types = ["tauri::path::BaseDirectory"]',
-    'name = "a # inside a basic string"',
-    "literal = 'a # inside a literal string'",
+    '# disallowed-types = [{ path = "tauri::path::BaseDirectory" }]',
     "",
   ].join("\n");
-  const blanked = tomlWithoutComments(source);
+  const arrays = disallowedIn(toml);
 
-  assert.equal(blanked.length, source.length, "length changed");
-  assert.equal(
-    blanked.split("\n").length,
-    source.split("\n").length,
-    "line count changed",
+  assert.deepEqual(arrays.get("disallowed-methods"), [
+    "tauri::path::PathResolver::app_data_dir",
+  ]);
+  assert.equal(arrays.get("disallowed-types"), undefined, "a commented-out array was read");
+
+  // A `#` inside a string is data. Both quote styles, because TOML has two and
+  // they take different escape rules.
+  assert.deepEqual(
+    disallowedIn('disallowed-names = ["a # inside a basic string", \'a # in a literal one\']').get(
+      "disallowed-names",
+    ),
+    ["a # inside a basic string", "a # in a literal one"],
   );
-  assert.ok(blanked.includes("app_data_dir"), "a live rule was blanked");
-  assert.ok(!blanked.includes("BaseDirectory"), "a commented-out rule survived");
-  assert.ok(blanked.includes("inside a basic string"), "a hash in a string ended the line");
-  assert.ok(blanked.includes("inside a literal string"), "a hash in a literal string did too");
+
+  // And the newline survives the comment, which is the invariant with a
+  // consumer: `tomlEntries` splits on it, so a comment that swallowed the break
+  // would take the *next* key with it — here, the level of the lint below.
+  assert.equal(
+    lintLevelsIn(["[lints.clippy]", "# a note", 'cast_sign_loss = "warn"', ""].join("\n")).get(
+      "clippy::cast_sign_loss",
+    ),
+    "warn",
+    "a comment swallowed the line after it",
+  );
 });
 
 void test("a TOML literal string ends at its quote, backslash and all", () => {
@@ -287,14 +302,15 @@ void test("a TOML literal string ends at its quote, backslash and all", () => {
   // left the scan inside a string for the rest of the file and copied every
   // comment through unblanked — reopening the comment bypass in the same round
   // it was closed, on a value as ordinary as a Windows path.
-  const source = [
-    "disallowed-names = ['C:" + String.fromCharCode(92) + "']",
+  const toml = [
+    `disallowed-names = ['C:${String.fromCharCode(92)}']`,
     '# disallowed-methods = ["tauri::path::PathResolver::app_data_dir"]',
     "",
   ].join("\n");
 
-  assert.ok(
-    !tomlWithoutComments(source).includes("app_data_dir"),
+  assert.equal(
+    disallowedIn(toml).get("disallowed-methods"),
+    undefined,
     "a comment after a literal string ending in a backslash survived",
   );
 });

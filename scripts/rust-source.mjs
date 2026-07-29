@@ -602,13 +602,25 @@ function dotted(key) {
  * written to end, applied to the Rust side and not to the TOML side added in
  * the same commit.
  *
- * A `#` starts a comment unless it is inside a string. Same length out as in,
- * so offsets still line up.
+ * A `#` starts a comment unless it is inside a string.
+ *
+ * The newlines survive, which is the part with a consumer: [`tomlEntries`]
+ * splits on them, so a comment that swallowed the line break would take the
+ * *next* key with it. The rest of the length is preserved too — `codeOnly`
+ * needs that for Rust — but nothing reads a TOML offset, so this does not claim
+ * it as a property anyone depends on.
+ *
+ * Not exported, for the reason [`tomlEntries`] gives: the three callers are all
+ * in this file, and the only thing outside it that wanted this was a test.
+ * Exporting for a test's sake is a public surface with no second consumer, and
+ * it means the behaviour is asserted somewhere no caller stands — the two rows
+ * that did are written through `disallowedIn` and `lintLevelsIn` now, which is
+ * where the blanking actually matters.
  *
  * @param {string} source
  * @returns {string}
  */
-export function tomlWithoutComments(source) {
+function tomlWithoutComments(source) {
   let out = "";
   let inString = false;
   let quote = "";
