@@ -132,3 +132,37 @@ test("pins round-trip in the shape settings persists", () => {
 test("toggling a pin on an unknown capture reports rather than throws", () => {
   assert.equal(new ShelfStore().togglePin("nope"), undefined);
 });
+
+test("the cap evicts an unpinned capture even when older pinned ones sit below it", () => {
+  // The shape the existing fixtures could not reach.
+  //
+  // "trim never evicts a pinned capture" pins *every* item, so `unpinned` is 0,
+  // `0 > cap` is false and the loop body never runs; "the cap counts unpinned
+  // captures only" has one unpinned against a cap of two, so it never runs
+  // either. Both are true with the `item.pinned` skip deleted.
+  //
+  // And this arrangement is the ordinary one, not a contrivance:
+  // `restorePinned` adds pins oldest-first at launch and captures land on top,
+  // so the oldest entries are exactly the pinned ones. Without the skip, the
+  // loop walks from the oldest and evicts a pin — the one piece of shelf state
+  // promised to survive a restart — while leaving the unpinned capture that
+  // pushed it over the cap.
+  const store = new ShelfStore();
+  store.add(capture(1000, "/a/one.png"), { pinned: true });
+  store.add(capture(2000, "/a/two.png"), { pinned: true });
+  store.add(capture(3000, "/a/three.png"));
+  store.add(capture(4000, "/a/four.png"));
+
+  const evicted = store.trim(1);
+
+  assert.deepEqual(
+    evicted.map((item) => item.path),
+    ["/a/three.png"],
+    "the oldest *unpinned* capture goes, and only that one",
+  );
+  assert.deepEqual(
+    store.items().map((item) => item.path),
+    ["/a/four.png", "/a/two.png", "/a/one.png"],
+    "both pins stay, however far over the cap they put the shelf",
+  );
+});

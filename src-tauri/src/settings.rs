@@ -701,6 +701,26 @@ mod tests {
         let moved = std::fs::read_to_string(&local).expect("pins were migrated");
         assert!(moved.contains("still-pinned"));
 
+        // …and *out* of the old one, which is the half nothing asserted.
+        //
+        // `persist` blanks `pinned` before serialising the roaming file, and
+        // deleting that line left all 134 Rust tests green. The existing test
+        // for it, `pinned_paths_are_never_written_to_the_roaming_file`, writes
+        // the roaming file with an empty `pinned` *before* touching pins and
+        // then asserts on its mtime — which covers "a pin toggle must not call
+        // the full `persist`", a different rule.
+        //
+        // This one reaches it because the first-run `persist` above writes a
+        // roaming file whose in-memory `pinned` is *not* empty: it was just
+        // migrated. Up to `MAX_PINNED` absolute capture paths would land in
+        // `%APPDATA%` — the one thing `SECURITY.md`, `dirs.rs` and this file's
+        // own header all say cannot happen.
+        let roamed = std::fs::read_to_string(&roaming).expect("preferences are still there");
+        assert!(
+            !roamed.contains("still-pinned"),
+            "a capture path reached the roaming file: {roamed}",
+        );
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

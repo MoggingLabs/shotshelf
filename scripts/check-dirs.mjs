@@ -119,7 +119,7 @@ const ROAMING_CALLER = "src-tauri/src/settings.rs";
 // Anchored to the start of a line, so the two files that *warn* about the
 // inner form in prose are not counted as using it.
 const SILENCERS =
-  /^[^\S\r\n]*#!?\[\s*allow\s*\(\s*(?:clippy::(?:disallowed_methods|disallowed_types|all)|warnings)\s*\)\s*\]/gm;
+  /^[^\S\r\n]*#!?\[\s*(?:allow|expect)\s*\(\s*(?:clippy::(?:disallowed_methods|disallowed_types|all)|warnings)\s*\)\s*\]/gm;
 
 const ALLOWANCES = new Map([
   // Resolves every root; one per resolving statement, never file-scope.
