@@ -84,9 +84,16 @@ root.addEventListener("pointerleave", () => shelf.holdColumn("pointer", false));
  * The keyboard path.
  *
  * The shelf is a popover you summon with a hotkey, so reaching for the mouse
- * to act on what it shows undoes the point of summoning it that way. Only
- * bound when the shelf is genuinely open — the auto-popup column never takes
- * focus, so it never sees these.
+ * to act on what it shows undoes the point of summoning it that way.
+ *
+ * Bound unconditionally, once, for the life of the document — this used to
+ * claim it was "only bound when the shelf is genuinely open", which is not what
+ * the line below does and would be the wrong shape anyway. What is true is the
+ * second half: the auto-popup column is created without focus, so no key event
+ * is ever delivered to it, and the guards inside the handler cover the rest.
+ * The distinction matters because "not bound" and "bound but never reached"
+ * fail differently — the first cannot misfire, the second can, which is why
+ * every branch below states its own condition.
  */
 document.addEventListener("keydown", (event) => {
   if (event.defaultPrevented) return;

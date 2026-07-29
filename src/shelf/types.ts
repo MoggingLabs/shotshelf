@@ -123,8 +123,17 @@ type SecretKind = (typeof SECRET_KINDS)[number];
 /**
  * Something in a capture worth a second look before it leaves the machine.
  *
- * `preview` is masked on the Rust side and must stay that way: the whole point
- * is to stop the value spreading, so putting it in a tooltip would defeat it.
+ * `preview` is masked on the Rust side and must stay that way. What that buys
+ * is the opposite of a prohibition: because it is masked, it is the one part of
+ * a finding that *can* be shown, and `view/secrets.ts` puts it in the card's
+ * tooltip so "a token is in this screenshot" can be answered with "which one".
+ *
+ * This used to say that putting it in a tooltip would defeat the point, which
+ * described the raw value rather than this field and forbade the only thing any
+ * consumer does with it. The rule that actually holds: nothing on this side may
+ * reconstruct or transmit an unmasked value, and nothing here ever receives one
+ * — `enrich::Findings` carries no recognised text, and a Rust test pins its key
+ * set so it cannot start.
  */
 export interface SecretFinding {
   kind: SecretKind;

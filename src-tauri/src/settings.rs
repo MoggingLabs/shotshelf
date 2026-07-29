@@ -258,15 +258,15 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
                 // file in place means the next write destroys it; a `.corrupt`
                 // neighbour is something a person can actually open.
                 if let Some(path) = pins.as_ref() {
-                    let kept = path.with_extension("json.corrupt");
-                    match std::fs::rename(path, &kept) {
-                        Ok(()) => crate::diag::warn(&format!(
+                    match set_aside(path) {
+                        Some(kept) => crate::diag::warn(&format!(
                             "the unreadable file was kept as {}",
                             kept.file_name().unwrap_or_default().to_string_lossy()
                         )),
-                        Err(err) => crate::diag::warn(&format!(
-                            "could not set the unreadable pins file aside: {err}"
-                        )),
+                        None => crate::diag::warn(
+                            "could not set the unreadable pins file aside; it is still in place \
+                             and the next write will overwrite it",
+                        ),
                     }
                 }
                 None
@@ -301,6 +301,57 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
 /// macOS.
 ///
 /// Preferences only. Pinned paths live somewhere else — see [`pins_path`].
+/// How many unreadable copies are kept before new ones stop being set aside.
+///
+/// Small on purpose: these live in the preferences directory beside the file
+/// they came from, and an unbounded set of them is its own kind of mess.
+const KEPT_CORRUPT: u32 = 5;
+
+/// Move an unreadable file somewhere the next write will not destroy it.
+///
+/// Returns where it went, or `None` if it could not be moved at all.
+///
+/// The name is searched for a free slot rather than fixed. `rename` replaces
+/// its destination, so a single `pinned.json.corrupt` was a rotating slot of
+/// one: the second corruption silently destroyed the copy the *first* warning
+/// had told the user to go and repair — the exact failure this whole branch
+/// exists to prevent, one level up.
+///
+/// Past `KEPT_CORRUPT` the file is left in place and the caller says so. That
+/// loses the newest copy rather than the oldest, which is the right way round:
+/// by then five earlier ones are already sitting there to be looked at.
+fn set_aside(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    for attempt in 0..KEPT_CORRUPT {
+        let kept = if attempt == 0 {
+            path.with_extension("json.corrupt")
+        } else {
+            path.with_extension(format!("json.corrupt.{attempt}"))
+        };
+
+        // `create_new` claims the name and fails if it is taken, so two
+        // processes racing here cannot both decide the same slot is free.
+        if std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&kept)
+            .is_err()
+        {
+            continue;
+        }
+
+        // The placeholder is replaced by the real file; `rename` overwrites it,
+        // which is what makes claiming the name first safe.
+        if std::fs::rename(path, &kept).is_ok() {
+            return Some(kept);
+        }
+
+        // The rename failed, so the placeholder is not the file it stands for.
+        let _ = std::fs::remove_file(&kept);
+        return None;
+    }
+    None
+}
+
 fn settings_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     Some(crate::dirs::preferences(app).ok()?.join("settings.json"))
 }
@@ -561,6 +612,52 @@ mod tests {
         assert_eq!(store.get().pinned.len(), 1);
         assert!(store.get().pinned[0].path.contains("current"));
         assert_eq!(store.last_capture_ms(), 42, "the watermark came back too");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_second_corruption_does_not_destroy_the_copy_kept_from_the_first() {
+        // The warning tells the user an unreadable file was kept for them to
+        // repair. `rename` replaces its destination, so a fixed
+        // `pinned.json.corrupt` was a rotating slot of one: the second
+        // corruption silently deleted the copy the first warning had pointed
+        // at. Losing the thing you were just told to go and look at is worse
+        // than the corruption.
+        let dir = workspace("corrupt-twice");
+        let pins = dir.join("pinned.json");
+
+        std::fs::write(&pins, "{ the first corruption }").expect("write");
+        let first = set_aside(&pins).expect("the first copy is kept");
+        assert_eq!(
+            std::fs::read_to_string(&first).expect("readable"),
+            "{ the first corruption }"
+        );
+
+        std::fs::write(&pins, "{ the second corruption }").expect("write");
+        let second = set_aside(&pins).expect("the second copy is kept too");
+
+        assert_ne!(first, second, "the second copy took the first one's name");
+        assert_eq!(
+            std::fs::read_to_string(&first).expect("the first copy is still there"),
+            "{ the first corruption }",
+            "the first kept copy was destroyed by the second corruption",
+        );
+        assert_eq!(
+            std::fs::read_to_string(&second).expect("readable"),
+            "{ the second corruption }"
+        );
+
+        // And the slots are bounded: past the cap the file is left in place
+        // and the caller reports that, rather than filling the preferences
+        // directory with copies.
+        for _ in 2..KEPT_CORRUPT {
+            std::fs::write(&pins, "more").expect("write");
+            assert!(set_aside(&pins).is_some());
+        }
+        std::fs::write(&pins, "one too many").expect("write");
+        assert!(set_aside(&pins).is_none(), "the cap does not hold");
+        assert!(pins.exists(), "the file past the cap is left where it is");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
