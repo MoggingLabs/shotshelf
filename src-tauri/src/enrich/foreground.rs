@@ -183,8 +183,14 @@ mod platform {
     use super::Context;
 
     pub fn current() -> Context {
-        // SAFETY: every call below takes a handle this function obtained and
-        // buffers it owns; none of them outlive this scope.
+        // SAFETY: the window handle is **foreign** — `GetForegroundWindow`
+        // returns a window this process does not own, and its owner may close
+        // it between that call and the next. This is sound because every Win32
+        // call here fails closed on a stale `HWND`: they answer zero or an
+        // error rather than reading freed memory, and each result is checked.
+        // It is *not* sound because of any lifetime this function controls,
+        // which is what an earlier version of this comment claimed — the
+        // buffers are the only part this scope owns.
         unsafe {
             let window = GetForegroundWindow();
             if window.0.is_null() {

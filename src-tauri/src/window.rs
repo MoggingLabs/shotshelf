@@ -148,7 +148,18 @@ fn monitor_for<R: Runtime>(shelf: &WebviewWindow<R>) -> Option<tauri::Monitor> {
         Err(err) => crate::diag::warn(&format!("could not read the monitor layout: {err}")),
     }
     match shelf.current_monitor() {
-        Ok(monitor) => monitor,
+        Ok(Some(monitor)) => Some(monitor),
+        // Said out loud, like the `Err` arms. Both "no monitor" answers used to
+        // return `None` silently, and `preview` treats that as a reason to
+        // abandon the whole operation — returning before `set_size`, `center`,
+        // `show`, `set_focus` and `mark_opened`, while the front end's `await`
+        // resolves and mounts a full-size picture into a 225px window. That is
+        // the failure this function's own docstring says it was extracted to
+        // fix, and `docs/USAGE.md` points the user at a log that said nothing.
+        Ok(None) => {
+            crate::diag::warn("no monitor could be identified; the shelf cannot size itself");
+            None
+        }
         Err(err) => {
             crate::diag::warn(&format!("could not read the current monitor: {err}"));
             None
@@ -291,10 +302,31 @@ pub fn hide<R: Runtime>(app: &AppHandle<R>) {
     // capture away silently instead of popping the column.
     let _ = shelf.emit(HIDDEN_EVENT, ());
 
-    // Hiding the window alone leaves macOS treating Shotshelf as the active
-    // app, so the app you were actually using does not get its focus back.
-    #[cfg(target_os = "macos")]
-    let _ = app.hide();
+    // No `app.hide()` here, on any platform.
+    //
+    // It was here on macOS, to hand focus back to whatever the user was
+    // actually working in. `AppHandle::hide` is not "deactivate" — it is ⌘H,
+    // `NSApplication::hide`, which hides the *whole application*. Its pair,
+    // `AppHandle::show` → `NSApplication::unhide`, was called nowhere.
+    //
+    // Neither thing `open` does afterwards recovers it. `window.show()` reaches
+    // `makeKeyAndOrderFront:`, which orders a window front and does not unhide
+    // an application; `set_focus` is the only call in the graph that reaches
+    // `activateIgnoringOtherApps:`, and `tao` gates it behind
+    // `ns_window.isVisible()`, which is false for every window of a hidden app.
+    // `peek` never calls `set_focus` at all, so a newly landed capture cannot
+    // bring it back either. And `ActivationPolicy::Accessory` means there is no
+    // Dock icon and no ⌘-Tab entry to unhide it by hand.
+    //
+    // Every dismissal reached it — the tray, the tray menu, the hotkey, ⌘W,
+    // `hide_shelf` — including the two nobody triggers: the column's
+    // sixty-second expiry, and the four-second launch dismissal. So a first
+    // macOS launch showed the shelf and then hid its own application, four
+    // seconds in, with no user action at all and no way back.
+    //
+    // Losing the focus-return nicety is the right trade for that. Tauri exposes
+    // no "deactivate without hiding", so the alternative would be hand-rolled
+    // AppKit in a project that adopts crates rather than doing that.
 }
 
 /// Tray click, tray menu, or the global shortcut.

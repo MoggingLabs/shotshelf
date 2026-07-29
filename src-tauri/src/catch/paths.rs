@@ -22,7 +22,7 @@ pub fn resolve_watch_dirs<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf])
         overrides.to_vec()
     };
 
-    settle(candidates)
+    settle(candidates, app.path().home_dir().ok().as_deref())
 }
 
 /// Turn a candidate list into the folders actually watched.
@@ -30,7 +30,7 @@ pub fn resolve_watch_dirs<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf])
 /// Split from `resolve_watch_dirs` so the create-and-filter rule can be tested
 /// without an `AppHandle` — the rule is where the interesting decisions are,
 /// and it had no coverage while it was inlined above `defaults()`.
-fn settle(candidates: Vec<PathBuf>) -> Vec<PathBuf> {
+fn settle(candidates: Vec<PathBuf>, home: Option<&Path>) -> Vec<PathBuf> {
     let mut seen = HashSet::new();
     candidates
         .into_iter()
@@ -56,8 +56,24 @@ fn settle(candidates: Vec<PathBuf>) -> Vec<PathBuf> {
         // is. `create_dir` rather than `create_dir_all` for the same reason —
         // it cannot build a tree.
         .inspect(|dir| {
-            let parent_is_there = dir.parent().is_some_and(Path::is_dir);
-            if parent_is_there && !dir.exists() {
+            // Only a leaf *inside* an existing capture folder, never a folder
+            // directly under `$HOME`.
+            //
+            // The rule was "create it if its parent is a directory", justified
+            // as making the leaf the OS is about to make anyway. On Linux the
+            // candidate list carries `~/Pictures` and `~/Videos` themselves,
+            // whose parent is `$HOME` and therefore always there — so on a
+            // machine with neither, an app whose pitch is that it does not touch
+            // your things created two top-level folders and then granted the
+            // webview read over them. That is not the leaf anyone was about to
+            // make.
+            let parent = dir.parent();
+            let parent_is_there = parent.is_some_and(Path::is_dir);
+            let parent_is_home = match (parent, home) {
+                (Some(parent), Some(home)) => parent == home,
+                _ => false,
+            };
+            if parent_is_there && !parent_is_home && !dir.exists() {
                 let _ = std::fs::create_dir(dir);
             }
         })
@@ -118,10 +134,33 @@ fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
 fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
     let home = app.path().home_dir().ok();
 
-    let configured = screencapture_location(home.as_deref());
-    let fallback = home.map(|home| home.join("Desktop"));
+    macos_candidates(
+        screencapture_location(home.as_deref()),
+        home.map(|home| home.join("Desktop")),
+    )
+}
 
-    configured.or(fallback).into_iter().collect()
+/// The macOS candidate list: the configured location *and* `~/Desktop`.
+///
+/// Not `cfg`-gated, so it has a test on every platform. The decision it holds
+/// was `configured.or(fallback)`, which branches on `Option`-ness and not on
+/// whether the folder is there: `screencapture_location` returns `Some(..)` for
+/// any non-empty `defaults read`, with no `is_dir` check and no requirement
+/// that the path be absolute. One stale preference — an unmounted volume, a
+/// deleted folder — took the fallback out of play, `settle` dropped the dead
+/// path, and macOS ended with *nothing* watched on a machine whose `~/Desktop`
+/// is right there. It is the only platform whose list had a single element.
+///
+/// Both, because that is what makes Windows and Linux survive a bad entry:
+/// `settle` filters what does not exist and de-duplicates the rest, so naming
+/// the same folder twice costs nothing.
+// Compiled everywhere, called from the macOS branch and from the test below.
+// That is the point: while this decision lived inside `cfg(macos)` it was
+// unreachable from the machine this is developed on, which is how it shipped.
+// `dead_code` only — nothing here silences a `clippy.toml` rule.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn macos_candidates(configured: Option<PathBuf>, desktop: Option<PathBuf>) -> Vec<PathBuf> {
+    [configured, desktop].into_iter().flatten().collect()
 }
 
 /// Reads `defaults read com.apple.screencapture location`. This is a local
@@ -215,6 +254,32 @@ fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_macos_desktop_fallback_survives_a_stale_preference() {
+        // `configured.or(desktop)` branched on `Option`-ness, so a
+        // `com.apple.screencapture location` pointing at an unmounted volume
+        // took `~/Desktop` out of play and macOS — the only platform with a
+        // one-element list — watched nothing at all.
+        //
+        // Testable here because the decision is no longer inside the
+        // `cfg(macos)` function: it was unreachable from this machine, which is
+        // how it shipped.
+        let gone = PathBuf::from("/Volumes/gone/Shots");
+        let desktop = PathBuf::from("/Users/someone/Desktop");
+
+        let both = macos_candidates(Some(gone.clone()), Some(desktop.clone()));
+        assert!(
+            both.contains(&gone),
+            "the configured location is still first choice"
+        );
+        assert!(both.contains(&desktop), "and the fallback is still offered");
+
+        // Either one missing is not an error; `settle` filters the rest.
+        assert_eq!(macos_candidates(None, Some(desktop.clone())), vec![desktop]);
+        assert_eq!(macos_candidates(Some(gone.clone()), None), vec![gone]);
+        assert!(macos_candidates(None, None).is_empty());
+    }
+
     use super::*;
 
     #[test]
@@ -230,7 +295,7 @@ mod tests {
         let leaf = root.join("Pictures").join("Screenshots");
         let invented = root.join("OneDrive").join("Pictures").join("Screenshots");
 
-        let watched = settle(vec![leaf.clone(), invented.clone()]);
+        let watched = settle(vec![leaf.clone(), invented.clone()], None);
 
         assert!(
             leaf.is_dir(),
@@ -250,7 +315,7 @@ mod tests {
         std::fs::create_dir_all(root.join("Pictures")).expect("a real dir");
 
         let dir = root.join("Pictures");
-        assert_eq!(settle(vec![dir.clone(), dir.clone()]).len(), 1);
+        assert_eq!(settle(vec![dir.clone(), dir.clone()], None).len(), 1);
 
         let _ = std::fs::remove_dir_all(&root);
     }
