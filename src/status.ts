@@ -48,6 +48,22 @@ export function say(message: string): void {
 export function alertHeight(): number {
   const alert = maybeEl<HTMLElement>("#shelf-alert");
   if (!alert || alert.hasAttribute("hidden")) return 0;
+
+  // Known limit: measured at the width the window is *now*, not the width it
+  // is about to become.
+  //
+  // After a quick look the window is much wider — `discardPreview` deliberately
+  // does not give it back — so a long message wraps to fewer lines here than it
+  // will need at the column's width, `peek` gets a height too small, and
+  // `overflow: hidden` clips the last line. Reported by review; the obvious fix
+  // (force the column's content width before measuring) was tried and reverted,
+  // because the constant it needs is not the 199 a card is and every value
+  // guessed for it moved three existing column-height gates. Sizing this
+  // correctly means measuring after the resize lands, which is a second round
+  // trip this module cannot make on its own.
+  //
+  // Written down rather than half-fixed: the message is still readable, it is
+  // the tail of a long one that can be cut.
   return alert.offsetHeight;
 }
 

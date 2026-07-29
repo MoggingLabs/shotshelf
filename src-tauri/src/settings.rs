@@ -263,6 +263,33 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
         )
         .unwrap_or_default();
 
+    // One field does not fail open: the update check.
+    //
+    // Everything else defaulting is a preference lost, which is a fair trade
+    // for not throwing away a hand-edited file over a typo. This one is a
+    // decision *not to talk to the network*, and `SECURITY.md` promises that
+    // turning it off "sends nothing at all and opens no socket" — by editing
+    // `checkForUpdates` in this very file, which is the single hand-edit the
+    // document instructs.
+    //
+    // A typo in that edit made the file unparseable, `Settings::default()` put
+    // `check_for_updates` back to `true`, and `set_aside` then *renamed the
+    // file away* — so the first-run write below recreated it with the check
+    // enabled and the user's decline destroyed, with nothing on screen because
+    // `get_settings` had succeeded against the defaults.
+    //
+    // So when the file was there and could not be read, this field fails
+    // closed. Losing a preference is recoverable; opening a socket the user
+    // asked to keep shut is not.
+    let current = if settings_unreadable {
+        Settings {
+            check_for_updates: false,
+            ..current
+        }
+    } else {
+        current
+    };
+
     // Pins from their own file, falling back to whatever the preferences file
     // still carries.
     //
@@ -726,6 +753,45 @@ mod tests {
             !roamed.contains("still-pinned"),
             "a capture path reached the roaming file: {roamed}",
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unreadable_settings_file_does_not_switch_the_update_check_back_on() {
+        // The one field that must not fail open.
+        //
+        // `SECURITY.md` promises that turning the check off "sends nothing at
+        // all and opens no socket", by editing `checkForUpdates` in this file —
+        // the single hand-edit it instructs. A typo in that edit made the file
+        // unparseable, `Settings::default()` put the flag back to `true`, and
+        // `set_aside` renamed the file away so the first-run write recreated it
+        // with the check enabled. The user's decision was reversed *and*
+        // destroyed, and nothing said so: `get_settings` succeeds against the
+        // defaults, so the front end reports no failure.
+        let dir = workspace("unreadable-update-check");
+        let roaming = dir.join("settings.json");
+        let local = dir.join("pinned.json");
+
+        // Valid JSON up to the typo, which is how a hand-edit actually fails.
+        std::fs::write(
+            &roaming,
+            "{
+  \"checkForUpdates\": false,
+  \"maxItems\": 50,
+}",
+        )
+        .expect("a settings file");
+
+        let store = load_from(Some(roaming), Some(local));
+
+        assert!(
+            !store.get().check_for_updates,
+            "an unreadable settings file re-enabled the update check"
+        );
+        // And the rest of the defaults are still applied, so this is one field
+        // failing closed rather than the whole load refusing.
+        assert_eq!(store.get().max_items, Settings::default().max_items);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

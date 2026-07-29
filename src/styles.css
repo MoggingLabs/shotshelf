@@ -318,7 +318,9 @@ body {
   opacity: 1;
 }
 
-/* A recording says so permanently: that is identity, not chrome. */
+/* A recording says so wherever the card is not being acted on: that is identity, not chrome.
+ * It does fade on hover, with the rest of the badge row, so the action buttons that
+ * appear there are readable — the word "permanently" was wrong and README said it too. */
 .tile__badge {
   position: absolute;
   bottom: 6px;

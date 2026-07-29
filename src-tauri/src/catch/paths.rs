@@ -121,16 +121,38 @@ fn dedupe_key(dir: &Path) -> PathBuf {
 #[cfg(target_os = "windows")]
 fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
     let path = app.path();
+    let home = path.home_dir().ok();
     let mut dirs = Vec::new();
 
-    if let Ok(pictures) = path.picture_dir() {
+    // `home_dir()` really is the fallback here now.
+    //
+    // The Linux branch's comment claimed Windows already had one — "which
+    // Windows and macOS both avoid by falling back (`home_dir()` and
+    // `~/Desktop` respectively)" — and it did not: `home_dir()` was used only
+    // to add the OneDrive candidate. So on the machine this module's own
+    // history keeps citing, a known folder redirected to an offline share,
+    // `picture_dir()` errs and three of the four candidates simply vanish,
+    // leaving "clipboard watch only" on the primary platform.
+    //
+    // `settle` filters what is not there, so naming a folder that does not
+    // exist costs nothing; naming none costs the user every screenshot.
+    let pictures = path
+        .picture_dir()
+        .ok()
+        .or_else(|| home.as_ref().map(|home| home.join("Pictures")));
+    let videos = path
+        .video_dir()
+        .ok()
+        .or_else(|| home.as_ref().map(|home| home.join("Videos")));
+
+    if let Some(pictures) = pictures {
         dirs.push(pictures.join("Screenshots"));
     }
-    if let Ok(videos) = path.video_dir() {
+    if let Some(videos) = videos {
         dirs.push(videos.join("Captures")); // Xbox Game Bar
         dirs.push(videos.join("Screen Recordings")); // Snipping Tool video
     }
-    if let Ok(home) = path.home_dir() {
+    if let Some(home) = home {
         // Present when OneDrive backs up Pictures but the known folder has not
         // been redirected, so `picture_dir()` still points at the local copy.
         dirs.push(home.join("OneDrive").join("Pictures").join("Screenshots"));

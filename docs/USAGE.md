@@ -136,10 +136,10 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
 - **Quick look** — press space to open the picked capture at readable size, and
   space or Esc to close it. A 199px card in a 225px panel is enough to recognise a screenshot and
   not enough to read one, which is the whole reason this exists.
-- **Edit** — pick one capture and a button appears in the title strip. Five tools,
+- **Edit** — pick one *image* and a button appears (a recording has nothing to mark up, so it stays hidden, as it does while a preview or the editor is open) in the title strip. Five tools,
   and only five: **crop**, **box**, **arrow**, **number** and **redact**. Saving
   produces a new capture on the shelf; the one you marked up is untouched.
-- **Compare** — pick exactly two and a Compare button appears in the title strip. It puts them
+- **Compare** — pick exactly two *images* and a Compare button appears (two recordings show nothing: an `.mp4` cannot be decoded as a picture, and offering the button made it look broken) in the title strip. It puts them
   side by side with whatever changed outlined, as a single new capture you can drag out. The
   **older** capture is the "before", whichever order you picked them in — ctrl-clicking and
   shift-selecting produce different pick orders, so pick order is not one rule but two.
@@ -313,7 +313,7 @@ clearing that folder is your call and not the app's. `posters` holds one frame p
 `handoff` holds smaller copies made for sending, and only if you turned that setting on; it keeps
 the 60 most recent. Both are caches and are safe to delete at any time.
 
-Deleting these folders costs you pins, thumbnails, and any comparisons you have not dragged out
+Deleting these folders costs you saved edits, poster frames and any comparisons you have not dragged out
 yet. Your captures live wherever the OS put them and Shotshelf never moves or deletes them.
 
 ---

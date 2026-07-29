@@ -960,3 +960,16 @@ test("a lost-capture message raised during the launch appearance reshapes the sh
   // Otherwise the full browse list renders into a window resized to a strip.
   await expect(page.locator("#shelf-items")).toHaveAttribute("data-view", "column");
 });
+
+// The `#showing &&` half of `showProblem`'s guard has no gate, and that is
+// written down rather than implied.
+//
+// `busy()` is `dragging || overlayOpen || settingsOpen()`. Two of the three no
+// longer survive a hide — `adoptHidden` discards the overlay and closes the
+// panel — so `#dragging`, which it does not clear, is the only state that can
+// make `busy()` true while the window is down. A spec that started a drag, hid
+// the window and raised a problem passed with the `#showing` term deleted, so
+// it gated nothing; rather than keep a test that cannot fail, the gap is
+// recorded here. What is missing is a way to hold `#dragging` true across the
+// hide from a spec, which the drag harness does not currently offer.
+
