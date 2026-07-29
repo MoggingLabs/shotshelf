@@ -172,3 +172,22 @@ test("a second crop replaces the first in the history as well as the state", () 
   assert.equal(edit.marks().length, 0);
   assert.equal(edit.undo(), false);
 });
+
+test("callout numbering ignores marks that are not callouts", () => {
+  // Both existing fixtures contain callouts and nothing else, so
+  // `nextNumber`'s filter was never exercised — replacing it with
+  // `this.#marks.length + 1` left the suite green.
+  //
+  // The default tool is `box`, so "draw a box, then place a callout" is the
+  // ordinary sequence: without the filter the first callout is numbered 2 and
+  // there is no 1 anywhere on the capture, which is exactly the "jumps from 1
+  // to 3 reads as a missing step" defect the code is written for.
+  const edit = session();
+  edit.add({ kind: "box", x: 1, y: 1, width: 10, height: 10 });
+  edit.add({ kind: "redact", x: 2, y: 2, width: 10, height: 10 });
+
+  assert.equal(edit.nextNumber(), 1, "the first callout is still the first");
+
+  edit.add({ kind: "callout", x: 3, y: 3, number: 1 });
+  assert.equal(edit.nextNumber(), 2);
+});

@@ -870,7 +870,16 @@ mod tests {
             serde_json::to_string(&Settings {
                 max_items: 77,
                 pinned: vec![PinnedItem {
-                    path: "/from/before/the/split.png".into(),
+                    // Through `somewhere`, not a POSIX literal.
+                    //
+                    // `Path::is_absolute()` is false for "/from/before/…" on
+                    // Windows, so `allowed_pins` dropped this pin during
+                    // `load_from` and `pinned` came out empty whatever branch
+                    // ran — on the very platform this suite is developed on.
+                    // The comment above says the fixture "carries a pin on
+                    // purpose" because an empty one could not test the rule;
+                    // it was empty again, one layer down.
+                    path: somewhere("from-before-the-split.png"),
                     kind: CaptureKind::Image,
                     ts: 1,
                 }],

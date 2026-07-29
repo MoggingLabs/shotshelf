@@ -114,6 +114,20 @@ test("discarding an open in flight owes nothing", async () => {
   await opening;
 
   assert.equal(restores.length, 0, "restoring would re-show a hidden window");
+  // The half that actually needs `discard()` to invalidate the ticket.
+  //
+  // Without this line the test was more true the more broken the code got:
+  // `#restore()` is only reachable from the *stale* branch of `show`, so
+  // deleting the invalidation makes that branch unreachable and leaves
+  // `restores.length === 0` trivially satisfied — while the discarded surface
+  // mounts anyway. The sibling test twenty lines up asserts exactly this and
+  // the discard twin omitted it.
+  //
+  // What that costs is documented at `Overlay.discard`: the surface outlives
+  // the hide, and the next capture pops a column with a stale canvas painted
+  // across it — untouchable, because a peeked window never takes focus, so
+  // Escape cannot reach it either.
+  assert.equal(overlay.live, undefined, "the discarded open must not mount");
 });
 
 test("a superseded open does not report the live one as closed", async () => {

@@ -83,7 +83,14 @@ test("a test naming a command does not count as calling it", () => {
   const result = check({
     "src-tauri/src/lib.rs": LIB,
     "src/app.ts": `invoke("wired_command", {});`,
-    "src/app.test.ts": `respond("orphan_command", null);`,
+    // An `invoke(…)`, which is the only shape the scanner sees.
+    //
+    // This was a `respond(…)` call, which matches the invocation pattern
+    // nowhere — so the contents of the test fixture were invisible whether or
+    // not the spec-file exclusion existed, and the assertion held either way.
+    // The exclusion this test is named for was cancelled by its own fixture,
+    // the same shape as a roaming fixture with no pins in it.
+    "src/app.test.ts": `invoke("orphan_command", {});`,
   });
   assert.equal(result.ok, false, "a test is not the app");
 });

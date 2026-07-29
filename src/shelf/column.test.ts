@@ -150,3 +150,15 @@ test("releasing nothing does not reset the deadlines", () => {
   column.releaseAll(COLUMN_MS * 3);
   assert.equal(column.expire(COLUMN_MS + 1), true, "an unheld column ages normally");
 });
+
+test("the column makes room for whatever else is in it", () => {
+  // The second argument had no test at all: every call in this file passed one
+  // argument, so deleting `+ alsoShowing` from `columnHeight` left the suite
+  // green — and that term is the whole fix for the alert strip clipping the
+  // capture it was about, which `geometry.ts` documents at length.
+  //
+  // The only two-argument call in the repo is production code.
+  const oneCard = columnHeight(1);
+  assert.equal(columnHeight(1, 47), oneCard + 47, "the strip is added, not absorbed");
+  assert.equal(columnHeight(3, 0), columnHeight(3), "and zero changes nothing");
+});
