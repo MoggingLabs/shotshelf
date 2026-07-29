@@ -265,7 +265,7 @@ fn target_for(dir: &Path, source: &Path, kind: &str) -> PathBuf {
 /// call the code that ships instead of a copy of it. The previous test
 /// re-implemented this `replace` in its own body and asserted against that,
 /// which left it green when the real call was deleted.
-fn safe_stem(source: &Path) -> String {
+pub(crate) fn safe_stem(source: &Path) -> String {
     let stem = source
         .file_stem()
         .map_or_else(

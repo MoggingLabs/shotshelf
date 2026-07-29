@@ -203,12 +203,18 @@ The gear in the title strip opens the whole surface: how long captures **stay**,
 shelf **holds**, whether to **send smaller copies**, and the **hotkey**. That's the entire list,
 and it's meant to stay short.
 
-Everything lives in one hand-editable JSON file, on device, never synced:
+Two hand-editable JSON files, on device, never synced — and they are two on purpose:
 
-| | Settings file |
-| :-- | :-- |
-| **Windows** | `%APPDATA%\com.mogginglabs.shotshelf\settings.json` |
-| **macOS** | `~/Library/Application Support/com.mogginglabs.shotshelf/settings.json` |
+| | Preferences | Pinned captures |
+| :-- | :-- | :-- |
+| **Windows** | `%APPDATA%\com.mogginglabs.shotshelf\settings.json` | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\pinned.json` |
+| **macOS** | `~/Library/Application Support/com.mogginglabs.shotshelf/settings.json` | `~/Library/Application Support/com.mogginglabs.shotshelf/pinned.json` |
+
+The split is a privacy one. On Windows `%APPDATA%` is the **roaming** profile, which a domain
+roaming profile or Enterprise State Roaming copies to a network share at logoff — and a pin is an
+absolute path to a capture, which carries client and project names as readily as a window title.
+A hotkey and an item cap can roam; five hundred capture paths cannot. Pins live in local app
+data, which nothing syncs, alongside `shotshelf.log`.
 
 The default hotkey is **`CommandOrControl+Shift+S`** — Ctrl+Shift+S on Windows, ⌘⇧S on macOS.
 Worth knowing: a global shortcut takes that combination away from *every* app, and on macOS

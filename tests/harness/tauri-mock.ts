@@ -134,6 +134,9 @@ export function installTauriMock(): void {
    */
   const defaults: Record<string, unknown> = {
     "catch_watch_dirs": [],
+    // Captures from before this launch. Empty by default: a spec that wants
+    // them says so, and every other spec asserts against a shelf it filled.
+    "catch_backfill": [],
     // No `get_settings` here on purpose: `bootShelf` seeds it from
     // `tests/fixtures/default-settings.json`, the same file Rust and the
     // front-end assert their defaults against. A third hand-written copy in

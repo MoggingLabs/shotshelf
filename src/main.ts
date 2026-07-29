@@ -17,7 +17,7 @@ import { Popover } from "./popover.ts";
 import { currentSettings, initSettings, settingsOpen } from "./settings.ts";
 import { textRecognitionAvailable } from "./shelf/bridge.ts";
 import { Shelf, type Capture } from "./shelf/index.ts";
-import { noteScanUnavailable, say, showWatchState } from "./status.ts";
+import { noteScanUnavailable, noteWatchUnavailable, say, showWatchState } from "./status.ts";
 
 // Windows rounds the window through DWM at a fixed 8px, so the panel's own
 // radius has to match it there — see `window::round_corners`. The user agent is
@@ -194,7 +194,23 @@ if (!import.meta.env.DEV) {
 // ── Events out of Rust ───────────────────────────────────────────────────
 
 subscribe(
-  listen<Capture>("capture://new", ({ payload }) => popover.catch(payload)),
+  listen<Capture>("capture://new", ({ payload }) => popover.catch(payload))
+    // Only once the listener is registered, and this ordering is the feature.
+    //
+    // Captures taken while Shotshelf was not running are *pulled*, not pushed:
+    // Rust creates the window and then runs `setup`, so anything emitted there
+    // fires while this bundle is still loading — and Tauri delivers only to
+    // registered handlers and buffers nothing. A push-based backfill was a
+    // silent no-op that the README promised to users. Asking for them here, in
+    // the `.then` of the subscription that would have missed them, is the one
+    // point where the answer cannot be lost.
+    .then(async () => {
+      const missed = await invoke<Capture[]>("catch_backfill");
+      // Added rather than `catch`ed: these are not new, so they must not pop
+      // the column over whatever the user is doing at launch. They are already
+      // oldest-first, and each carries the time it was taken.
+      for (const capture of missed) shelf.add(capture);
+    }),
   "New captures will not appear on the shelf. Restarting should fix it.",
 );
 
@@ -236,7 +252,11 @@ void invoke<string[]>("catch_watch_dirs")
   .then((dirs) => showWatchState(dirs))
   .catch((error: unknown) => {
     console.error("[shotshelf] could not read the watch folders", error);
-    say("The catch engine is unavailable — no captures will be picked up.");
+    // The indicator is told too. Only the `.then` used to set it, so the app's
+    // total failure left the dot with no state at all and the sole signal was
+    // an alert that erases itself after twelve seconds.
+    noteWatchUnavailable();
+    say("The catch engine is unavailable — no captures will be picked up. Restarting should fix it.");
   })
   // Its own chain, deliberately. Asking whether captures can be checked for
   // credentials is advisory, and hanging it off the watch-folder call meant a

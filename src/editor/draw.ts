@@ -43,13 +43,10 @@ export function paint(
   session: EditSession,
   scale: number,
 ): void {
-  const region = session.exportRect();
-
   context.save();
-  context.scale(scale, scale);
   // Everything below is in image pixels with the crop's origin at zero, so a
   // mark drawn at (x, y) lands at (x, y) whether or not there is a crop.
-  context.translate(-region.x, -region.y);
+  inImageSpace(context, session, scale);
 
   context.drawImage(picture, 0, 0);
 
@@ -69,12 +66,44 @@ export function paint(
   context.restore();
 }
 
-function drawMark(context: CanvasRenderingContext2D, mark: Mark): void {
+/**
+ * How a mark is stroked, in one place.
+ *
+ * The live preview under the pointer used to set `"#f59e0b"` and `3` itself,
+ * because `INK` and `OUTLINE_WIDTH` were module-private here — so the
+ * rectangle you dragged had square corners and the one that landed a
+ * millisecond later had round joins, and recolouring a mark would have changed
+ * only half of it. Two painters of the same thing is exactly what `paint`'s
+ * own docstring says sharing this module exists to prevent.
+ */
+export function inkStyle(context: CanvasRenderingContext2D): void {
   context.strokeStyle = INK;
   context.fillStyle = INK;
   context.lineWidth = OUTLINE_WIDTH;
   context.lineJoin = "round";
   context.lineCap = "round";
+}
+
+/**
+ * Put the context into image space: capture pixels, crop origin at zero.
+ *
+ * The caller is responsible for `save`/`restore`. Shared for the same reason
+ * as the style — `paint` and the live preview both need it, and a fourth site
+ * applied the same correction arithmetically instead, which is where the
+ * second-crop bug came from.
+ */
+export function inImageSpace(
+  context: CanvasRenderingContext2D,
+  session: EditSession,
+  scale: number,
+): void {
+  const region = session.exportRect();
+  context.scale(scale, scale);
+  context.translate(-region.x, -region.y);
+}
+
+function drawMark(context: CanvasRenderingContext2D, mark: Mark): void {
+  inkStyle(context);
 
   switch (mark.kind) {
     case "box":

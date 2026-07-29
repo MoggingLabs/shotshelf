@@ -340,3 +340,84 @@ test("pins come back when the settings read loses a start-up race and wins the r
     .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("set_pinned").length))
     .toBeGreaterThan(0);
 });
+
+test("captures taken while the app was closed come back on the next launch", async ({ page }) => {
+  // Shotshelf only hears about a capture from a watcher, and a watcher only
+  // runs while the app does — so before this, every restart lost everything
+  // taken since the last one, while the README promised the opposite.
+  //
+  // Pulled, not pushed, and that is the whole point of the test. The first
+  // version emitted `capture://new` from a thread spawned during Rust's
+  // `setup`, which fires while this bundle is still loading — and Tauri
+  // delivers only to registered handlers and buffers nothing, so the feature
+  // was a silent no-op. Asserting on tiles rather than on the call proves the
+  // answer actually arrived somewhere the user can see.
+  await page.addInitScript(() => {
+    window.__shotshelfStubs__ = {
+      catch_backfill: [
+        { path: "/captures/tall.png", kind: "image", ts: 1 },
+        { path: "/captures/wide.png", kind: "image", ts: 2 },
+      ],
+    };
+  });
+  await bootShelf(page);
+  await openBrowse(page);
+
+  await expect(page.locator(".tile")).toHaveCount(2);
+  // Newest at the top, from the time each was *taken* — not the launch time,
+  // which would put yesterday's screenshots under "Today" and restart their
+  // retention clock on every launch.
+  await expect(page.locator(".tile").first()).toHaveAttribute("title", /wide\.png/);
+});
+
+test("a launch with nothing missed does not pop the column", async ({ page }) => {
+  // Backfilled captures are added, not `catch`ed: they are not new, so they
+  // must not throw the column over whatever the user is doing at launch.
+  await page.addInitScript(() => {
+    window.__shotshelfStubs__ = {
+      catch_backfill: [{ path: "/captures/wide.png", kind: "image", ts: 1 }],
+    };
+  });
+  await bootShelf(page);
+
+  await expect(page.locator(".tile")).toHaveCount(1);
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("show_shelf").length)).toBe(0);
+});
+
+test("the watching indicator is not green when nothing is being watched", async ({ page }) => {
+  // Rust reports the folders it is *actually* watching — `folders::start` drops
+  // any the watcher refused — so an empty list means the app's one job is not
+  // happening. The dot was turned green unconditionally, which undid that fix
+  // one line into the front end: an exhausted inotify limit, a declined macOS
+  // permission or a folder redirected to an offline share all looked healthy.
+  //
+  // The harness answers `catch_watch_dirs` with `[]` by default, so this was
+  // the untested default rather than an exotic case.
+  await bootShelf(page);
+
+  await expect(page.locator("#shelf-mark")).not.toHaveClass(/shelf__mark--live/);
+  await expect(page.locator("#shelf-alert")).toContainText(/No capture folders are being watched/i);
+});
+
+test("the watching indicator is green when a folder really is watched", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__shotshelfStubs__ = { catch_watch_dirs: ["/home/someone/Pictures"] };
+  });
+  await bootShelf(page);
+
+  await expect(page.locator("#shelf-mark")).toHaveClass(/shelf__mark--live/);
+  await expect(page.locator("#shelf-mark")).toHaveAttribute("title", /Pictures/);
+});
+
+test("an unreachable catch engine is not shown as healthy either", async ({ page }) => {
+  // Distinct from watching nothing: this is the app not knowing. Only the
+  // `.then` set the indicator, so a rejection left the dot with no state and
+  // no tooltip, and the sole signal erased itself after twelve seconds.
+  await page.addInitScript(() => {
+    window.__shotshelfStubs__ = { catch_watch_dirs: { __rejects__: "engine is down" } };
+  });
+  await bootShelf(page);
+
+  await expect(page.locator("#shelf-mark")).not.toHaveClass(/shelf__mark--live/);
+  await expect(page.locator("#shelf-mark")).toHaveAttribute("title", /could not reach/i);
+});

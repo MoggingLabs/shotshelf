@@ -129,7 +129,13 @@ fn is_write(kind: &EventKind) -> bool {
 }
 
 /// Half-written or sidecar files the writer will clean up itself.
-fn is_partial(path: &Path) -> bool {
+///
+/// `pub(super)` so `catch::scan` applies the same rule. It did not, and
+/// `._Screenshot.png` — a macOS AppleDouble stub, present beside every real
+/// file on any exFAT or SMB volume — keeps the `.png` extension and passes
+/// `kind_of`. A first launch on macOS would have filled the shelf with 4 KB
+/// resource forks rendered as broken images.
+pub(super) fn is_partial(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return true;
     };

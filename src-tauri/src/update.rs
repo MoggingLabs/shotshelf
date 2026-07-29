@@ -54,10 +54,10 @@ pub fn check_on_launch<R: Runtime>(app: &AppHandle<R>, wanted: bool) {
         match updater {
             Ok(updater) => match updater.check().await {
                 Ok(Some(update)) => {
-                    println!(
-                        "shotshelf: update {} available (running {})",
+                    crate::diag::info(&format!(
+                        "update {} available (running {})",
                         update.version, update.current_version
-                    );
+                    ));
                     // Told, not done. The shelf mentions it once; nothing is
                     // downloaded and nothing is replaced.
                     let _ = app.emit(UPDATE_EVENT, update.version.clone());

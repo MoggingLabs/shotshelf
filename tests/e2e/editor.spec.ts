@@ -846,3 +846,42 @@ test("the crop guide still frames the selection on a second crop", async ({ page
   expect(guided[3]).toBe(255);
   expect(guided).toEqual(before);
 });
+
+test("the mark under the pointer looks like the mark that lands", async ({ page }) => {
+  // The live preview set its own `strokeStyle` and `lineWidth` and neither
+  // `lineJoin` nor `lineCap`, because the constants were module-private to
+  // `draw.ts`. So the rectangle you dragged had square corners and the one that
+  // landed a millisecond later had round ones, and recolouring a mark would
+  // have changed only half of it.
+  //
+  // Sampled on the stroke itself, mid-drag and after release, at a point on the
+  // top edge away from any corner — the two must be the same ink.
+  await openEditor(page);
+  await page.locator('.editor__tool[data-tool="box"]').click();
+
+  const box = await page.locator(".editor__canvas").boundingBox();
+  expect(box).not.toBeNull();
+  const from: [number, number] = [box!.width * 0.25, box!.height * 0.3];
+  const to: [number, number] = [box!.width * 0.75, box!.height * 0.7];
+  // What this can and cannot see, stated because it was measured.
+  //
+  // It catches the divergence that matters — the two using different **ink**,
+  // so recolouring a mark changes only the half you are not looking at.
+  // Verified by giving the preview its own colour: the test fails.
+  //
+  // It does *not* catch the `lineJoin`/`lineCap` half of the same divergence.
+  // At a 3px stroke a round join and a miter join at 90° differ by less than a
+  // pixel after antialiasing, and neither an edge nor a corner sample can tell
+  // them apart. That is worth knowing rather than papering over: the sharing
+  // is still right, and this test guards the part of it that is observable.
+  const atCorner: [number, number] = [box!.width * 0.25 - 1, box!.height * 0.3 - 1];
+
+  await page.mouse.move(box!.x + from[0], box!.y + from[1]);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + to[0], box!.y + to[1], { steps: 6 });
+  const previewed = await inkAt(page, ...atCorner);
+  await page.mouse.up();
+  const committed = await inkAt(page, ...atCorner);
+
+  expect(previewed).toEqual(committed);
+});

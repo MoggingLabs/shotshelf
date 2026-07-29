@@ -24,10 +24,24 @@
 //! constraint, and the plugin should replace this the moment the manifest can
 //! be touched.
 //!
-//! **Nothing sensitive goes through here.** The same rule the emit path already
-//! follows: file *names*, never paths, never window titles, never recognised
-//! text. A capture's path carries client and project names, and this writes to
-//! a file that outlives the session.
+//! **What may go through here, exactly.** Two things, and no others:
+//!
+//! * **Watch-folder paths.** A folder the user chose, and the only useful
+//!   answer to "why is nothing appearing" — which is what this file exists to
+//!   answer, and what `docs/USAGE.md` tells the user to attach to a report.
+//! * **Capture *file names*.** Never full capture paths.
+//!
+//! Never: a capture's directory, a window title, or recognised text. The
+//! reasoning is `catch/mod.rs`'s — a capture's *path* carries client and
+//! project names as readily as a window title does — and it applies with more
+//! force here, because this file outlives the session.
+//!
+//! The distinction is not a hedge. A user pointing `SHOTSHELF_WATCH_DIRS` at
+//! `D:\Clients\Acme\Captures` has told Shotshelf to watch that folder and
+//! needs to see it named when the watch fails; they have not asked for every
+//! screenshot's full path written down. An earlier version of this paragraph
+//! said "never paths" while three call sites logged folder paths, which is the
+//! defect this whole review cycle keeps finding.
 
 use std::io::Write;
 use std::path::PathBuf;

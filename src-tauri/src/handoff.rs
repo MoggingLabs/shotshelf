@@ -102,51 +102,25 @@ fn sized_copy<R: Runtime>(app: &AppHandle<R>, source: &Path) -> Result<Option<Pa
 ///
 /// The extension has to change because the bytes really are PNG, and handing
 /// over a file whose contents contradict its name breaks whatever opens it.
-/// Everything before the extension is the original's, because the module's
-/// promise at the top of this file is that a drop produces the file the user
-/// recognises.
+/// Everything before it is the original's, because the module's promise at the
+/// top of this file is that a drop produces the file the user recognises.
 ///
 /// Appending rather than `with_extension`, which is what this was and which
-/// quietly broke that promise. `with_extension` replaces everything after the
-/// **last dot of the stem** — and macOS names screenshots
-/// `Screenshot 2026-07-27 at 1.30.12 PM.png` by default, whose stem ends
-/// `1.30.12 PM`. So the handed-over file arrived as
-/// `Screenshot 2026-07-27 at 1.30.png`: a different timestamp, silently, on a
-/// first-class platform's out-of-the-box naming.
+/// quietly broke that promise: `with_extension` replaces everything after the
+/// **last dot of the stem**, and macOS names screenshots
+/// `Screenshot 2026-07-27 at 1.30.12 PM.png` by default. The handed-over file
+/// arrived as `Screenshot 2026-07-27 at 1.30.png` — a different timestamp,
+/// silently, on a first-class platform's out-of-the-box naming.
 ///
-/// `OsString` rather than a `String`, so a capture whose name is not valid
-/// UTF-8 keeps its bytes instead of being replaced or dropped.
-fn handoff_name(source: &Path) -> std::ffi::OsString {
-    let stem = source.file_stem().unwrap_or_default();
-
-    // Separators and colons out, the same rule `edit.rs::safe_stem` applies and
-    // for the same reason: `PathBuf::join` **truncates its base** when the
-    // pushed component carries a Windows prefix. A capture named
-    // `D:evil.png` — reachable from a synced or network volume, where a
-    // filename may contain a colon Windows itself forbids — gave a stem of
-    // `D:evil`, and joining that onto the cache directory produced a
-    // drive-relative path outside it.
-    //
-    // `edit.rs` documented that mechanism in full and asserted containment; one
-    // module away, this did neither. The two names are not merged because they
-    // differ deliberately — this stays `OsString` so a capture whose name is
-    // not valid UTF-8 keeps its bytes — so what is shared is the rule, stated
-    // here, and the containment assertion, stated in both test modules.
-    let cleaned: std::ffi::OsString = stem.to_string_lossy().replace([':', '/', '\\'], "_").into();
-
-    // A name that is nothing, or nothing but dots, is a relative path in
-    // disguise or no name at all. Either would target the cache directory
-    // itself.
-    let bare = cleaned.to_string_lossy().trim().is_empty()
-        || cleaned.to_string_lossy().chars().all(|c| c == '.');
-
-    let mut name = if bare {
-        std::ffi::OsString::from("capture")
-    } else {
-        cleaned
-    };
-    name.push(".png");
-    name
+/// The stem itself comes from `edit::safe_stem`, shared rather than restated.
+/// Both modules join a name onto a directory they own, so both need the same
+/// containment rule; this file had its own copy, under a comment claiming they
+/// could not be merged because this one "stays `OsString` so a capture whose
+/// name is not valid UTF-8 keeps its bytes". It did not — the very next line
+/// called `to_string_lossy`, which has already replaced those bytes. The sole
+/// stated reason for the duplicate was a property the code did not have.
+fn handoff_name(source: &Path) -> String {
+    format!("{}.png", crate::edit::safe_stem(source))
 }
 
 fn cache_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {

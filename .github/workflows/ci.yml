@@ -115,9 +115,16 @@ jobs:
         if: '!cancelled()'
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
+      # `--all-targets`, which runs lib, bin and integration tests but not
+      # doctests. The crate has none — every Rust test is a `#[cfg(test)] mod`
+      # — so nothing is lost, and it keeps this identical to what
+      # `npm run gate:rust` runs locally. Plain `cargo test` always invokes
+      # rustdoc, which Windows Smart App Control blocks on the development
+      # machine (os error 4551), so the two commands could not otherwise be
+      # the same and README's "npm run gate runs the lot" would be false again.
       - name: Rust tests
         if: '!cancelled()'
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
 
       - name: Build app
         if: '!cancelled()'

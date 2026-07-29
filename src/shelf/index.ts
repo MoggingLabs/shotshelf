@@ -33,7 +33,7 @@ import { armDrag, beginDrag } from "./drag.ts";
 import { columnHeight } from "./geometry.ts";
 import { Selection } from "./selection.ts";
 import { ShelfStore } from "./store.ts";
-import { type Capture, captureId, type ShelfItem } from "./types.ts";
+import { type Capture, captureId, isEditable, type ShelfItem } from "./types.ts";
 import { ShelfView } from "./view/index.ts";
 import {
   discardPreview,
@@ -333,7 +333,7 @@ export class Shelf {
     // pressing it did nothing at all and said nothing either.
     this.#options.onSelectionChange(
       picked.length,
-      picked.length === 1 && picked[0]?.kind === "image",
+      picked.length === 1 && picked[0] !== undefined && isEditable(picked[0]),
     );
   }
 
@@ -421,7 +421,7 @@ export class Shelf {
     // predated it.
     const [item] = this.#pickedItems();
     if (!item) return;
-    if (item.kind === "video") {
+    if (!isEditable(item)) {
       // The control should not be offered at all, and is not; this is the
       // keyboard path, where `e` reaches whatever happens to be picked.
       this.#options.onProblem("A recording cannot be marked up.");

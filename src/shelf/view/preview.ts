@@ -20,7 +20,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 
 import { browseShelf, previewShelf } from "../bridge.ts";
 import { Overlay, readable } from "../overlay.ts";
-import type { ShelfItem } from "../types.ts";
+import { canPreview, type ShelfItem } from "../types.ts";
 
 interface Shown {
   id: string;
@@ -49,7 +49,7 @@ export function previewedId(): string | undefined {
  * preview of a video, and playing one is a media player, not a shelf.
  */
 export async function showPreview(item: ShelfItem, host: HTMLElement): Promise<void> {
-  if (item.kind === "video") return;
+  if (!canPreview(item)) return;
 
   await overlay.show(async (stale) => {
     // The picture is measured before the window is asked for, because the

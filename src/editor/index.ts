@@ -15,8 +15,8 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 
 import { browseShelf, previewShelf, saveEdit } from "../shelf/bridge.ts";
-import type { ShelfItem } from "../shelf/types.ts";
-import { paint, paintCropGuide } from "./draw.ts";
+import { isEditable, type ShelfItem } from "../shelf/types.ts";
+import { inImageSpace, inkStyle, paint, paintCropGuide } from "./draw.ts";
 import { Overlay, readable } from "../shelf/overlay.ts";
 import { EditSession, type Rect, type Tool } from "./session.ts";
 
@@ -83,7 +83,7 @@ export async function openEditor(
   host: HTMLElement,
   callbacks: EditorHost,
 ): Promise<void> {
-  if (item.kind === "video") return;
+  if (!isEditable(item)) return;
 
   const mounted = await overlay.show(async (stale) => {
     const picture = new Image();
@@ -442,11 +442,12 @@ function preview(rect: Rect): void {
   if (!context) return;
 
   context.save();
-  context.scale(live.scale, live.scale);
-  const region = live.session.exportRect();
-  context.translate(-region.x, -region.y);
-  context.strokeStyle = "#f59e0b";
-  context.lineWidth = 3;
+  // The same transform and the same ink `paint` uses, rather than a second
+  // copy of each. This set `"#f59e0b"` and `3` by hand and set neither
+  // `lineJoin` nor `lineCap`, so the rectangle under the pointer had square
+  // corners and the one that landed had round ones.
+  inImageSpace(context, live.session, live.scale);
+  inkStyle(context);
   context.strokeRect(rect.x, rect.y, rect.width, rect.height);
   context.restore();
 }

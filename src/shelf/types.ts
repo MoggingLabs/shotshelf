@@ -47,6 +47,31 @@ export interface Capture {
  * hanging a node off the data is how a rebuilt view leaves stale references
  * behind.
  */
+/**
+ * Whether a capture can be marked up or looked at full size.
+ *
+ * A recording can be neither: a still frame blown up is not a preview of a
+ * video, playing one makes this a media player rather than a shelf, and there
+ * is nothing to annotate on a clip.
+ *
+ * Named because the rule was written out at five sites — the Edit control, the
+ * keyboard path, `openEditor`, `showPreview` and the card — as
+ * `kind === "video"`, plus one inverted `kind === "image"` that is equivalent
+ * only because `CaptureKind` happens to have exactly two members. Add a third
+ * and the Edit control hides itself, reading "not an image", while `openEditor`
+ * accepts it. That is the same defect `allowed_pins` was extracted to fix on
+ * the Rust side: one rule, several copies, and a fix that lands in some of
+ * them.
+ */
+export function isEditable(item: Pick<ShelfItem, "kind">): boolean {
+  return item.kind === "image";
+}
+
+/** Same rule, different question — see {@link isEditable}. */
+export function canPreview(item: Pick<ShelfItem, "kind">): boolean {
+  return item.kind === "image";
+}
+
 export interface ShelfItem extends Capture {
   readonly id: string;
   /** Pinned captures ignore retention and the item cap, and survive a restart. */

@@ -219,13 +219,18 @@ quietly handing you a smaller file than the one you asked for is not a decision 
 should make for you. Your original is never modified either way; the smaller copy is a
 separate file, and it keeps the original's name so a drop still produces the file you expect.
 
-Settings are one JSON file you can also edit by hand:
+Settings are two JSON files you can also edit by hand — preferences, and your pins:
 
-| | |
-| :-- | :-- |
-| **Windows** | `%APPDATA%\com.mogginglabs.shotshelf\settings.json` |
-| **macOS** | `~/Library/Application Support/com.mogginglabs.shotshelf/settings.json` |
-| **Linux** | `~/.config/com.mogginglabs.shotshelf/settings.json` |
+| | Preferences | Pinned captures |
+| :-- | :-- | :-- |
+| **Windows** | `%APPDATA%\com.mogginglabs.shotshelf\settings.json` | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\pinned.json` |
+| **macOS** | `~/Library/Application Support/com.mogginglabs.shotshelf/settings.json` | `~/Library/Application Support/com.mogginglabs.shotshelf/pinned.json` |
+| **Linux** | `~/.config/com.mogginglabs.shotshelf/settings.json` | `~/.local/share/com.mogginglabs.shotshelf/pinned.json` |
+
+They are separate because on Windows the first location roams to a network share on a managed
+machine and the second does not, and a pin is an absolute path to one of your captures. `pinned.json`
+also records how recent the newest capture Shotshelf has seen was, which is how a relaunch knows
+not to bring back something you removed.
 
 **About the default hotkey:** a global shortcut takes that combination away from every other
 app. On macOS `⌘⇧S` is Save As almost everywhere, so it's worth changing to something you don't
@@ -286,7 +291,10 @@ Then, if you want its leftovers gone too:
 
 - **Safe to delete, always** — `posters` and `handoff`. Both are caches of things Shotshelf can
   work out again from your captures. Deleting them costs a few seconds of re-reading.
-- **Safe to delete, and you lose your settings** — the settings folder. Pins go with it.
+- **Safe to delete, and you lose your settings** — the settings folder. Your **pins are not in
+  here**: they live in the local app data folder alongside `shotshelf.log`, so deleting only the
+  settings folder resets your preferences and leaves your pinned captures on the shelf. Delete
+  `pinned.json` too if you want a genuinely clean start.
 - **Read this before deleting** — `clipboard` and `edits`. `clipboard` holds captures taken with
   Win+Shift+S or ⌘⇧⌃4, which never touched your disk anywhere else — **these are originals, and
   Shotshelf is the only place they exist.** `edits` holds the annotated copies and comparisons you
@@ -317,5 +325,6 @@ Shotshelf writes diagnostics to `shotshelf.log` in its local app data directory 
 
 It used to say "run the installed binary from a terminal", which on Windows produces nothing at
 all: a release build sets `windows_subsystem = "windows"` so the app has no console, and every
-diagnostic went nowhere. The log holds file *names* and never paths, window titles or recognised
-text, and it restarts itself once it passes 512 KB.
+diagnostic went nowhere. The log holds the folders Shotshelf was asked to watch and capture *file names*
+— never a capture's folder, a window title, or any recognised text — and it restarts itself once
+it passes 512 KB.

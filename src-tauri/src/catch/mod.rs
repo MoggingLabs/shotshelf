@@ -109,6 +109,13 @@ impl CaptureSink {
             context: crate::enrich::foreground::current(),
         };
 
+        // Move the watermark on, so the next launch does not offer this one
+        // back after the user has removed it. Only ever forwards — see
+        // `SettingsStore::note_capture`.
+        if let Some(store) = app.try_state::<crate::settings::SettingsStore>() {
+            store.note_capture(capture.ts);
+        }
+
         match app.emit(CAPTURE_EVENT, &capture) {
             // Neither the window title nor the folder.
             //
@@ -219,21 +226,6 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
 
     clipboard::start(app, std::sync::Arc::clone(&sink));
 
-    // What landed while Shotshelf was not running, on its own thread.
-    //
-    // A `read_dir` plus a `metadata` per entry across every watch folder, and
-    // one of those folders can be a disconnected network share under
-    // enterprise folder redirection — where each of those calls is a blocking
-    // round trip with a multi-second timeout. Nothing about that belongs on
-    // the thread the window is waiting on: the webview only listens for
-    // `capture://new`, so these arrive whenever they arrive.
-    let backfill_app = app.clone();
-    let backfill_dirs = watching.clone();
-    let backfill_sink = std::sync::Arc::clone(&sink);
-    std::thread::spawn(move || {
-        backfill(&backfill_app, &backfill_dirs, &backfill_sink);
-    });
-
     // The copy-out fallback needs to reach the sink to flag its own clipboard
     // writes, so the shelf doesn't catch what the shelf just copied.
     app.manage(sink);
@@ -246,81 +238,169 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
 
 /// How far back a launch looks for captures it was not running to see.
 ///
-/// Shotshelf only ever hears about a capture from a watcher, and a watcher
-/// only runs while the app does. Install it, use it for a day, reboot — and
-/// the shelf comes back empty, having missed everything taken since. The
-/// README says it "catches every new screenshot automatically", and after any
-/// restart that was false.
+/// Shotshelf only ever hears about a capture from a watcher, and a watcher only
+/// runs while the app does. Install it, use it for a day, reboot — and the
+/// shelf came back empty, having missed everything taken since. The README says
+/// it "catches every new screenshot", and after any restart that was false.
 ///
 /// A day, not everything: this is for the gap between sessions, not for
-/// indexing a Pictures folder. Anything older is history the user already has
-/// a folder for.
+/// indexing a Pictures folder. Anything older is history the user already has a
+/// folder for.
 const BACKFILL_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The most captures a launch will bring back.
 ///
 /// A hard bound, because the alternative is a first run on a machine with four
-/// thousand screenshots filling the shelf with a decade of them. Well under
-/// the default item cap, so a backfill never evicts anything the user pinned.
+/// thousand screenshots filling the shelf with a decade of them. Well under the
+/// default item cap, so a backfill never evicts anything the user pinned.
 const BACKFILL_LIMIT: usize = 20;
 
-/// Shelve captures that landed while Shotshelf was not running.
+/// How recently a file may have changed and still count as finished.
 ///
-/// Through the same sink as the watchers, so de-duplication, the clipboard
-/// echo rule and the event shape are all shared — a backfilled capture is a
-/// capture, not a second kind of thing.
-fn backfill<R: Runtime>(app: &AppHandle<R>, dirs: &[PathBuf], sink: &CaptureSink) {
-    let mut found: Vec<(SystemTime, PathBuf, CaptureKind)> = Vec::new();
-    for dir in dirs {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(kind) = kind_of(&path) else { continue };
-            let Ok(modified) = entry.metadata().and_then(|meta| meta.modified()) else {
-                continue;
-            };
-            found.push((modified, path, kind));
-        }
-    }
+/// A recording in progress has an mtime of *now*. The watcher has a whole
+/// settle loop for that — stability ticks, an empty-file timeout — and a
+/// backfill cannot run one, because it gets a single look at the folder. So it
+/// declines anything this recent and leaves it to the watcher, which is already
+/// watching that folder and will emit it properly once it stops growing.
+///
+/// That also removes the only way the two paths could double-shelve one
+/// capture: a file the watcher is about to emit is a file backfill skips.
+const BACKFILL_SETTLED: Duration = Duration::from_secs(5);
 
-    let chosen = to_backfill(found, SystemTime::now());
+/// Captures that landed while Shotshelf was not running.
+///
+/// **Pulled by the front end, not pushed at it.** This was a thread spawned in
+/// `setup` that emitted `capture://new`, and it delivered nothing: Tauri
+/// creates the window and then runs `setup`, so those events fired within
+/// milliseconds while the webview was still loading its bundle — and Tauri
+/// delivers only to registered handlers and buffers nothing. The whole feature
+/// was a no-op that two documents promised to users. `main.ts` already names
+/// this exact failure for `update://available`, which survives only because a
+/// network round trip is slower than a page load.
+///
+/// So it is a command, the shape pinned captures already use: the front end
+/// asks once it is listening, and gets an answer it cannot miss.
+#[tauri::command]
+pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Vec<Capture> {
+    let Some(engine) = app.try_state::<CatchEngine>() else {
+        return Vec::new();
+    };
+    let dirs = engine.watching.clone();
+    let since = app
+        .try_state::<crate::settings::SettingsStore>()
+        .map_or(0, |store| store.last_capture_ms());
+
+    // On a blocking worker: a `read_dir` plus a `metadata` per entry across
+    // every watch folder, and one of those folders can be a disconnected SMB
+    // share under enterprise folder redirection, where each call is a round
+    // trip with a multi-second timeout.
+    let found = tauri::async_runtime::spawn_blocking(move || scan(&dirs))
+        .await
+        .unwrap_or_default();
+
+    let chosen = to_backfill(found, SystemTime::now(), since);
     if !chosen.is_empty() {
         crate::diag::info(&format!(
             "{} captures from before this launch",
             chosen.len()
         ));
     }
-    for (path, kind) in chosen {
-        sink.emit(app, &path, kind, Source::Folder);
-    }
+    chosen
 }
 
-/// Which of the files found should be shelved, in the order they go on.
+/// Everything on disk that could be a capture, with when it was taken.
+fn scan(dirs: &[PathBuf]) -> Vec<(SystemTime, PathBuf, CaptureKind)> {
+    let mut found = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // The watcher's own admission rule, shared rather than restated.
+            // Without it a macOS `._Screenshot.png` — an AppleDouble stub that
+            // sits beside every real file on exFAT and SMB volumes, keeps the
+            // `.png` extension and passes `kind_of` — is shelved as a
+            // screenshot, 4 KB of resource fork rendered as a broken image.
+            if folders::is_partial(&path) {
+                continue;
+            }
+            let Some(kind) = kind_of(&path) else { continue };
+            let Ok(meta) = entry.metadata() else { continue };
+            // A directory named `shots.png` is not a capture, and a zero-length
+            // file is a placeholder its writer has not filled in yet.
+            if !meta.is_file() || meta.len() == 0 {
+                continue;
+            }
+            let Ok(modified) = meta.modified() else {
+                continue;
+            };
+            found.push((modified, path, kind));
+        }
+    }
+    found
+}
+
+/// Which of the files found should be shelved, and when each was taken.
 ///
 /// Separated from the `read_dir` so the rule can be stated without a
-/// filesystem or a clock: what it decides — how far back, how many, and in
-/// which order — is the whole of what a user sees after a restart.
+/// filesystem or a clock: what it decides — how far back, how recent is too
+/// recent, how many, in which order, and what is already known — is the whole
+/// of what a user sees after a restart.
 fn to_backfill(
     mut found: Vec<(SystemTime, PathBuf, CaptureKind)>,
     now: SystemTime,
-) -> Vec<(PathBuf, CaptureKind)> {
+    since_ms: u64,
+) -> Vec<Capture> {
     let cutoff = now - BACKFILL_WINDOW;
-    found.retain(|(modified, _, _)| *modified >= cutoff);
+    let settled = now - BACKFILL_SETTLED;
+
+    found.retain(|(modified, _, _)| {
+        // Newer than the newest capture the shelf has already seen.
+        //
+        // Without this, backfill undoes `Remove`. Taking a capture off the
+        // shelf is deliberately shelf-only — the file stays on disk, which is
+        // the app's central promise — so every removed capture from the last
+        // 24 hours came straight back on the next launch, along with anything
+        // retention had already expired. A user who curates their shelf and
+        // then reboots got all twenty back. `Remove` and a naive backfill
+        // cancel each other out exactly.
+        as_ms(*modified) > since_ms && *modified >= cutoff && *modified <= settled
+    });
 
     // Newest first to apply the cap, so the cap keeps the most recent...
     found.sort_unstable_by_key(|(modified, _, _)| std::cmp::Reverse(*modified));
     found.truncate(BACKFILL_LIMIT);
     // ...then oldest first onto the shelf, so the order the user sees matches
-    // the order they took them in. The shelf shows newest at the top, and it
-    // builds that by prepending.
+    // the order they took them in. The shelf shows newest at the top and builds
+    // that by prepending.
     found.reverse();
 
     found
         .into_iter()
-        .map(|(_, path, kind)| (path, kind))
+        .map(|(modified, path, kind)| Capture {
+            path: path.display().to_string(),
+            kind,
+            // **When it was taken**, not when it was found. `emit` stamps
+            // `now_ms()` because a live capture is being taken as it runs; a
+            // backfilled one is not, and stamping the launch time put
+            // yesterday's screenshots under "Today" and restarted the retention
+            // clock on every launch — so with a one-hour window they would
+            // never expire.
+            ts: as_ms(modified),
+            // Deliberately absent. The foreground context answers "what was in
+            // front when this landed", and for a capture taken before this
+            // process existed that is unknowable. Reading it now would answer
+            // "Shotshelf".
+            context: crate::enrich::foreground::Context::default(),
+        })
         .collect()
+}
+
+fn as_ms(at: SystemTime) -> u64 {
+    at.duration_since(UNIX_EPOCH).map_or(0, |since| {
+        u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+    })
 }
 
 /// Let the webview render captures straight off disk.
@@ -397,66 +477,155 @@ pub(crate) fn now_ms() -> u64 {
 mod tests {
     use super::*;
 
+    const NOW_SECS: u64 = 1_000_000;
+
+    fn now() -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS)
+    }
+
     fn seen(secs_ago: u64, name: &str) -> (SystemTime, PathBuf, CaptureKind) {
         (
-            SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000 - secs_ago),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - secs_ago),
             PathBuf::from(name),
             CaptureKind::Image,
         )
     }
 
+    /// Old enough to have settled, recent enough to be inside the window.
+    fn ordinary(secs_ago: u64, name: &str) -> (SystemTime, PathBuf, CaptureKind) {
+        seen(secs_ago + BACKFILL_SETTLED.as_secs(), name)
+    }
+
+    fn names(chosen: &[Capture]) -> Vec<&str> {
+        chosen.iter().map(|c| c.path.as_str()).collect()
+    }
+
     #[test]
     fn a_launch_brings_back_recent_captures_oldest_first() {
-        // What a user sees after a reboot. Shotshelf only hears about a
-        // capture from a watcher, and a watcher only runs while the app does —
-        // so before this, every restart lost everything taken since the last
-        // one, while the README claimed it "catches every new screenshot
-        // automatically".
-        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        // What a user sees after a reboot. Shotshelf only hears about a capture
+        // from a watcher, and a watcher only runs while the app does — so
+        // before this, every restart lost everything taken since the last one
+        // while the README claimed it "catches every new screenshot".
         let chosen = to_backfill(
             vec![
-                seen(60, "newest.png"),
-                seen(600, "older.png"),
-                seen(30, "newer.png"),
+                ordinary(60, "newest.png"),
+                ordinary(600, "older.png"),
+                ordinary(30, "newer.png"),
             ],
-            now,
+            now(),
+            0,
         );
 
         assert_eq!(
-            chosen.iter().map(|(p, _)| p.as_path()).collect::<Vec<_>>(),
-            vec![
-                Path::new("older.png"),
-                Path::new("newest.png"),
-                Path::new("newer.png")
-            ],
+            names(&chosen),
+            vec!["older.png", "newest.png", "newer.png"],
             "oldest first, so the shelf's newest-on-top order matches when they were taken",
         );
     }
 
     #[test]
-    fn a_launch_does_not_index_the_pictures_folder() {
-        // Two bounds, and both matter on a first run. Anything older than the
-        // window is history the user already has a folder for, and a machine
-        // with four thousand screenshots must not have them all shelved.
-        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    fn a_backfilled_capture_is_dated_when_it_was_taken() {
+        // Not when it was found. `emit` stamps `now_ms()` because a live
+        // capture is being taken as it runs; stamping a backfilled one the same
+        // way put yesterday's screenshots under "Today" and restarted the
+        // retention clock every launch — so with a one-hour window they would
+        // never expire at all.
+        let taken = ordinary(3_600, "an-hour-ago.png");
+        let chosen = to_backfill(vec![taken.clone()], now(), 0);
 
+        assert_eq!(chosen.len(), 1);
+        assert_eq!(chosen[0].ts, as_ms(taken.0));
+        assert_ne!(chosen[0].ts, as_ms(now()), "not the launch time");
+    }
+
+    #[test]
+    fn a_launch_does_not_undo_remove() {
+        // Taking a capture off the shelf is shelf-only by design — the file
+        // stays on disk — so a backfill that looks only at the last 24 hours
+        // brought every removed capture straight back, along with anything
+        // retention had already expired. A user who curates their shelf and
+        // reboots got all of it back. The watermark is what makes `Remove`
+        // stick across a restart.
+        let watermark = as_ms(ordinary(300, "x").0);
+        let chosen = to_backfill(
+            vec![
+                ordinary(600, "removed-last-session.png"),
+                ordinary(300, "exactly-the-watermark.png"),
+                ordinary(60, "taken-while-the-app-was-closed.png"),
+            ],
+            now(),
+            watermark,
+        );
+
+        assert_eq!(
+            names(&chosen),
+            vec!["taken-while-the-app-was-closed.png"],
+            "only what the shelf has never been told about",
+        );
+    }
+
+    #[test]
+    fn a_capture_still_being_written_is_left_to_the_watcher() {
+        // A recording in progress has an mtime of *now*. Backfill gets one look
+        // at the folder and cannot run the watcher's settle loop, so shelving
+        // it here would hand over a truncated file — the exact failure
+        // `folders.rs` exists to prevent. Leaving it also removes the only way
+        // the two paths could double-shelve one capture.
+        let chosen = to_backfill(
+            vec![
+                seen(1, "recording-in-progress.mp4"),
+                ordinary(60, "finished.png"),
+            ],
+            now(),
+            0,
+        );
+
+        assert_eq!(names(&chosen), vec!["finished.png"]);
+    }
+
+    #[test]
+    fn a_launch_does_not_index_the_pictures_folder() {
+        // Two bounds, both of which matter on a first run. Anything older than
+        // the window is history the user already has a folder for, and a
+        // machine with four thousand screenshots must not have them all
+        // shelved.
         let stale = to_backfill(
-            vec![seen(BACKFILL_WINDOW.as_secs() + 60, "last-week.png")],
-            now,
+            vec![ordinary(BACKFILL_WINDOW.as_secs() + 60, "last-week.png")],
+            now(),
+            0,
         );
         assert!(stale.is_empty(), "older than the window");
 
-        let flood: Vec<_> = (0..BACKFILL_LIMIT * 5)
-            .map(|n| seen(u64::try_from(n).unwrap(), &format!("shot{n}.png")))
+        // Deliberately shuffled, so the cap is tested against the *sort* and
+        // not against the order the fixture happened to be built in. Generated
+        // newest-first, the previous version of this passed with the sort
+        // deleted outright.
+        let mut flood: Vec<_> = (0..BACKFILL_LIMIT * 5)
+            .map(|n| ordinary(u64::try_from(n).unwrap() * 10, &format!("shot{n}.png")))
             .collect();
-        let capped = to_backfill(flood, now);
+        flood.rotate_left(37);
+        flood.swap(0, BACKFILL_LIMIT * 2);
+
+        let capped = to_backfill(flood, now(), 0);
         assert_eq!(capped.len(), BACKFILL_LIMIT);
-        // And the cap keeps the newest, not whichever the filesystem listed first.
-        assert!(capped.iter().any(|(p, _)| p == Path::new("shot0.png")));
-        assert!(!capped.iter().any(|(p, _)| p == Path::new("shot99.png")));
+        // The cap keeps the newest — `shot0` is the most recent, `shot99` the
+        // oldest — whatever order they were found in.
+        assert!(names(&capped).contains(&"shot0.png"), "the newest survived");
+        assert!(
+            !names(&capped).contains(&"shot99.png"),
+            "the oldest did not"
+        );
     }
 
-    use super::*;
+    #[test]
+    fn a_backfilled_capture_claims_no_foreground_context() {
+        // "What was in front when this landed" is unknowable for a capture
+        // taken before this process existed, and reading it now would answer
+        // "Shotshelf" — labelling every recovered card with the app that
+        // recovered it.
+        let chosen = to_backfill(vec![ordinary(60, "yesterday.png")], now(), 0);
+        assert!(chosen[0].context.is_empty());
+    }
 
     #[test]
     fn classifies_by_extension_regardless_of_case() {

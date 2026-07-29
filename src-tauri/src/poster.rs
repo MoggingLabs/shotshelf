@@ -371,13 +371,32 @@ fn cache_name(key: u64, duration_ms: Option<u64>) -> String {
     }
 }
 
+/// Which *version of which file* a cached frame belongs to.
+///
+/// Milliseconds, not seconds. `handoff.rs` cites this cache as its precedent —
+/// "the poster cache already keys on path and mtime for exactly this reason" —
+/// and calls serving the previous file's pixels under the new thumbnail "a
+/// disclosure bug rather than a stale cache". At one-second granularity the
+/// precedent was weaker than the thing citing it: re-recording within the same
+/// second served the previous clip's frame. `handoff` closed that at 1 ms; this
+/// had not.
+///
+/// Split from the `Metadata` so the property can be stated with two timestamps
+/// rather than by writing a file, sleeping, and hoping the filesystem records a
+/// distinct mtime — the mistake `handoff::fingerprint`'s docstring records.
 fn cache_key(source: &Path, meta: &std::fs::Metadata) -> u64 {
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|at| at.duration_since(UNIX_EPOCH).ok());
+    version_key(source, modified)
+}
+
+fn version_key(source: &Path, modified: Option<std::time::Duration>) -> u64 {
     let mut hasher = DefaultHasher::new();
     source.hash(&mut hasher);
-    if let Ok(modified) = meta.modified() {
-        if let Ok(since) = modified.duration_since(UNIX_EPOCH) {
-            since.as_secs().hash(&mut hasher);
-        }
+    if let Some(since) = modified {
+        since.as_millis().hash(&mut hasher);
     }
     hasher.finish()
 }
@@ -410,6 +429,39 @@ mod tests {
         // Live captures and some containers report this rather than a time.
         assert_eq!(parse_duration("  Duration: N/A, start: 0.000000"), None);
         assert_eq!(parse_duration("no duration here at all"), None);
+    }
+
+    #[test]
+    fn a_re_recorded_clip_does_not_serve_the_previous_frame() {
+        // `cache_key` had no test at all: reducing it to path-only, dropping
+        // the mtime entirely, left all 108 tests passing while a comment three
+        // lines away claimed the mtime was what stopped a re-recording showing
+        // the old clip's frame.
+        //
+        // Milliseconds, because a screen recorder overwriting its output within
+        // the same second is ordinary, and this cache is cited by `handoff.rs`
+        // as the precedent for treating that as a disclosure bug.
+        let at = |ms| Some(std::time::Duration::from_millis(ms));
+        let clip = Path::new("/clips/demo.mp4");
+
+        assert_ne!(
+            version_key(clip, at(1_700_000_000_000)),
+            version_key(clip, at(1_700_000_000_020)),
+            "same path, different recording, same key",
+        );
+        assert_eq!(
+            version_key(clip, at(1_700_000_000_000)),
+            version_key(clip, at(1_700_000_000_000)),
+            "the same version keys the same way",
+        );
+        assert_ne!(
+            version_key(clip, at(1)),
+            version_key(Path::new("/clips/other.mp4"), at(1)),
+            "two recordings must not share one frame",
+        );
+        // An unreadable timestamp degrades to sharing a key with its other
+        // versions — where this cache was before — rather than panicking.
+        let _ = version_key(clip, None);
     }
 
     #[test]

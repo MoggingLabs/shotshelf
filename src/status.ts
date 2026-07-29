@@ -73,14 +73,45 @@ export function noteScanUnavailable(): void {
 Captures are not checked for credentials on this platform.`;
 }
 
+/**
+ * Show whether the catch engine is actually catching anything.
+ *
+ * `dirs` is what Rust is **really** watching, not what it meant to watch —
+ * `folders::start` drops any directory the watcher refused. So an empty list
+ * here is a genuine "nothing is being watched", and it must not look like
+ * success.
+ *
+ * It did. The dot was turned green unconditionally, so the Rust half of this
+ * fix — reporting the true list — was undone one line later in the front end:
+ * an exhausted inotify limit, a declined macOS permission or a folder
+ * redirected to an offline share all produced an empty list and a green dot.
+ * The alert strip was the only honest signal, and it erases itself after
+ * twelve seconds; the usage guide points the user at this indicator.
+ */
 export function showWatchState(dirs: readonly string[]): void {
   console.info("[shotshelf] watching", dirs);
+  setMark(dirs.length > 0, describeWatch(dirs));
 
-  const mark = maybeEl<HTMLElement>("#shelf-mark");
-  if (mark) {
-    mark.classList.add("shelf__mark--live");
-    mark.title = describeWatch(dirs);
+  if (dirs.length === 0) {
+    say("No capture folders are being watched — captures will not be picked up. See the log.");
   }
+}
 
-  if (dirs.length === 0) say("No capture folders found — watching the clipboard only.");
+/**
+ * The catch engine could not be asked at all.
+ *
+ * Distinct from "watching nothing": this is the app not knowing, which is
+ * worse, and it previously left the dot with no state and no tooltip because
+ * `showWatchState` was only ever called from `.then`.
+ */
+export function noteWatchUnavailable(): void {
+  setMark(false, "Shotshelf could not reach its catch engine.");
+}
+
+/** The one place the indicator's state is set, so the two callers agree. */
+function setMark(live: boolean, title: string): void {
+  const mark = maybeEl<HTMLElement>("#shelf-mark");
+  if (!mark) return;
+  mark.classList.toggle("shelf__mark--live", live);
+  mark.title = title;
 }

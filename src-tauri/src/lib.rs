@@ -64,6 +64,7 @@ pub fn run() {
         }))
         .invoke_handler(tauri::generate_handler![
             catch::catch_watch_dirs,
+            catch::catch_backfill,
             share::prepare_drag,
             share::copy_capture,
             share::describe_capture,
@@ -116,7 +117,20 @@ pub fn run() {
             update::check_on_launch(app.handle(), current.check_for_updates);
 
             // Watch the OS capture folders + the clipboard. Emits `capture://new`.
-            catch::start(app.handle(), &catch::overrides_from_env());
+            //
+            // On a worker, because this can block for a long time. Resolving
+            // the watch folders does `exists`, `is_dir`, `create_dir` and
+            // `canonicalize` per candidate, and opening a watch takes a
+            // directory handle each — and under Windows folder redirection
+            // `picture_dir()` can be a `\server\share\…` path where every
+            // one of those is an SMB round trip with a multi-second timeout.
+            // Run inline it delayed `window::open` below by that whole amount,
+            // with nothing on screen and the event loop not yet started, so the
+            // tray icon was unresponsive too.
+            let engine = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                catch::start(&engine, &catch::overrides_from_env());
+            });
             poster::allow_reading_posters(app.handle());
             // Caches are swept on a timer, not once at launch.
             //

@@ -82,9 +82,13 @@ impl Default for Settings {
 pub struct SettingsStore {
     /// Preferences. May roam.
     path: PathBuf,
-    /// Pinned capture paths. Must not roam — see [`pins_path`].
+    /// Pinned capture paths and the catch watermark. Must not roam — see
+    /// [`pins_path`].
     pins: PathBuf,
     current: Mutex<Settings>,
+    /// The newest capture seen, mirrored in memory so the catch path does not
+    /// read a file per capture.
+    last_capture: Mutex<u64>,
 }
 
 impl SettingsStore {
@@ -119,6 +123,33 @@ impl SettingsStore {
     /// Two files, because they have different rules about leaving the machine.
     /// The preferences file carries everything except `pinned`; the pins file
     /// carries only `pinned`, and lives where nothing syncs it.
+    /// The newest capture the shelf has been told about, in Unix ms.
+    pub fn last_capture_ms(&self) -> u64 {
+        *self
+            .last_capture
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Record that a capture this recent has reached the shelf.
+    ///
+    /// Only ever moves forward: captures do not arrive in order — a backfill
+    /// hands over yesterday's after today's have already landed — and a
+    /// watermark that went backwards would re-offer everything in between on
+    /// the next launch.
+    pub fn note_capture(&self, ts: u64) {
+        let mut newest = self
+            .last_capture
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if ts <= *newest {
+            return;
+        }
+        *newest = ts;
+        drop(newest);
+        self.persist(&self.get());
+    }
+
     fn persist(&self, settings: &Settings) {
         let preferences = Settings {
             pinned: Vec::new(),
@@ -127,7 +158,11 @@ impl SettingsStore {
         if let Err(err) = write(&self.path, &preferences) {
             crate::diag::warn(&format!("could not save settings: {err}"));
         }
-        if let Err(err) = write(&self.pins, &settings.pinned) {
+        let local = LocalState {
+            pinned: settings.pinned.clone(),
+            last_capture_ms: self.last_capture_ms(),
+        };
+        if let Err(err) = write(&self.pins, &local) {
             crate::diag::warn(&format!("could not save pins: {err}"));
         }
     }
@@ -143,8 +178,16 @@ impl SettingsStore {
 /// unreadable — a corrupt settings file should cost you your preferences, not
 /// your shelf.
 pub fn load<R: Runtime>(app: &AppHandle<R>) -> SettingsStore {
-    let path = settings_path(app);
+    load_from(settings_path(app), pins_path(app))
+}
 
+/// The file half, with the two locations passed in.
+///
+/// Split out so the migration can be tested. It is the one path in this module
+/// that can destroy a user's pins — it decides which of two files wins, and
+/// what happens when either is unreadable — and it had no test, because
+/// everything it did was behind an `AppHandle`.
+fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
     let current = path
         .as_ref()
         .and_then(|path| std::fs::read_to_string(path).ok())
@@ -163,8 +206,6 @@ pub fn load<R: Runtime>(app: &AppHandle<R>) -> SettingsStore {
         )
         .unwrap_or_default();
 
-    let pins = pins_path(app);
-
     // Pins from their own file, falling back to whatever the preferences file
     // still carries.
     //
@@ -174,18 +215,38 @@ pub fn load<R: Runtime>(app: &AppHandle<R>) -> SettingsStore {
     // hand — the next write of `settings.json` omits `pinned` anyway, because
     // `persist` blanks it.
     let mut current = current;
-    let stored_pins = pins
+    let local = pins
         .as_ref()
         .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|raw| serde_json::from_str::<Vec<PinnedItem>>(strip_bom(&raw)).ok());
-    if let Some(from_own_file) = stored_pins {
-        current.pinned = from_own_file;
+        .and_then(
+            |raw| match serde_json::from_str::<LocalState>(strip_bom(&raw)) {
+                Ok(state) => Some(state),
+                // Said out loud, like the preferences file four lines up.
+                //
+                // This used to be `.ok()`. A corrupt `pinned.json` therefore lost
+                // every pin in silence, fell back to the preferences file — which
+                // `persist` has been blanking since the split — and the next pin
+                // toggle overwrote the corrupt file, destroying the only copy a
+                // user could have hand-repaired.
+                Err(err) => {
+                    crate::diag::warn(&format!(
+                        "pinned captures could not be read, so none were restored: {err}"
+                    ));
+                    None
+                }
+            },
+        );
+
+    if let Some(state) = local {
+        current.pinned = state.pinned;
     }
+    let last_capture = local_watermark(&pins);
 
     let store = SettingsStore {
         path: path.unwrap_or_default(),
         pins: pins.unwrap_or_default(),
         current: Mutex::new(sanitise(current)),
+        last_capture: Mutex::new(last_capture),
     };
 
     // Write both out on first run so the files are there to be found and
@@ -209,6 +270,24 @@ fn settings_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     Some(dir.join("settings.json"))
 }
 
+/// What Shotshelf keeps locally: the pins, and how far the catch engine got.
+///
+/// One file, because both are the same kind of thing — state about *this
+/// machine's captures* — and both must stay off a roaming profile.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct LocalState {
+    pub pinned: Vec<PinnedItem>,
+    /// The newest capture the shelf has been told about, in Unix ms.
+    ///
+    /// A watermark, and the thing that stops a launch undoing `Remove`.
+    /// Taking a capture off the shelf is deliberately shelf-only — the file
+    /// stays on disk — so without this every removed capture from the last day
+    /// came back on the next launch. `catch::to_backfill` only offers captures
+    /// newer than this.
+    pub last_capture_ms: u64,
+}
+
 /// Where pinned capture paths live: **local** app data, never roaming.
 ///
 /// Split out from the preferences file, which is in `app_config_dir` — and on
@@ -226,6 +305,18 @@ fn settings_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
 fn pins_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     let dir = app.path().app_local_data_dir().ok()?;
     Some(dir.join("pinned.json"))
+}
+
+/// The watermark from the local state file, or zero if there is not one yet.
+///
+/// Zero means "offer everything in the window", which is right for a fresh
+/// install and right after a corrupt file: the alternative is a launch that
+/// silently brings nothing back.
+fn local_watermark(pins: &Option<PathBuf>) -> u64 {
+    pins.as_ref()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|raw| serde_json::from_str::<LocalState>(strip_bom(&raw)).ok())
+        .map_or(0, |state| state.last_capture_ms)
 }
 
 fn strip_bom(raw: &str) -> &str {
@@ -334,6 +425,118 @@ mod tests {
         }
     }
 
+    /// A temp directory of this test's own.
+    fn workspace(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("shotshelf-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        dir
+    }
+
+    #[test]
+    fn pins_from_before_the_split_are_migrated_rather_than_lost() {
+        // The upgrade path. Before this round pins lived in `settings.json`;
+        // they now live in a local-only file, and an existing install has to
+        // keep them. This is the one code path that can destroy a user's pins,
+        // and it had no test.
+        let dir = workspace("migrate");
+        let roaming = dir.join("settings.json");
+        let local = dir.join("pinned.json");
+        let kept = somewhere("still-pinned.png");
+
+        // An old install: everything in one file.
+        std::fs::write(
+            &roaming,
+            serde_json::to_string(&Settings {
+                max_items: 33,
+                pinned: vec![pin(&kept)],
+                ..Settings::default()
+            })
+            .expect("serialises"),
+        )
+        .expect("an old settings file");
+
+        let store = load_from(Some(roaming.clone()), Some(local.clone()));
+
+        assert_eq!(store.get().pinned.len(), 1, "the pin survived the upgrade");
+        assert_eq!(store.get().pinned[0].path, kept);
+        assert_eq!(store.get().max_items, 33, "and so did the preferences");
+
+        // And it has been written to its new home immediately, so the next
+        // launch does not depend on the old file still being readable.
+        let moved = std::fs::read_to_string(&local).expect("pins were migrated");
+        assert!(moved.contains("still-pinned"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_local_file_wins_when_both_hold_pins() {
+        // After a migration the roaming file still carries whatever it had
+        // until the next write blanks it. The local file is the live one.
+        let dir = workspace("both");
+        let roaming = dir.join("settings.json");
+        let local = dir.join("pinned.json");
+
+        std::fs::write(
+            &roaming,
+            serde_json::to_string(&Settings {
+                pinned: vec![pin(&somewhere("stale.png"))],
+                ..Settings::default()
+            })
+            .expect("serialises"),
+        )
+        .expect("a settings file");
+        std::fs::write(
+            &local,
+            serde_json::to_string(&LocalState {
+                pinned: vec![pin(&somewhere("current.png"))],
+                last_capture_ms: 42,
+            })
+            .expect("serialises"),
+        )
+        .expect("a pins file");
+
+        let store = load_from(Some(roaming), Some(local));
+
+        assert_eq!(store.get().pinned.len(), 1);
+        assert!(store.get().pinned[0].path.contains("current"));
+        assert_eq!(store.last_capture_ms(), 42, "the watermark came back too");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_corrupt_pins_file_costs_the_pins_but_not_the_settings() {
+        // And it must not silently fall back to the roaming file, which
+        // `persist` has been blanking since the split — that would look like
+        // "you had no pins" rather than "your pins could not be read".
+        let dir = workspace("corrupt");
+        let roaming = dir.join("settings.json");
+        let local = dir.join("pinned.json");
+
+        std::fs::write(
+            &roaming,
+            serde_json::to_string(&Settings {
+                max_items: 77,
+                ..Settings::default()
+            })
+            .expect("serialises"),
+        )
+        .expect("a settings file");
+        std::fs::write(&local, b"{ this is not json").expect("a corrupt pins file");
+
+        let store = load_from(Some(roaming), Some(local.clone()));
+
+        assert!(store.get().pinned.is_empty());
+        assert_eq!(store.get().max_items, 77, "preferences are unaffected");
+        // The corrupt file is left alone until something actually writes, so a
+        // user still has a copy to repair by hand.
+        assert!(std::fs::read_to_string(&local).is_ok_and(|raw| raw.contains("not json")));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn pinned_paths_are_never_written_to_the_roaming_file() {
         // On Windows `app_config_dir` is `%APPDATA%` — the roaming profile,
@@ -355,6 +558,7 @@ mod tests {
             path: roaming.clone(),
             pins: local.clone(),
             current: Mutex::new(Settings::default()),
+            last_capture: Mutex::new(0),
         };
         store.set_pinned(vec![pin(&secret)]);
 
