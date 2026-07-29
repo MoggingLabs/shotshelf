@@ -3,8 +3,8 @@
   "entry": [
     "tests/**/*.spec.ts",
     "src/**/*.test.ts",
-    "scripts/*.mjs"
+    "scripts/*.mjs",
+    "!scripts/rust-source.mjs"
   ],
-  "project": ["src/**/*.ts", "tests/**/*.ts", "scripts/*.mjs"],
-  "ignore": [".claude/worktrees/**"]
+  "project": ["src/**/*.ts", "tests/**/*.ts", "scripts/*.mjs"]
 }

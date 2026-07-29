@@ -870,31 +870,20 @@ test("a lost-capture message does not take the settings panel off screen", async
   await expect(page.locator("#settings-panel")).toBeVisible();
 });
 
-test("a capture the backfill already showed does not land a second time", async ({ page }) => {
-  // Backfill wins this race, always: the front end polls for the engine every
-  // 500ms and `catch_backfill` answers at once, while the watcher holds a file
-  // for 750ms — or about 2.8s for a recording — before emitting. So the live
-  // copy arrives *after* the backfilled one, with a different `ts` and
-  // therefore a different id. The first version of this guard only checked what
-  // was already on the shelf when a backfilled capture arrived, which is the
-  // opposite order.
-  // Seeded before boot: the app asks for the backfill during start-up, so a
-  // stub installed afterwards arrives too late to be the answer.
-  await page.addInitScript((file) => {
-    window.__shotshelfStubs__ = {
-      ...(window.__shotshelfStubs__ ?? {}),
-      catch_backfill: [{ path: file, kind: "image", ts: 1 }],
-    };
-  }, FIXTURE.wide);
-  await bootShelf(page);
-  await expect(page.locator(".tile")).toHaveCount(1);
-
-  // The watcher's copy of the same file, stamped when it was caught.
-  await land(page, FIXTURE.wide, { ts: Date.now() });
-
-  await expect(page.locator(".tile")).toHaveCount(1);
-  await expect(page.locator("#shelf-count")).toHaveText("1 capture");
-});
+// The "one capture, one card" rule is enforced in Rust, not here.
+//
+// A spec lived at this point asserting that the front end dropped a backfilled
+// path it already held. That guard is gone: it could only see one of the two
+// routes a live capture takes, it silently swallowed a genuine re-save inside
+// its window — leaving the tile showing the *old* image for a file that had
+// changed — and when it dropped a capture the popover still peeked a window
+// with nothing in it and no way to dismiss it.
+//
+// The duplicate it was written for is a timing question and it is answered
+// where the timing is known: `catch::to_backfill` hands each file over at its
+// own folder's watcher-start moment, so the two paths cannot both claim one
+// capture. `catch::tests::each_folder_hands_over_at_its_own_watchers_start` is
+// the gate.
 
 test("a lost-capture message is raised even when the shelf was put away with settings open", async ({
   page,

@@ -98,20 +98,8 @@ export interface ShelfOptions {
   limits(): Pick<Settings, "maxItems" | "retentionHours">;
 }
 
-/**
- * How long a backfilled path stays claimed against the live watcher.
- *
- * Long enough to cover the widest gap between the two paths — the watcher holds
- * a recording for about 2.8 s of quiet before it emits, and the front end has
- * already been handed the backfill by then — and far short of anything a user
- * would experience as "the same screenshot again".
- */
-const BACKFILL_OVERLAP_MS = 30_000;
-
 export class Shelf {
   readonly #store = new ShelfStore();
-  /** Paths the launch backfill delivered, and when — see `#wasJustBackfilled`. */
-  readonly #backfilled = new Map<string, number>();
   readonly #column = new ColumnQueue();
   readonly #selection = new Selection();
   readonly #view: ShelfView;
@@ -210,8 +198,6 @@ export class Shelf {
    * the column that pops up to show it — different lifetimes on purpose.
    */
   note(capture: Capture): void {
-    // A capture backfill has already shown is not a second capture.
-    if (this.#wasJustBackfilled(capture)) return;
     this.add(capture, { render: false });
     this.#column.add(captureId(capture));
     this.#mode = "column";
@@ -249,39 +235,6 @@ export class Shelf {
    * time, so a boundary stamped before the first leaves a gap and one stamped
    * after the last allows this overlap. Identity is the half that can be right.
    */
-  addFromBackfill(capture: Capture): void {
-    if (this.#store.items().some((item) => item.path === capture.path)) return;
-    // Remembered, because the *live* copy of this capture has not arrived yet.
-    //
-    // The first version of this guard only looked at what was already on the
-    // shelf, which assumed the watcher wins the race. It loses it, always: the
-    // front end polls for the engine every 500 ms and `catch_backfill` answers
-    // at once, while the watcher holds a file for `SLOWEST_IMAGE` (750 ms) or,
-    // for a recording, eight stability ticks — about 2.8 s. So backfill's card
-    // lands first and the watcher's arrives after, with a different `ts` and
-    // therefore a different id, and nothing looked at it.
-    this.#backfilled.set(capture.path, Date.now());
-    this.add(capture);
-  }
-
-  /**
-   * Whether a capture arriving live is the one backfill just handed over.
-   *
-   * Bounded in time on purpose. Re-saving to the same path is a genuine second
-   * capture — a tool overwriting its output — and `store.test.ts` states that
-   * rule deliberately, so this must not become "one path, one card, for ever".
-   * The overlap it exists to catch is measured in seconds: a file written just
-   * before `watching_since` is stamped, offered by backfill immediately, and
-   * emitted by the watcher once it stops growing.
-   */
-  #wasJustBackfilled(capture: Capture): boolean {
-    const delivered = this.#backfilled.get(capture.path);
-    if (delivered === undefined) return false;
-
-    this.#backfilled.delete(capture.path);
-    return Date.now() - delivered < BACKFILL_OVERLAP_MS;
-  }
-
   /** Put pinned captures back after a restart, oldest first so order survives. */
   restorePinned(settings: Settings): void {
     for (const capture of [...settings.pinned].sort((a, b) => a.ts - b.ts)) {

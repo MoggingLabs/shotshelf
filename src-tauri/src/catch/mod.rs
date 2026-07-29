@@ -257,13 +257,13 @@ pub struct CatchEngine {
     /// status line stopped reporting it, and two lists with no way to tell
     /// which answers "is it working" is worse than one.
     watching: Mutex<Option<Vec<PathBuf>>>,
-    /// When the watcher started, which is the boundary backfill needs.
+    /// When each watched directory's watcher started — the boundary backfill needs.
     ///
     /// `notify` reports events, not history: it can only tell us about writes
     /// that happen after it registers. So "the watcher will emit this one" is
     /// true exactly of files whose last write landed at or after this moment,
     /// and false — permanently — of everything before it.
-    watching_since: Mutex<Option<SystemTime>>,
+    watching_since: Mutex<Option<Vec<(PathBuf, SystemTime)>>>,
     /// Dropping the watch stops the `notify` threads.
     _folders: Mutex<Option<folders::FolderWatch>>,
 }
@@ -275,8 +275,8 @@ impl CatchEngine {
     }
 
     /// When the watcher registered. `None` while the engine is still starting.
-    fn watching_since(&self) -> Option<SystemTime> {
-        *lock(&self.watching_since)
+    fn watching_since(&self) -> Option<Vec<(PathBuf, SystemTime)>> {
+        lock(&self.watching_since).clone()
     }
 }
 
@@ -322,6 +322,10 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
         .as_ref()
         .map(|watch| watch.watching.clone())
         .unwrap_or_default();
+    let started = folders
+        .as_ref()
+        .map(|watch| watch.started.clone())
+        .unwrap_or_default();
 
     clipboard::start(app, std::sync::Arc::clone(&sink));
 
@@ -333,11 +337,10 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
     // was shown, precisely so the commands below never see it missing.
     if let Some(engine) = app.try_state::<CatchEngine>() {
         *lock(&engine.watching) = Some(watching);
-        // Stamped here rather than at the top of `start`: everything above is
-        // resolving paths, and the watcher is not listening until it is built.
-        // Erring late would open the gap this exists to close, so this is the
-        // earliest moment it is honest to claim.
-        *lock(&engine.watching_since) = Some(SystemTime::now());
+        // Recorded by `folders::start` as each directory was taken, not stamped
+        // once here. A single moment is wrong in one direction or the other —
+        // see the field's own docstring.
+        *lock(&engine.watching_since) = Some(started);
         *lock(&engine._folders) = folders;
     }
 }
@@ -399,8 +402,11 @@ pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Capture
     // `watching()` answered `Some` above, so this cannot be missing — but
     // falling back to "now" rather than unwrapping keeps the worst case at
     // "behaves as the old five-second rule did", not a panic in the launch path.
-    let watching_since = engine.watching_since().unwrap_or_else(SystemTime::now);
-    let chosen = to_backfill(found, SystemTime::now(), since, watching_since);
+    // `watching()` answered `Some` above, so this cannot be missing. An empty
+    // list means nothing is watched, and `to_backfill` then admits nothing —
+    // which is the right answer when there is no watcher to hand over to.
+    let watching_since = engine.watching_since().unwrap_or_default();
+    let chosen = to_backfill(found, SystemTime::now(), since, &watching_since);
 
     // Move the watermark past what is being handed over.
     //
@@ -485,15 +491,23 @@ fn to_backfill(
     mut found: Vec<(SystemTime, PathBuf, CaptureKind)>,
     now: SystemTime,
     since_ms: u64,
-    watching_since: SystemTime,
+    watching_since: &[(PathBuf, SystemTime)],
 ) -> Vec<Capture> {
     let cutoff = now - BACKFILL_WINDOW;
-    // Where backfill stops and the watcher takes over: the moment the watcher
-    // registered. See `CatchEngine::watching_since` for why it is that and not
-    // "five seconds ago", which is what it used to be.
-    let settled = watching_since;
 
-    found.retain(|(modified, _, _)| {
+    /// When the watcher covering this file started listening.
+    ///
+    /// `None` when no watched directory holds it, which means nothing will ever
+    /// emit it live — so backfill is its only way in and the boundary does not
+    /// apply.
+    fn took_over(file: &Path, watching_since: &[(PathBuf, SystemTime)]) -> Option<SystemTime> {
+        watching_since
+            .iter()
+            .find(|(dir, _)| file.parent() == Some(dir.as_path()))
+            .map(|(_, started)| *started)
+    }
+
+    found.retain(|(modified, path, _)| {
         // Newer than the newest capture the shelf has already seen.
         //
         // Without this, backfill undoes `Remove`. Taking a capture off the
@@ -503,7 +517,16 @@ fn to_backfill(
         // retention had already expired. A user who curates their shelf and
         // then reboots got all twenty back. `Remove` and a naive backfill
         // cancel each other out exactly.
-        as_ms(*modified) > since_ms && *modified >= cutoff && *modified < settled
+        // Against *this file's own* folder, not one moment for the engine.
+        //
+        // A file is backfill's exactly when its last write landed before the
+        // watcher for its directory started. Earlier than that, no live event
+        // can ever have been produced for it; later, one was, and taking it
+        // here as well is how one capture became two cards.
+        let watchers_yet =
+            took_over(path, watching_since).is_none_or(|started| *modified < started);
+
+        as_ms(*modified) > since_ms && *modified >= cutoff && watchers_yet
     });
 
     // Newest first to apply the cap, so the cap keeps the most recent...
@@ -681,9 +704,15 @@ mod tests {
     /// How long ago the watcher came up, in these tests.
     const WATCH_STARTED_SECS: u64 = 5;
 
-    /// The moment `folders::start` finished — the boundary backfill stops at.
-    fn watcher_started() -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - WATCH_STARTED_SECS)
+    /// When the one watched directory in these fixtures started listening.
+    ///
+    /// The fixtures name files without a directory, so their parent is `""` and
+    /// the watched directory is `PathBuf::new()` — which is what pairs them.
+    fn watcher_started() -> Vec<(PathBuf, SystemTime)> {
+        vec![(
+            PathBuf::new(),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - WATCH_STARTED_SECS),
+        )]
     }
 
     /// `to_backfill` with the watcher-start argument these tests all share.
@@ -692,7 +721,7 @@ mod tests {
         now: SystemTime,
         since_ms: u64,
     ) -> Vec<Capture> {
-        to_backfill(found, now, since_ms, watcher_started())
+        to_backfill(found, now, since_ms, &watcher_started())
     }
 
     /// Written before the watcher was listening, and inside the window.
@@ -891,6 +920,53 @@ mod tests {
     }
 
     #[test]
+    fn each_folder_hands_over_at_its_own_watchers_start() {
+        // Why the boundary is per directory rather than one moment.
+        //
+        // `folders::start` registers watchers one at a time, and either single
+        // stamp is wrong in one direction. Taken before the first: a file
+        // written while the rest were still registering is skipped by backfill
+        // *and* invisible to a watcher that was not yet listening — the capture
+        // is lost, permanently, because the watermark moves past it. Taken
+        // after the last: a file written in that same interval is emitted live
+        // by an already-live watcher *and* offered by backfill, and one capture
+        // becomes two cards.
+        //
+        // Two folders, registered a second apart, and a file in each written
+        // between the two registrations. Both properties are asserted at once:
+        // the early folder's file is the watcher's, the late folder's is not.
+        let early = PathBuf::from("/early");
+        let late = PathBuf::from("/late");
+        let started = vec![
+            (
+                early.clone(),
+                SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 2),
+            ),
+            (
+                late.clone(),
+                SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 1),
+            ),
+        ];
+
+        // Written 1.5 s ago: after `early`'s watcher, before `late`'s.
+        let between = SystemTime::UNIX_EPOCH + Duration::from_millis(NOW_SECS * 1000 - 1500);
+        let found = vec![
+            (between, early.join("seen-live.png"), CaptureKind::Image),
+            (between, late.join("nobody-saw-it.png"), CaptureKind::Image),
+        ];
+
+        let chosen = to_backfill(found, now(), 0, &started);
+        assert_eq!(
+            names(&chosen),
+            vec!["/late\nobody-saw-it.png"]
+                .into_iter()
+                .map(|_| late.join("nobody-saw-it.png").display().to_string())
+                .collect::<Vec<_>>(),
+            "one moment for the whole engine is wrong for one of these two files"
+        );
+    }
+
+    #[test]
     fn a_capture_written_just_before_the_watcher_started_is_still_brought_back() {
         // The gap this boundary exists to close.
         //
@@ -912,9 +988,12 @@ mod tests {
         // Shotshelf was still coming up. Under the old rule that file was
         // inside the grace and skipped as "the watcher has it"; the watcher had
         // not started yet, so nothing had it.
-        let started_just_now = SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 1);
+        let started_just_now = vec![(
+            PathBuf::new(),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 1),
+        )];
         let during_launch = seen(2, "taken-during-launch.png");
-        let chosen = to_backfill(vec![during_launch], now(), 0, started_just_now);
+        let chosen = to_backfill(vec![during_launch], now(), 0, &started_just_now);
         assert_eq!(
             names(&chosen),
             vec!["taken-during-launch.png"],
@@ -926,7 +1005,7 @@ mod tests {
         // registration, and still growing.
         let after = seen(0, "still-being-written.mp4");
         assert!(
-            to_backfill(vec![after], now(), 0, started_just_now).is_empty(),
+            to_backfill(vec![after], now(), 0, &started_just_now).is_empty(),
             "a file written after the watcher came up is the watcher's to emit"
         );
     }

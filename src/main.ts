@@ -309,7 +309,7 @@ void whenEngineIsUp("captures from before launch", () => invoke<Capture[]>("catc
     // Added rather than `catch`ed: these are not new, so they must not pop the
     // column over whatever the user is doing at launch. They are already
     // oldest-first, and each carries the time it was taken.
-    for (const capture of missed) shelf.addFromBackfill(capture);
+    for (const capture of missed) shelf.add(capture);
   })
   .catch((error: unknown) => {
     // Its own message, not the listener's: the live path is registered and

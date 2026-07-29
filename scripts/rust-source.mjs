@@ -120,7 +120,18 @@ export function codeOnly(source) {
   return out.replace(
     /#(\s*)(!?)(\s*)\[/g,
     /** @type {(whole: string, before: string, bang: string) => string} */
-    (whole, _before, bang) => `#${bang}[`.padEnd(whole.length, " "),
+    (whole, _before, bang) => {
+      // Padded with the newlines the match contained, not with spaces.
+      //
+      // `padEnd(…, " ")` was shorter and broke this function's own promise that
+      // line numbers survive: an attribute written with a line break between
+      // `#` and `[` came back one line shorter than it went in. Nothing reads
+      // offsets today, so it was prose outrunning code rather than a live bug —
+      // in the file added to end exactly that.
+      const newlines = (whole.match(/\n/g) ?? []).join("");
+      const head = `#${bang}[`;
+      return head + newlines + " ".repeat(whole.length - head.length - newlines.length);
+    },
   );
 }
 

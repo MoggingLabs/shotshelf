@@ -268,8 +268,16 @@ function unwrap(block) {
  * track — `prompts/` and `reference/` are git-ignored and present on the
  * author's machine, `src-tauri/binaries/` holds an 82 MB local ffmpeg — so a
  * comment pointing into one of them passed here and would fail on any other
- * clone and in CI. A gate whose verdict depends on untracked files is a gate
- * that answers a different question on every machine.
+ * clone and in CI. A gate whose verdict depends on *ignored* files is a gate
+ * that answers a different question on every machine, which is why
+ * `--exclude-standard` stays.
+ *
+ * Untracked-but-not-ignored files do count, and that is a deliberate local/CI
+ * divergence in the safe direction: locally a file created in the same change
+ * as the comment naming it resolves; in CI, which checks out only what was
+ * committed, it does not, so the gate is stricter there. Requiring `git add`
+ * first made this fire on a *correct* comment minutes after it was written —
+ * a false positive in the one file built to catch false statements.
  */
 function repoFiles() {
   const byName = new Map();

@@ -12,7 +12,7 @@ use std::{
         mpsc::{self, RecvTimeoutError},
         Arc,
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use notify::{
@@ -74,6 +74,21 @@ pub struct FolderWatch {
     /// The directories the watcher really took, which is what the status line
     /// must report — see `start`.
     pub watching: Vec<PathBuf>,
+    /// When each of those directories went live, paired with it.
+    ///
+    /// Per directory rather than one moment for the whole engine, because the
+    /// watchers register one at a time and either single stamp is wrong: taken
+    /// before the first, a file written while the rest were still registering
+    /// is skipped by backfill *and* invisible to a watcher that was not yet
+    /// listening; taken after the last, a file written in that same interval is
+    /// emitted by an already-live watcher *and* offered by backfill, and the
+    /// user gets two cards for one capture.
+    ///
+    /// Per directory there is no interval to be wrong about: a file belongs to
+    /// backfill exactly when it was last written before its own folder's
+    /// watcher started. That is decidable, and it is why this is a list of
+    /// pairs rather than the single `SystemTime` it used to be.
+    pub started: Vec<(PathBuf, SystemTime)>,
     _debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
 }
 
@@ -96,11 +111,16 @@ pub fn start<R: Runtime>(
     // the one diagnostic offered for the app's central failure was the one
     // thing that could not report it.
     let mut watching = Vec::with_capacity(dirs.len());
+    let mut started = Vec::with_capacity(dirs.len());
     for dir in dirs {
         // Non-recursive on purpose: capture folders are flat, and recursing a
         // whole Pictures tree would be a lot of churn for nothing.
         match debouncer.watch(dir, RecursiveMode::NonRecursive) {
-            Ok(()) => watching.push(dir.clone()),
+            Ok(()) => {
+                // Stamped as each one is taken, not once for the loop.
+                started.push((dir.clone(), SystemTime::now()));
+                watching.push(dir.clone());
+            }
             Err(err) => crate::diag::warn(&format!("cannot watch {}: {err}", dir.display())),
         }
     }
@@ -109,6 +129,7 @@ pub fn start<R: Runtime>(
 
     Ok(FolderWatch {
         watching,
+        started,
         _debouncer: debouncer,
     })
 }

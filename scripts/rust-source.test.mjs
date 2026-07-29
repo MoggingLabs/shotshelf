@@ -174,6 +174,25 @@ void test("blanking preserves offsets, so line numbers still line up", () => {
   assert.ok(blanked.includes("let s ="), "code did not survive");
 });
 
+void test("blanking preserves line count across an attribute it normalises", () => {
+  // The fixture above has no attribute in it, so it passed while the `#`/`[`
+  // normalisation was padding with spaces and swallowing the newline between
+  // them — a test for an invariant, written so it could not see the one code
+  // path that breaks it.
+  const source = ["fn a() {}", "#", "[allow(clippy::disallowed_methods)]", "fn b() {}", ""].join(
+    "\n",
+  );
+  const blanked = codeOnly(source);
+
+  assert.equal(blanked.length, source.length, "length changed");
+  assert.equal(
+    blanked.split("\n").length,
+    source.split("\n").length,
+    "a newline inside the attribute was padded away",
+  );
+  assert.deepEqual(silencedIn(source), ["clippy::disallowed_methods"]);
+});
+
 void test("a char literal holding a quote does not open a string", () => {
   // `'"'` is a char literal. Read as a quote it would open a string that never
   // closes, and everything after it in the file would go unscanned — including

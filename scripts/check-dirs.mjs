@@ -26,6 +26,14 @@
 
 import { globSync, readFileSync } from "node:fs";
 
+/**
+ * Failures found in the lint *configuration*, before any source file is read.
+ *
+ * Separate from `problems` only because it is collected first; both end up in
+ * the same report.
+ */
+const problemsWithConfig = [];
+
 /** The module allowed to resolve a root, because it is the one that documents why. */
 const OWNER = "src-tauri/src/dirs.rs";
 
@@ -191,7 +199,72 @@ const DIRECTORY_GRANTERS = new Set([
   "src-tauri/src/edit.rs",
 ]);
 
-const problems = [];
+/**
+ * The clippy rules the source-text checks below are only half of.
+ *
+ * `clippy.toml`'s `disallowed-methods`/`disallowed-types` and `Cargo.toml`'s
+ * `[lints.clippy]` levels are what catch the spellings *this file cannot see* —
+ * UFCS, a module alias, a function item taken by reference. Nothing read either
+ * file. One line, `disallowed_methods = "allow"` appended to `[lints.clippy]`,
+ * switched the whole resolved-path half off with every gate green: a reviewer
+ * used it to route the diagnostic log into `%APPDATA%` through a module alias,
+ * and to open `C:/` recursively to the webview from a module that is not a
+ * granter. Deleting the `[lints.clippy]` block outright is the same shape one
+ * level up — it returns every `#[allow(clippy::cast_*)]` in the tree to
+ * silencing a lint nothing enables, which is precisely the dead-attribute
+ * defect that block was added to end.
+ *
+ * That is the escape hatch spelled as *configuration*, and it is strictly
+ * stronger than the attribute form, because it needs no attribute anywhere for
+ * `silencedIn` to find. So the required rules live in a fixture and are checked
+ * like any other cross-language contract: remove one, or lower a level, and this
+ * goes red.
+ */
+const CLIPPY_RULES = JSON.parse(readFileSync("tests/fixtures/clippy-rules.json", "utf8"));
+
+{
+  const clippyToml = readFileSync("src-tauri/clippy.toml", "utf8");
+  for (const path of CLIPPY_RULES.disallowed) {
+    if (!clippyToml.includes(`"${path}"`)) {
+      problemsWithConfig.push(
+        `  src-tauri/clippy.toml: no longer disallows \`${path}\`. ` +
+          `Clippy resolves paths, so it is the only thing here that sees UFCS ` +
+          `and module aliases.`,
+      );
+    }
+  }
+
+  // The `[lints.clippy]` table only, so a level set elsewhere in the manifest
+  // cannot be mistaken for this one.
+  const manifest = readFileSync("src-tauri/Cargo.toml", "utf8");
+  const table = /\[lints\.clippy\]([\s\S]*?)(?=\n\[|$)/.exec(manifest)?.[1] ?? "";
+  // Nothing in this table may be set to `allow`.
+  //
+  // Requiring the four `warn` lines is not enough on its own: appending
+  // `disallowed_methods = "allow"` leaves them all present and still switches
+  // the `clippy.toml` rules off, which is the bypass this whole check exists
+  // for. An `allow` here is the escape hatch spelled as configuration, and it
+  // gets the same treatment as the attribute form — argue for it in a diff.
+  for (const [, lint] of table.matchAll(/^\s*([a-z_:]+)\s*=\s*"allow"/gm)) {
+    problemsWithConfig.push(
+      `  src-tauri/Cargo.toml: [lints.clippy] sets \`${lint}\` to "allow". ` +
+        `That switches a clippy rule off for the whole crate with no attribute ` +
+        `anywhere for the allowance table to see.`,
+    );
+  }
+
+  for (const [lint, level] of Object.entries(CLIPPY_RULES.denied)) {
+    if (!new RegExp(String.raw`^\s*${lint}\s*=\s*"${level}"`, "m").test(table)) {
+      problemsWithConfig.push(
+        `  src-tauri/Cargo.toml: [lints.clippy] no longer sets \`${lint} = "${level}"\`. ` +
+          `Every \`#[allow(clippy::${lint})]\` in the tree silences nothing without it.`,
+      );
+    }
+  }
+}
+
+const problems = [...problemsWithConfig];
+
 
 for (const file of globSync("src-tauri/src/**/*.rs")) {
   const normalised = file.replaceAll("\\", "/");
