@@ -158,6 +158,16 @@ impl CaptureSink {
         *lock(&self.own_clipboard_write) = Some(Instant::now() + window);
     }
 
+    /// Stand the warning down because the write it was armed for did not happen.
+    ///
+    /// Without this a failed clipboard write left a live marker with nothing to
+    /// consume it, so the *next* genuine screenshot inside the window was
+    /// mistaken for our own copy and silently dropped — the failure the marker
+    /// exists to prevent, produced by the error path that arms it.
+    pub fn cancel_own_clipboard_write(&self) {
+        *lock(&self.own_clipboard_write) = None;
+    }
+
     /// `true` if that warning is still standing, consuming it either way.
     pub fn take_own_clipboard_write(&self) -> bool {
         let mut expected = lock(&self.own_clipboard_write);

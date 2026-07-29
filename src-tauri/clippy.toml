@@ -7,13 +7,33 @@
 # `dirs.rs` is the one module allowed to resolve a root, so the rule is stated
 # once. Clippy matches on the resolved path, which is what makes this stronger
 # than the substring scan in `scripts/check-dirs.mjs`: it sees UFCS and renamed
-# imports too. The script covers what clippy cannot — `BaseDirectory::AppData`,
-# which reaches the same root through an enum.
+# imports too.
 #
-# `dirs.rs` itself carries `#[allow(clippy::disallowed_methods)]`.
+# `BaseDirectory` is listed as a disallowed *type* rather than left to the
+# script. The script matches the literal text `BaseDirectory::`, which one
+# import alias defeats:
+#
+#     use tauri::path::BaseDirectory as Roaming;
+#     app.path().resolve("pinned.json", Roaming::AppData)
+#
+# That reaches the roaming profile with the script reporting success, because
+# the string never appears. Clippy resolves paths, so the alias is the same type
+# and it fires either way. Both files used to claim the other covered this;
+# neither did.
+#
+# The script still runs, and still covers what clippy cannot: it reads files
+# rustc never compiles — a module not yet declared in `lib.rs`, or one behind a
+# `cfg` for another OS.
+#
+# `dirs.rs` itself carries `#[allow(clippy::disallowed_methods)]` and
+# `#[allow(clippy::disallowed_types)]`.
 disallowed-methods = [
   { path = "tauri::path::PathResolver::app_data_dir", reason = "roaming; go through `dirs::preferences`" },
   { path = "tauri::path::PathResolver::app_config_dir", reason = "roaming; go through `dirs::preferences`" },
   { path = "tauri::path::PathResolver::app_local_data_dir", reason = "go through `dirs::local`" },
   { path = "tauri::path::PathResolver::app_cache_dir", reason = "go through `dirs::cache`" },
+]
+
+disallowed-types = [
+  { path = "tauri::path::BaseDirectory", reason = "resolves a root without naming it; go through `dirs`" },
 ]

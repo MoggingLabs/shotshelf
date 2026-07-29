@@ -138,3 +138,37 @@ test("a crop is clipped to the capture", () => {
 test("clipRect refuses a rectangle with no area", () => {
   assert.equal(clipRect({ x: 10, y: 10, width: 0, height: 10 }, 100, 100), undefined);
 });
+
+test("undo follows the order things were done, not the kind they were", () => {
+  // The natural order, and the one the old code got wrong: the default tool is
+  // `box`, so a mark comes first and Crop has to be clicked. Undo popped a mark
+  // whenever there was one, so it took the annotation and left the crop — with
+  // no redo anywhere in the app.
+  const edit = session();
+  edit.add({ kind: "box", x: 5, y: 5, width: 20, height: 20 });
+  edit.setCrop({ x: 0, y: 0, width: 40, height: 40 });
+
+  assert.equal(edit.undo(), true);
+  assert.equal(edit.marks().length, 1, "the crop was the last thing done");
+  assert.deepEqual(edit.exportRect(), { x: 0, y: 0, width: 100, height: 80 });
+
+  assert.equal(edit.undo(), true);
+  assert.equal(edit.marks().length, 0);
+  assert.equal(edit.undo(), false, "nothing left to undo");
+});
+
+test("a second crop replaces the first in the history as well as the state", () => {
+  // Crop is not additive — a second one replaces the first — so it must not
+  // leave two entries behind, or undoing twice would try to remove a crop that
+  // is already gone and swallow the mark underneath it.
+  const edit = session();
+  edit.setCrop({ x: 0, y: 0, width: 40, height: 40 });
+  edit.add({ kind: "box", x: 1, y: 1, width: 5, height: 5 });
+  edit.setCrop({ x: 0, y: 0, width: 30, height: 30 });
+
+  assert.equal(edit.undo(), true);
+  assert.deepEqual(edit.exportRect(), { x: 0, y: 0, width: 100, height: 80 });
+  assert.equal(edit.undo(), true);
+  assert.equal(edit.marks().length, 0);
+  assert.equal(edit.undo(), false);
+});

@@ -409,6 +409,15 @@ test("a launch with nothing missed does not pop the column", async ({ page }) =>
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("show_shelf").length)).toBe(0);
 });
 
+// The column's expiry timer reaches the same guard by a second route —
+// `onColumnChange` took the `else showColumn()` branch whenever cards remained
+// after a hide — and it is *not* covered here. A test for it needs a card to
+// expire while the column still holds another, and `ColumnQueue.expire` refuses
+// to run at all while anything holds the column; nothing reachable from the page
+// clears the hold that `bootShelf` leaves armed. Rather than a test that passes
+// without exercising the path, this is written down: both routes go through
+// `#showing`, which the test above pins.
+
 test("the watching indicator is not green when nothing is being watched", async ({ page }) => {
   // Rust reports the folders it is *actually* watching — `folders::start` drops
   // any the watcher refused — so an empty list means the app's one job is not
@@ -484,4 +493,48 @@ test("a shelf that asks before the catch engine is up waits rather than reportin
   await expect(page.locator(".tile")).toHaveCount(1);
   // And nothing was reported as broken along the way.
   await expect(page.locator("#shelf-alert")).not.toContainText(/could not reach/i);
+});
+
+test("a shelf the user dismissed is not put back by an alert", async ({ page }) => {
+  // The window is frameless and always-on-top. Bringing it back uninvited is
+  // not a cosmetic bug.
+  //
+  // `resizeColumn` guarded on `columnIsEmpty`, which is not "the column is off
+  // screen": `adoptHidden` calls `setMode("column")`, a no-op when the mode is
+  // already "column", so the queue survives the hide. Hidden with cards in it
+  // satisfied neither guard, and every `say()` — including the launch update
+  // notice and its own twelve-second expiry — called through to `show_shelf`.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await expect(page.locator(".tile")).toHaveCount(1);
+
+  await page.evaluate(() => window.__shotshelf__.emit("shelf://hidden", null));
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  // The app's own update notice, which needs no failure to reach.
+  await page.evaluate(() => window.__shotshelf__.emit("update://available", "0.3.0"));
+  await expect(page.locator("#shelf-alert")).toContainText("0.3.0");
+
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("show_shelf").length)).toBe(0);
+});
+
+test("Escape in the settings panel closes the panel, not the shelf", async ({ page }) => {
+  // Escape had no settings rung, so it fell through to `dismiss()` while
+  // `settingsOpen()` stayed true — and `main.ts`'s first guard then swallowed
+  // every shelf key for the rest of the session.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.locator("#shelf-settings").click();
+  await expect(page.locator(".settings")).toBeVisible();
+
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+  await page.keyboard.press("Escape");
+
+  await expect(page.locator(".settings")).toBeHidden();
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+
+  // And the keyboard is alive again: Escape now reaches the shelf.
+  await page.keyboard.press("Escape");
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(1);
 });

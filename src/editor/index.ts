@@ -74,9 +74,10 @@ const overlay = new Overlay<Live>({
  *
  * This was the last module-global flag in a file whose whole ticket mechanism
  * exists because module-global flags were the bug.
+ *
+ * The ticket is a number, and `undefined` — not zero — means "no save in
+ * flight", so every comparison here is `===` against a specific ticket.
  */
-/// The ticket is a number, and `undefined` — not zero — means "no save in
-/// flight", so every comparison here is `===` against a specific ticket.
 let saving: number | undefined;
 
 export function editorIsOpen(): boolean {

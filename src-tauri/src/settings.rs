@@ -323,11 +323,6 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
     store
 }
 
-/// Where the preferences file lives: `%APPDATA%\com.mogginglabs.shotshelf\`
-/// on Windows, `~/Library/Application Support/com.mogginglabs.shotshelf/` on
-/// macOS.
-///
-/// Preferences only. Pinned paths live somewhere else — see [`pins_path`].
 /// How many unreadable copies are kept before new ones stop being set aside.
 ///
 /// Small on purpose: these live beside the file they came from — which is the
@@ -383,6 +378,11 @@ fn set_aside(path: &std::path::Path) -> Option<std::path::PathBuf> {
     None
 }
 
+/// Where the preferences file lives: `%APPDATA%\com.mogginglabs.shotshelf\`
+/// on Windows, `~/Library/Application Support/com.mogginglabs.shotshelf/` on
+/// macOS.
+///
+/// Preferences only. Pinned paths live somewhere else — see [`pins_path`].
 fn settings_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     Some(crate::dirs::preferences(app).ok()?.join("settings.json"))
 }

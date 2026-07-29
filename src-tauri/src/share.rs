@@ -332,13 +332,31 @@ pub async fn copy_capture<R: Runtime>(
         CaptureKind::Video => Payload::File(file_uri(&source)),
     };
 
+    // Armed *before* the write, and only if the write succeeds.
+    //
+    // The ordering matters in both directions, which is why it reads oddly. The
+    // marker has to be standing before the clipboard changes, or the watcher
+    // sees the change first and shelves our own copy back as a new capture —
+    // that is what the comment on `OWN_WRITE_WINDOW` is about. But arming it
+    // unconditionally meant a *failed* write left a live marker with nothing to
+    // consume it, so the next genuine screenshot within the window was
+    // swallowed instead: the exact failure the ordering exists to prevent,
+    // reintroduced by the error path. On macOS, where every recording copy
+    // failed outright, that was every single time.
+    //
+    // So: arm, write, and stand the marker down again if the write did not
+    // happen.
+    let clipboard = app.state::<Clipboard>();
     sink.expect_own_clipboard_write(OWN_WRITE_WINDOW);
 
-    let clipboard = app.state::<Clipboard>();
-    match payload {
+    let wrote = match payload {
         Payload::Pixels(bytes) => clipboard.write_image_binary(bytes),
         Payload::File(uri) => clipboard.write_files_uris(vec![uri]),
+    };
+    if wrote.is_err() {
+        sink.cancel_own_clipboard_write();
     }
+    wrote
 }
 
 /// What is about to go on the clipboard, prepared before anything is armed.
@@ -376,11 +394,32 @@ enum Payload {
 /// raw space is not something anyone here has tested on a Linux desktop —
 /// which `docs/USAGE.md` already says of Linux generally.
 fn file_uri(path: &Path) -> String {
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    // Windows is the *only* platform that takes a bare path here.
+    //
+    // `tauri-plugin-clipboard`'s `write_files_uris` validates before it does
+    // anything: it rejects a `file://` prefix on Windows and **requires** one on
+    // macOS and Linux. macOS was grouped with Windows, so every recording copy
+    // on a Mac returned "Invalid file uri … should start with file://" — not a
+    // degraded paste, a hard error, every time, for the one path
+    // `docs/USAGE.md` documents as "recordings as a file reference".
+    //
+    // The earlier docstring above reasoned from `clipboard-rs`'s
+    // `NSFilenamesPboardType`, which does want POSIX paths, and never looked at
+    // the plugin layer sitting on top of it. Both statements were true about
+    // their own layer and the wrong one won.
+    #[cfg(target_os = "windows")]
     {
         path.to_string_lossy().into_owned()
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    // macOS and Linux both take the URI form the plugin demands.
+    //
+    // NOT VERIFIED ON A MAC, and worth stating plainly: `clipboard-rs` puts this
+    // string verbatim into `NSFilenamesPboardType`, which is documented as a
+    // property list of POSIX paths, so a receiver may or may not resolve a
+    // `file://` URI found there. What is certain is that the previous form
+    // never reached the pasteboard at all — the plugin refused it first — so
+    // this is the better of two imperfect options rather than a known-good one.
+    #[cfg(not(target_os = "windows"))]
     {
         format!("file://{}", percent_encode_path(&path.to_string_lossy()))
     }

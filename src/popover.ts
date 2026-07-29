@@ -52,6 +52,25 @@ export class Popover {
    * capture never popped.
    */
   #opened = false;
+  /**
+   * Whether the window is on screen at all, by either shape.
+   *
+   * Distinct from `#opened`, which is only "up because you asked for it", and
+   * from `columnIsEmpty`, which was standing in for this and is not the same
+   * question: `adoptHidden` leaves `ColumnQueue` populated — `setMode("column")`
+   * is a no-op when the mode is already `"column"` — so a dismissed shelf holding
+   * cards satisfied neither of the old guards, and anything that asked for a
+   * resize put the window back on screen.
+   *
+   * Two ordinary routes reached it. The column's own expiry timer keeps ticking
+   * after a hide, so a card ageing out took the `else showColumn()` branch; and
+   * every `say()` and its twelve-second `hush()` call `resizeColumn`, so the
+   * app's own update notice re-showed a window the user had just dismissed from
+   * the tray.
+   *
+   * Set where the window's visibility actually changes, so the two cannot drift.
+   */
+  #showing = false;
 
   constructor(root: HTMLElement, shelf: Shelf, options: PopoverOptions) {
     this.#root = root;
@@ -61,6 +80,7 @@ export class Popover {
 
   /** Put the column on screen at whatever height its cards need right now. */
   showColumn(): void {
+    this.#showing = true;
     this.#root.dataset["mode"] = "column";
     void invoke("show_shelf", { focus: false, height: this.#shelf.columnHeight() });
   }
@@ -79,7 +99,7 @@ export class Popover {
    * is no column to resize in either case, and `showColumn` would put one there.
    */
   resizeColumn(): void {
-    if (this.#opened || this.#shelf.columnIsEmpty) return;
+    if (!this.#showing || this.#opened || this.#shelf.columnIsEmpty) return;
     this.showColumn();
   }
 
@@ -112,6 +132,7 @@ export class Popover {
     // machine, and CI's single retry is exactly what would have hidden it.
     this.#standDown();
     this.#opened = true;
+    this.#showing = true;
     this.#root.dataset["mode"] = "browse";
     this.#shelf.setMode("browse");
   }
@@ -135,6 +156,7 @@ export class Popover {
   adoptHidden(): void {
     this.#standDown();
     this.#opened = false;
+    this.#showing = false;
     // The editor and the quick look mount outside the list so the list can
     // rebuild under them; that also means nothing else ends their lifetime.
     // Left standing, they survived the hide and the next capture popped a
@@ -165,7 +187,11 @@ export class Popover {
 
   /** A card aged out. Either the column needs to be shorter, or it is done. */
   onColumnChange(): void {
-    if (this.#opened) return;
+    // Nothing to reshape and nothing to put away if the window is already down.
+    // Without this the column's expiry timer — which keeps ticking after a hide,
+    // because the mode is still `"column"` — took the `else` branch and showed a
+    // window the user had dismissed.
+    if (!this.#showing || this.#opened) return;
     if (this.#shelf.columnIsEmpty) this.dismiss();
     else this.showColumn();
   }

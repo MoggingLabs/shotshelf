@@ -168,6 +168,23 @@ export async function persistPinned(pinned: PinnedItem[]): Promise<void> {
 }
 
 
+/**
+ * Put the panel away if it is up. `true` if it was.
+ *
+ * Exported so Escape has a rung for it. Without one, Escape in the settings
+ * panel fell straight through to `popover.dismiss()`: the window went away and
+ * `settingsOpen()` stayed true, because `toggle` is the only thing that
+ * restores the `hidden` attribute. From then on `main.ts`'s first guard
+ * swallowed every shelf key — arrows, space, Enter, Delete, `e` — and
+ * `popover.busy()` stayed true so the launch dismissal never fired, against a
+ * panel the column shape renders invisible anyway.
+ */
+export function closeSettings(): boolean {
+  if (!settingsOpen()) return false;
+  toggle();
+  return true;
+}
+
 function toggle(): void {
   const open = panel().hasAttribute("hidden");
   if (open) panel().removeAttribute("hidden");

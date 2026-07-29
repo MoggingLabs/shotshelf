@@ -43,12 +43,14 @@ const OWNED = ["app_data_dir", "app_config_dir", "app_local_data_dir", "app_cach
 /**
  * The other way in: `path().resolve(…, BaseDirectory::AppData)`.
  *
- * `BaseDirectory` dispatches to exactly these functions, so a module can reach
- * the roaming profile without naming it. Substring matching cannot see that,
- * which is the honest limit of this script and the reason `clippy.toml` also
- * refuses the calls by resolved path.
+ * The bare name, not `BaseDirectory::`. One import alias defeated the longer
+ * form — `use tauri::path::BaseDirectory as Roaming;` and then `Roaming::AppData`
+ * — which a reviewer demonstrated reaching the roaming profile with this script
+ * reporting success. Matching the name catches the import; `clippy.toml` now
+ * also lists the type, which resolves through the alias and is the stronger of
+ * the two.
  */
-const BASE_DIRECTORY = "BaseDirectory::";
+const BASE_DIRECTORY = "BaseDirectory";
 
 /**
  * Who may write into the roaming profile.

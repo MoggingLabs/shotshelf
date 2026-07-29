@@ -100,11 +100,19 @@ pub fn set_capture_count<R: Runtime>(app: AppHandle<R>, count: usize) {
     // in `init` — which on Linux left two `let icon` bindings, the first
     // shadowed and unread, and `-D warnings` refuses that. The Linux CI leg
     // could not compile, and the local gate could not see it.
-    // The crate's idiom for "the GTK platform": everything that is not Windows or
-    // macOS. `catch/paths.rs`, `enrich/foreground.rs`, `enrich/ocr.rs`,
-    // `share.rs` and `window.rs` all spell it this way; enumerating macOS and
-    // Linux was the one site that did not, and it silently dropped the capture
-    // count on any other Unix `tray-icon` builds for.
+    // "Not Windows" — deliberately *wider* than the crate's usual
+    // `not(any(windows, macos))`, which names the GTK platform.
+    //
+    // Both macOS and every GTK platform have a real `set_title`; only Windows
+    // does not. The five sites that spell it the narrower way — `catch/paths.rs`,
+    // `enrich/foreground.rs`, `enrich/ocr.rs`, `share.rs`, `window.rs` — are
+    // each choosing a GTK-specific implementation, which is a different question
+    // from "does this API exist here".
+    //
+    // What was wrong before was `any(macos, linux)`: an enumeration, so the
+    // capture count silently never reached the tray on any other Unix
+    // `tray-icon` builds for. Widening fixed that; matching the other five would
+    // have re-broken macOS.
     #[cfg(not(target_os = "windows"))]
     let _ = tray.set_title(if count == 0 {
         None

@@ -14,7 +14,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { el } from "./dom.ts";
 import { icon } from "./icons.ts";
 import { Popover } from "./popover.ts";
-import { currentSettings, initSettings, settingsOpen } from "./settings.ts";
+import { closeSettings, currentSettings, initSettings, settingsOpen } from "./settings.ts";
 import { textRecognitionAvailable } from "./shelf/bridge.ts";
 import { Shelf, type Capture } from "./shelf/index.ts";
 import { until, type Wait } from "./retry.ts";
@@ -118,7 +118,11 @@ document.addEventListener("keydown", (event) => {
       // Escape backs out one level at a time: the editor, then a preview,
       // then the shelf. One key that closes two things at once is one key
       // that loses your place.
+      // Settings is a rung on this ladder, and was missing from it: Escape
+      // reached `dismiss()` with the panel still logically open, and every
+      // shelf key stayed dead for the rest of the session.
       if (shelf.closeEditor()) return;
+      if (closeSettings()) return;
       if (!shelf.closePreview()) popover.dismiss();
       return;
 

@@ -652,9 +652,9 @@ and again: {token}
         // disclosure decision, and the test below still passes.
         // Exactly one sample per pattern, and exactly one pattern per label.
         //
-        // `any(â€¦)` alone counted a *label* as covered, so an eleventh pattern
-        // reusing an existing label â€” the natural way to add a second spelling
-        // of the same credential â€” was covered by the first one's sample and
+        // `any(…)` alone counted a *label* as covered, so an eleventh pattern
+        // reusing an existing label — the natural way to add a second spelling
+        // of the same credential — was covered by the first one's sample and
         // its own `marker` was never exercised. That is the whole failure this
         // test exists to prevent, reachable by adding a pattern the way every
         // pattern here was added.

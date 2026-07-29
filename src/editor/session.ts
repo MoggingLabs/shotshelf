@@ -40,6 +40,25 @@ export type Tool = Mark["kind"] | "crop";
 export class EditSession {
   readonly #marks: Mark[] = [];
   #crop: Rect | undefined;
+  /**
+   * What was done, in the order it was done.
+   *
+   * Undo used to pop a mark whenever there was one and only fall through to the
+   * crop when there were none — LIFO per category, not chronological. The
+   * default tool is `"box"` and Crop has to be clicked, so draw-then-crop is the
+   * natural order: box the mistake, crop, mis-crop, press Ctrl+Z, and the crop
+   * stays while the annotation disappears. There is no redo anywhere, so that
+   * is destructive, and `docs/USAGE.md` promises "undoes the last mark,
+   * including a crop".
+   *
+   * The list holds only *what kind* of action each step was; the state itself
+   * still lives in `#marks` and `#crop`. That keeps one source of truth for the
+   * pixels and adds one for the ordering, rather than duplicating either.
+   *
+   * A second crop replaces the first, so its entry replaces the first's too —
+   * otherwise undoing twice would try to remove a crop that was already gone.
+   */
+  readonly #history: ("mark" | "crop")[] = [];
   #tool: Tool = "box";
 
   /** The capture's own size, which bounds every mark and the crop. */
@@ -84,6 +103,7 @@ export class EditSession {
     const clipped = this.#clip(mark);
     if (!clipped) return false;
     this.#marks.push(clipped);
+    this.#history.push("mark");
     return true;
   }
 
@@ -98,6 +118,11 @@ export class EditSession {
     const clipped = clipRect(rect, this.width, this.height);
     if (!clipped) return false;
     this.#crop = clipped;
+    // One crop entry at most: a second crop replaces the first rather than
+    // stacking, so the history must say the same.
+    const previous = this.#history.indexOf("crop");
+    if (previous !== -1) this.#history.splice(previous, 1);
+    this.#history.push("crop");
     return true;
   }
 
@@ -108,15 +133,15 @@ export class EditSession {
    * whole capture back, or the only way out is to start again.
    */
   undo(): boolean {
-    if (this.#marks.length > 0) {
+    const last = this.#history.pop();
+    if (last === undefined) return false;
+
+    if (last === "mark") {
       this.#marks.pop();
-      return true;
-    }
-    if (this.#crop !== undefined) {
+    } else {
       this.#crop = undefined;
-      return true;
     }
-    return false;
+    return true;
   }
 
   /** The region the exported file covers: the crop, or the whole capture. */
