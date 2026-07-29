@@ -1,7 +1,8 @@
 //! Asking the internal release feed whether a newer build exists.
 //!
 //! This is the *only* thing Shotshelf ever sends over the network, and it sends
-//! nothing but its own version. No capture ever leaves the device, and there is
+//! its version, OS and CPU architecture — SECURITY.md states exactly what the
+//! request discloses. No capture ever leaves the device, and there is
 //! no telemetry.
 //!
 //! **It asks, and stops there.** It used to call `download_and_install` at every

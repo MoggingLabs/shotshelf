@@ -41,8 +41,8 @@ instead of fixing our filing habits.
 ## ✨ What it does
 
 - **Catches** every new screenshot and screen recording while it is running (watches the OS
-  capture locations + clipboard), and brings back anything from the last 24 hours it was not
-  running to see. Shotshelf does **not** add itself to startup — see
+  capture locations + clipboard), and brings back up to twenty captures from the last 24
+  hours it was not running to see. Shotshelf does **not** add itself to startup — see
   [Run it](#-run-it) — so after a reboot you launch it yourself, and the backfill is what stops
   that costing you the morning's captures.
 - **Holds** them in a popover in the corner of your screen, newest first, as thumbnails.
@@ -199,7 +199,7 @@ and size, because that is identity rather than chrome.
 ### Settings
 
 The gear in the title strip opens the whole surface: how long captures **stay**, how many the
-shelf **holds**, whether to **send smaller copies**, and the **hotkey**. That's the entire list,
+shelf **holds**, whether to **send smaller copies**, and the **hotkey**. That's the entire list of *controls*,
 and it's meant to stay short.
 
 Two hand-editable JSON files, on device, never synced — and they are two on purpose:
@@ -209,11 +209,14 @@ Two hand-editable JSON files, on device, never synced — and they are two on pu
 | **Windows** | `%APPDATA%\com.mogginglabs.shotshelf\settings.json` | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\pinned.json` |
 | **macOS** | `~/Library/Application Support/com.mogginglabs.shotshelf/settings.json` | `~/Library/Application Support/com.mogginglabs.shotshelf/pinned.json` |
 
-The split is a privacy one. On Windows `%APPDATA%` is the **roaming** profile, which a domain
-roaming profile or Enterprise State Roaming copies to a network share at logoff — and a pin is an
+The split is a privacy one, **on Windows and Linux**. On Windows `%APPDATA%` is the **roaming**
+profile, which a domain roaming profile or Enterprise State Roaming copies to a network share at
+logoff — and a pin is an
 absolute path to a capture, which carries client and project names as readily as a window title.
 A hotkey and an item cap can roam; five hundred capture paths cannot. Pins live in local app
-data, which nothing syncs, alongside `shotshelf.log`.
+data, which nothing syncs, alongside `shotshelf.log`. On macOS the two paths are the same
+folder — there is no roaming profile to separate them from — so the split is a no-op there, and
+`docs/USAGE.md` says so where it matters, in the uninstall instructions.
 
 The default hotkey is **`CommandOrControl+Shift+S`** — Ctrl+Shift+S on Windows, ⌘⇧S on macOS.
 Worth knowing: a global shortcut takes that combination away from *every* app, and on macOS

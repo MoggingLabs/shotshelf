@@ -202,7 +202,8 @@ never leaves Rust.
 
 ## Settings
 
-The gear in the title strip opens everything there is:
+The gear in the title strip opens every control there is — four of them. One setting has no
+control and is hand-edited only: `checkForUpdates`, covered further down.
 
 | Setting | What it does |
 | :-- | :-- |
@@ -217,7 +218,9 @@ uploaded and then discarded — turning this on costs nothing and saves time and
 off by default because a drag-out is also how captures reach design tools and bug reports, and
 quietly handing you a smaller file than the one you asked for is not a decision Shotshelf
 should make for you. Your original is never modified either way; the smaller copy is a
-separate file, and it keeps the original's name so a drop still produces the file you expect.
+separate file, and it keeps the original's name — with a `.png` extension, because the smaller
+copy really is a PNG and a file whose contents contradict its name breaks whatever opens it. So a
+downscaled `shot.jpg` arrives as `shot.png`.
 
 Settings are two JSON files you can also edit by hand — preferences, and your pins:
 
@@ -227,10 +230,15 @@ Settings are two JSON files you can also edit by hand — preferences, and your 
 | **macOS** | `~/Library/Application Support/com.mogginglabs.shotshelf/settings.json` | `~/Library/Application Support/com.mogginglabs.shotshelf/pinned.json` |
 | **Linux** | `~/.config/com.mogginglabs.shotshelf/settings.json` | `~/.local/share/com.mogginglabs.shotshelf/pinned.json` |
 
-They are separate because on Windows the first location roams to a network share on a managed
-machine and the second does not, and a pin is an absolute path to one of your captures. `pinned.json`
-also records how recent the newest capture Shotshelf has seen was, which is how a relaunch knows
-not to bring back something you removed.
+They are separate **on Windows and Linux** because the first location roams to a network share on
+a managed machine and the second does not, and a pin is an absolute path to one of your captures.
+**On macOS the two paths above are the same folder** — macOS has no roaming profile, so there is
+nothing to separate them from and the split buys nothing there.
+
+`pinned.json` also records how recent the newest capture Shotshelf has seen was, which is how a
+relaunch knows not to bring back something you removed. The same local-data folder holds
+`shotshelf.log` and a small `video-drag-preview.png` that Shotshelf writes for drag previews;
+both are re-derivable and safe to delete.
 
 **About the default hotkey:** a global shortcut takes that combination away from every other
 app. On macOS `⌘⇧S` is Save As almost everywhere, so it's worth changing to something you don't
@@ -291,10 +299,15 @@ Then, if you want its leftovers gone too:
 
 - **Safe to delete, always** — `posters` and `handoff`. Both are caches of things Shotshelf can
   work out again from your captures. Deleting them costs a few seconds of re-reading.
-- **Safe to delete, and you lose your settings** — the settings folder. Your **pins are not in
-  here**: they live in the local app data folder alongside `shotshelf.log`, so deleting only the
-  settings folder resets your preferences and leaves your pinned captures on the shelf. Delete
-  `pinned.json` too if you want a genuinely clean start.
+- **Read this first on macOS.** Shotshelf has two roots on Windows and Linux — a preferences one
+  and a local-data one — and on macOS they are **the same folder**:
+  `~/Library/Application Support/com.mogginglabs.shotshelf/`. So on macOS "delete the settings
+  folder" also deletes `clipboard/` and `edits/`, and the next bullet explains why that is not
+  something to do casually. On Windows and Linux the two are genuinely separate and deleting the
+  preferences one is safe.
+- **Safe to delete, and you lose your preferences** — `settings.json`. Delete the *file*, not the
+  folder, and nothing else goes with it. Your pins are in `pinned.json` in the local-data root,
+  so they survive; delete that too for a genuinely clean start.
 - **Read this before deleting** — `clipboard` and `edits`. `clipboard` holds captures taken with
   Win+Shift+S or ⌘⇧⌃4, which never touched your disk anywhere else — **these are originals, and
   Shotshelf is the only place they exist.** `edits` holds the annotated copies and comparisons you
@@ -312,7 +325,7 @@ it creates there is an empty capture folder that was missing, and those are left
 | :-- | :-- |
 | Nothing appears when you take a screenshot | The folder isn't being watched — check the status line, which now reports the folders actually being watched rather than the ones Shotshelf meant to watch. On macOS, the folder permission prompt may have been declined. `shotshelf.log` says which folder failed and why |
 | The hotkey does nothing | Another app already owns that combination; change it in settings |
-| Nothing appeared after a reboot | Shotshelf does not start itself — add it to your startup items. A launch brings back captures from the previous 24 hours, so the recent ones are still there |
+| Nothing appeared after a reboot | Shotshelf does not start itself — add it to your startup items. A launch brings back **up to 20** captures from the previous 24 hours, newest first, so the recent ones are still there |
 | A recording shows a film glyph, not a frame | ffmpeg couldn't decode that file. The tile still drags out |
 | A tile shows ⚠ | The file has been moved or deleted since it was caught |
 | The shelf is nowhere to be seen | It's a popover — click the tray/menu-bar icon, or press the hotkey |

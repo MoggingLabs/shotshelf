@@ -9,7 +9,7 @@ Thanks for taking the time to contribute!
 2. **Reuse before rewriting.** Shotshelf deliberately forks/adopts existing OSS for the hard parts
    (native drag-out, capture-folder watching) where a good option exists.
    Don't hand-roll what a maintained library already does.
-3. **Keep both platforms working.** Every change is verified on **Windows and macOS**, or clearly
+3. **Keep both platforms working.** Every change is verified by the gates on **Windows, macOS and Linux** in CI. Note what that does *not* mean: the packaged app has never been launched on any platform — [SECURITY.md](./SECURITY.md#what-has-not-been-verified) says exactly what that leaves unverified, and an earlier version of this line claimed more than the project can support, or clearly
    flagged as platform-specific. Catch + drag-out are the two features that must never regress on
    either OS.
 4. **Local-only, always.** No telemetry, no cloud, and exactly one network call: the launch-time

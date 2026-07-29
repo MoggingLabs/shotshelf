@@ -29,7 +29,9 @@ tokens visible on screen, private messages. Shotshelf's core privacy guarantee:
   is the guarantee worth stating. The rest is what an HTTP request costs, and this document is the
   wrong place to round it down.
 
-  Turning the check off in Settings sends nothing at all, and opens no socket.
+  Turning the check off sends nothing at all and opens no socket. It is `checkForUpdates` in
+  `settings.json` — a hand-edit, not a control in the Settings panel, which has four and does not
+  include this one. Saying "in Settings" implied a switch that does not exist.
 - Thumbnails, the capture index, and settings live **only** on the local device.
 - Any change that would introduce a network call touching captures is a privacy regression and will
   be rejected.

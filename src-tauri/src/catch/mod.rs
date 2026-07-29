@@ -181,16 +181,49 @@ impl CaptureSink {
 }
 
 /// Keeps the watcher threads alive for the life of the app; held in Tauri state.
+///
+/// **Managed before the slow work starts, and filled in afterwards.** Starting
+/// the engine can block for seconds — `resolve_watch_dirs` does `exists`,
+/// `create_dir` and `canonicalize` per candidate, and under Windows folder
+/// redirection each is an SMB round trip — so it runs on a worker. That left
+/// the two commands below reading state that was not there yet: Tauri creates
+/// the window *before* `setup` runs, so the webview asks within milliseconds
+/// and both commands answered with an empty list. A backfill that returned
+/// nothing and a status line that said "no capture folders are being watched"
+/// on a launch where nothing was wrong — permanently, because nothing re-asks.
+///
+/// `settings.ts` already documents this exact race for `get_settings` and
+/// works around it by retrying. Rather than have every caller retry, the state
+/// exists from the start and says which of the two things it means:
+/// `None` is "still starting", `Some` is an answer.
 pub struct CatchEngine {
-    /// Where the engine actually is listening — see `catch_watch_dirs`.
+    /// Where the engine actually is listening, once it knows.
     ///
-    /// Only this. The resolved *intended* list was stored beside it and became
-    /// unread the moment the status line stopped reporting it; keeping both
-    /// would leave the next reader a choice between two lists with no way to
-    /// tell which one answers "is it working".
-    watching: Vec<PathBuf>,
+    /// `None` until `start` finishes. Only the resolved list is kept — the
+    /// *intended* one was stored beside it and became unread the moment the
+    /// status line stopped reporting it, and two lists with no way to tell
+    /// which answers "is it working" is worse than one.
+    watching: Mutex<Option<Vec<PathBuf>>>,
     /// Dropping the watch stops the `notify` threads.
-    _folders: Option<folders::FolderWatch>,
+    _folders: Mutex<Option<folders::FolderWatch>>,
+}
+
+impl CatchEngine {
+    /// The resolved watch list, or `None` while the engine is still starting.
+    fn watching(&self) -> Option<Vec<PathBuf>> {
+        lock(&self.watching).clone()
+    }
+}
+
+/// Put the engine in state before anything slow happens.
+///
+/// Split from `start` so `lib.rs` can do this synchronously in `setup` and
+/// then hand the slow half to a worker.
+pub fn reserve<R: Runtime>(app: &AppHandle<R>) {
+    app.manage(CatchEngine {
+        watching: Mutex::new(None),
+        _folders: Mutex::new(None),
+    });
 }
 
 /// Start watching. Never fatal: a shelf with a broken watcher is still a shelf,
@@ -230,10 +263,12 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
     // writes, so the shelf doesn't catch what the shelf just copied.
     app.manage(sink);
 
-    app.manage(CatchEngine {
-        watching,
-        _folders: folders,
-    });
+    // Filled in, not managed: `reserve` put this in place before the window
+    // was shown, precisely so the commands below never see it missing.
+    if let Some(engine) = app.try_state::<CatchEngine>() {
+        *lock(&engine.watching) = Some(watching);
+        *lock(&engine._folders) = folders;
+    }
 }
 
 /// How far back a launch looks for captures it was not running to see.
@@ -281,11 +316,15 @@ const BACKFILL_SETTLED: Duration = Duration::from_secs(5);
 /// So it is a command, the shape pinned captures already use: the front end
 /// asks once it is listening, and gets an answer it cannot miss.
 #[tauri::command]
-pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Vec<Capture> {
-    let Some(engine) = app.try_state::<CatchEngine>() else {
-        return Vec::new();
-    };
-    let dirs = engine.watching.clone();
+pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Capture>, String> {
+    // Same distinction as `catch_watch_dirs`: "still starting" is not "nothing
+    // to bring back". Answering the second for the first made this a silent
+    // no-op again — the very failure the pull-based rewrite existed to fix,
+    // moved from event ordering to state registration.
+    let engine = app
+        .try_state::<CatchEngine>()
+        .ok_or_else(|| STARTING.to_owned())?;
+    let dirs = engine.watching().ok_or_else(|| STARTING.to_owned())?;
     let since = app
         .try_state::<crate::settings::SettingsStore>()
         .map_or(0, |store| store.last_capture_ms());
@@ -299,13 +338,30 @@ pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Vec<Capture> {
         .unwrap_or_default();
 
     let chosen = to_backfill(found, SystemTime::now(), since);
+
+    // Move the watermark past what is being handed over.
+    //
+    // Without this the whole mechanism does nothing: `note_capture` had one
+    // caller, the live capture sink, so a capture that only ever arrived via a
+    // backfill never advanced it — and came back on the next launch, and the
+    // one after that, however many times the user removed it. `Remove` not
+    // surviving a restart is exactly what the watermark was added to fix, and
+    // `settings.rs` even documents this caller ("a backfill hands over
+    // yesterday's after today's have already landed") for a call that did not
+    // exist.
+    if let Some(store) = app.try_state::<crate::settings::SettingsStore>() {
+        if let Some(newest) = chosen.iter().map(|capture| capture.ts).max() {
+            store.note_capture(newest);
+        }
+    }
+
     if !chosen.is_empty() {
         crate::diag::info(&format!(
             "{} captures from before this launch",
             chosen.len()
         ));
     }
-    chosen
+    Ok(chosen)
 }
 
 /// Everything on disk that could be a capture, with when it was taken.
@@ -443,20 +499,31 @@ pub fn overrides_from_env() -> Vec<PathBuf> {
 /// Lets the shelf show where it is listening, so "nothing is appearing" has an
 /// answer the user can see rather than a silence they have to guess at.
 #[tauri::command]
-pub fn catch_watch_dirs<R: Runtime>(app: AppHandle<R>) -> Vec<String> {
-    app.try_state::<CatchEngine>()
-        .map(|engine| {
-            // `watching`, not `watch_dirs`: the second is where the engine
-            // *meant* to listen, and reporting that turned every watcher
-            // failure into a green dot. See `folders::start`.
-            engine
-                .watching
-                .iter()
-                .map(|dir| dir.display().to_string())
-                .collect()
-        })
-        .unwrap_or_default()
+pub fn catch_watch_dirs<R: Runtime>(app: AppHandle<R>) -> Result<Vec<String>, String> {
+    // An error, not an empty list, while the engine is still coming up.
+    //
+    // The two are opposite answers: empty means "nothing is being watched, the
+    // app's one job is not happening", which the front end reports in those
+    // words. Returning it for "ask me again in a moment" told the user their
+    // install was broken on a launch where nothing was wrong, and left it
+    // saying so for the rest of the session.
+    let engine = app
+        .try_state::<CatchEngine>()
+        .ok_or_else(|| STARTING.to_owned())?;
+
+    // `watching`, not the intended list: reporting what the engine *meant* to
+    // watch turned every watcher failure into a green dot. See `folders::start`.
+    engine
+        .watching()
+        .map(|dirs| dirs.iter().map(|dir| dir.display().to_string()).collect())
+        .ok_or_else(|| STARTING.to_owned())
 }
+
+/// What both commands say while the catch engine is still starting.
+///
+/// Matched by the front end, which retries — the same shape `settings.ts` uses
+/// for `get_settings`, which loses the same race for the same reason.
+pub const STARTING: &str = "the catch engine is still starting";
 
 /// A watcher thread dying mid-update should not take the whole engine with it;
 /// the worst a poisoned lock costs here is one stale timestamp.
@@ -625,6 +692,50 @@ mod tests {
         // recovered it.
         let chosen = to_backfill(vec![ordinary(60, "yesterday.png")], now(), 0);
         assert!(chosen[0].context.is_empty());
+    }
+
+    #[test]
+    fn a_scan_admits_only_what_the_watcher_would_admit() {
+        // Against `scan` itself, not against `is_partial` in isolation.
+        //
+        // Deleting both guards from `scan` left all 116 tests green: the rule
+        // was tested in `folders.rs` and nothing checked that `scan` still
+        // called it. That is verbatim the criticism `edit.rs` levels at its own
+        // former test — "splitting the sanitiser out and testing that was not
+        // enough: it left nothing checking that `write_edit` still called it".
+        let dir = std::env::temp_dir().join(format!("shotshelf-scan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+
+        std::fs::write(dir.join("real.png"), b"pixels").expect("a capture");
+        // A macOS AppleDouble stub. Sits beside every real file on exFAT and
+        // SMB volumes, keeps the `.png` extension, and is 4 KB of resource
+        // fork — a broken image on the shelf if it is admitted.
+        std::fs::write(dir.join("._real.png"), b"resource fork").expect("a stub");
+        std::fs::write(dir.join("half.png.part"), b"partial").expect("a partial");
+        std::fs::write(dir.join("~draft.png"), b"draft").expect("a draft");
+        // A placeholder its writer has not filled in yet.
+        std::fs::write(dir.join("empty.png"), b"").expect("an empty file");
+        // Not a capture at all.
+        std::fs::write(dir.join("notes.txt"), b"text").expect("a text file");
+        // A *directory* that looks like one.
+        std::fs::create_dir_all(dir.join("album.png")).expect("a directory");
+
+        let found = scan(std::slice::from_ref(&dir));
+        let mut names: Vec<String> = found
+            .iter()
+            .map(|(_, path, _)| {
+                path.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        names.sort();
+
+        assert_eq!(names, vec!["real.png".to_owned()], "admitted: {names:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -127,6 +127,11 @@ pub fn run() {
             // Run inline it delayed `window::open` below by that whole amount,
             // with nothing on screen and the event loop not yet started, so the
             // tray icon was unresponsive too.
+            // Reserved synchronously, before the slow half runs on a worker:
+            // Tauri creates the window before `setup`, so the webview asks
+            // within milliseconds and both catch commands must be able to say
+            // "still starting" rather than "nothing".
+            catch::reserve(app.handle());
             let engine = app.handle().clone();
             tauri::async_runtime::spawn_blocking(move || {
                 catch::start(&engine, &catch::overrides_from_env());

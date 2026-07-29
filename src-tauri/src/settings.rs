@@ -218,24 +218,22 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
     let local = pins
         .as_ref()
         .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(
-            |raw| match serde_json::from_str::<LocalState>(strip_bom(&raw)) {
-                Ok(state) => Some(state),
-                // Said out loud, like the preferences file four lines up.
-                //
-                // This used to be `.ok()`. A corrupt `pinned.json` therefore lost
-                // every pin in silence, fell back to the preferences file — which
-                // `persist` has been blanking since the split — and the next pin
-                // toggle overwrote the corrupt file, destroying the only copy a
-                // user could have hand-repaired.
-                Err(err) => {
-                    crate::diag::warn(&format!(
-                        "pinned captures could not be read, so none were restored: {err}"
-                    ));
-                    None
-                }
-            },
-        );
+        .and_then(|raw| match read_local_state(strip_bom(&raw)) {
+            Ok(state) => Some(state),
+            // Said out loud, like the preferences file four lines up.
+            //
+            // This used to be `.ok()`. A corrupt `pinned.json` therefore lost
+            // every pin in silence, fell back to the preferences file — which
+            // `persist` has been blanking since the split — and the next pin
+            // toggle overwrote the corrupt file, destroying the only copy a
+            // user could have hand-repaired.
+            Err(err) => {
+                crate::diag::warn(&format!(
+                    "pinned captures could not be read, so none were restored: {err}"
+                ));
+                None
+            }
+        });
 
     if let Some(state) = local {
         current.pinned = state.pinned;
@@ -312,10 +310,40 @@ fn pins_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
 /// Zero means "offer everything in the window", which is right for a fresh
 /// install and right after a corrupt file: the alternative is a launch that
 /// silently brings nothing back.
+/// Parse the local state file, in either shape it has ever had.
+///
+/// It shipped for one round as a bare JSON array of pins, then gained an
+/// object with the capture watermark beside them. Reading only the object
+/// meant an existing file failed to parse, the corrupt-file warning fired, and
+/// every pin was lost — then the first capture overwrote the only copy that
+/// could have been repaired by hand. That is the same defect the previous
+/// migration was written to avoid, one round later, in the same file.
+///
+/// Nobody has an installed build (there are no release tags), so the blast
+/// radius is anyone who built from source in between — which is not nobody,
+/// and is not a reason to skip six lines.
+fn read_local_state(raw: &str) -> Result<LocalState, serde_json::Error> {
+    match serde_json::from_str::<LocalState>(raw) {
+        Ok(state) => Ok(state),
+        Err(object_error) => match serde_json::from_str::<Vec<PinnedItem>>(raw) {
+            // The older shape: pins only, and no watermark yet. Zero is right
+            // for that — it means "offer everything in the window", which is
+            // what the previous version did anyway.
+            Ok(pinned) => Ok(LocalState {
+                pinned,
+                last_capture_ms: 0,
+            }),
+            // Neither shape. Report the object error, which is the one a
+            // reader of the current file wants.
+            Err(_) => Err(object_error),
+        },
+    }
+}
+
 fn local_watermark(pins: &Option<PathBuf>) -> u64 {
     pins.as_ref()
         .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|raw| serde_json::from_str::<LocalState>(strip_bom(&raw)).ok())
+        .and_then(|raw| read_local_state(strip_bom(&raw)).ok())
         .map_or(0, |state| state.last_capture_ms)
 }
 
@@ -533,6 +561,89 @@ mod tests {
         // The corrupt file is left alone until something actually writes, so a
         // user still has a copy to repair by hand.
         assert!(std::fs::read_to_string(&local).is_ok_and(|raw| raw.contains("not json")));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_pins_file_from_the_previous_shape_is_still_read() {
+        // `pinned.json` shipped for one round as a bare array and then became
+        // an object with the watermark beside it. Reading only the object lost
+        // every pin — and then the first capture overwrote the file, so there
+        // was nothing left to repair.
+        let dir = workspace("shape");
+        let local = dir.join("pinned.json");
+        let kept = somewhere("from-the-old-shape.png");
+
+        std::fs::write(
+            &local,
+            serde_json::to_string(&vec![pin(&kept)]).expect("serialises"),
+        )
+        .expect("an old-shape pins file");
+
+        let store = load_from(Some(dir.join("settings.json")), Some(local.clone()));
+
+        assert_eq!(
+            store.get().pinned.len(),
+            1,
+            "the pin survived the shape change"
+        );
+        assert_eq!(store.get().pinned[0].path, kept);
+        assert_eq!(store.last_capture_ms(), 0, "no watermark in the old shape");
+
+        // And it is rewritten in the current shape, so this only happens once.
+        store.note_capture(7);
+        let rewritten = std::fs::read_to_string(&local).expect("rewritten");
+        assert!(rewritten.contains("lastCaptureMs"));
+        assert!(rewritten.contains("from-the-old-shape"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_capture_watermark_only_ever_moves_forward() {
+        // Deleting the `ts <= *newest` guard left all 116 tests green, while
+        // the docstring calls it the thing that stops the shelf "re-offering
+        // everything in between on the next launch".
+        //
+        // It matters because captures genuinely arrive out of order: a backfill
+        // hands over yesterday's after today's have already landed, and a
+        // watermark that moved backwards would re-offer every capture between
+        // the two on the following launch — including ones the user removed.
+        let dir = workspace("watermark");
+        let store = SettingsStore {
+            path: dir.join("settings.json"),
+            pins: dir.join("pinned.json"),
+            current: Mutex::new(Settings::default()),
+            last_capture: Mutex::new(0),
+        };
+
+        store.note_capture(500);
+        assert_eq!(store.last_capture_ms(), 500);
+
+        store.note_capture(200);
+        assert_eq!(
+            store.last_capture_ms(),
+            500,
+            "an older capture must not move it back"
+        );
+
+        store.note_capture(500);
+        assert_eq!(
+            store.last_capture_ms(),
+            500,
+            "the same capture changes nothing"
+        );
+
+        store.note_capture(900);
+        assert_eq!(store.last_capture_ms(), 900);
+
+        // And it survives, which is the whole point of writing it down.
+        let reloaded = load_from(
+            Some(dir.join("settings.json")),
+            Some(dir.join("pinned.json")),
+        );
+        assert_eq!(reloaded.last_capture_ms(), 900);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

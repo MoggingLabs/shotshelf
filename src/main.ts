@@ -194,25 +194,66 @@ if (!import.meta.env.DEV) {
 // ── Events out of Rust ───────────────────────────────────────────────────
 
 subscribe(
-  listen<Capture>("capture://new", ({ payload }) => popover.catch(payload))
-    // Only once the listener is registered, and this ordering is the feature.
-    //
-    // Captures taken while Shotshelf was not running are *pulled*, not pushed:
-    // Rust creates the window and then runs `setup`, so anything emitted there
-    // fires while this bundle is still loading — and Tauri delivers only to
-    // registered handlers and buffers nothing. A push-based backfill was a
-    // silent no-op that the README promised to users. Asking for them here, in
-    // the `.then` of the subscription that would have missed them, is the one
-    // point where the answer cannot be lost.
-    .then(async () => {
-      const missed = await invoke<Capture[]>("catch_backfill");
-      // Added rather than `catch`ed: these are not new, so they must not pop
-      // the column over whatever the user is doing at launch. They are already
-      // oldest-first, and each carries the time it was taken.
-      for (const capture of missed) shelf.add(capture);
-    }),
+  listen<Capture>("capture://new", ({ payload }) => popover.catch(payload)),
   "New captures will not appear on the shelf. Restarting should fix it.",
 );
+
+/**
+ * Ask Rust something the catch engine has to be up for, retrying while it is
+ * not.
+ *
+ * The engine starts on a worker — resolving watch folders can take SMB round
+ * trips on a redirected profile — while the webview is created *before* Rust's
+ * `setup` runs and asks within milliseconds. So both catch commands answer
+ * "the catch engine is still starting" for a moment, and the difference
+ * between that and a real answer is the difference between "ask again" and
+ * "your captures are not being watched".
+ *
+ * `settings.ts` already retries `get_settings` for exactly this reason and
+ * documents the same race; this is the same shape, with the wait long enough
+ * to cover a slow share rather than a fast local disk.
+ */
+async function whenEngineIsUp<T>(what: string, ask: () => Promise<T>): Promise<T> {
+  // The caller passes the `invoke` rather than a command name, so the command
+  // stays a string literal at its call site. Taking the name and invoking it
+  // here read better and broke `check-commands.mjs`, which finds callers by
+  // looking for `invoke("…")` — both catch commands immediately reported as
+  // having no caller in `src/`, which is the gate working exactly as intended.
+  for (let attempt = 0; attempt < ENGINE_ATTEMPTS; attempt += 1) {
+    try {
+      return await ask();
+    } catch (error) {
+      const starting = String(error).includes("still starting");
+      if (!starting || attempt === ENGINE_ATTEMPTS - 1) throw error;
+      await new Promise((wake) => setTimeout(wake, ENGINE_RETRY_MS));
+    }
+  }
+  throw new Error(`${what} never became available`);
+}
+
+/** Roughly six seconds, which is a slow network share rather than a local disk. */
+const ENGINE_ATTEMPTS = 20;
+const ENGINE_RETRY_MS = 300;
+
+// Captures taken while Shotshelf was not running are *pulled*, not pushed.
+//
+// Rust creates the window and then runs `setup`, so anything emitted there
+// fires while this bundle is still loading — and Tauri delivers only to
+// registered handlers and buffers nothing. A push-based backfill was a silent
+// no-op that the README promised to users.
+void whenEngineIsUp("captures from before launch", () => invoke<Capture[]>("catch_backfill"))
+  .then((missed) => {
+    // Added rather than `catch`ed: these are not new, so they must not pop the
+    // column over whatever the user is doing at launch. They are already
+    // oldest-first, and each carries the time it was taken.
+    for (const capture of missed) shelf.add(capture);
+  })
+  .catch((error: unknown) => {
+    // Its own message, not the listener's: the live path is registered and
+    // working, and saying otherwise sends the user after the wrong thing.
+    console.error("[shotshelf] could not recover captures from before launch", error);
+    say("Captures taken while Shotshelf was closed could not be recovered.");
+  });
 
 // Rust shows or hides the window on a tray click, a menu item or the hotkey;
 // these only reshape the front-end to match. Neither may call back into Rust.
@@ -248,7 +289,7 @@ void initSettings(() => shelf.applySettings())
     say("Settings could not be loaded — running on defaults.");
   });
 
-void invoke<string[]>("catch_watch_dirs")
+void whenEngineIsUp("the watch folders", () => invoke<string[]>("catch_watch_dirs"))
   .then((dirs) => showWatchState(dirs))
   .catch((error: unknown) => {
     console.error("[shotshelf] could not read the watch folders", error);
