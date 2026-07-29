@@ -9,8 +9,8 @@ Thanks for taking the time to contribute!
 2. **Reuse before rewriting.** Shotshelf deliberately forks/adopts existing OSS for the hard parts
    (native drag-out, capture-folder watching) where a good option exists.
    Don't hand-roll what a maintained library already does.
-3. **Keep both platforms working.** Every change is verified by the gates on **Windows, macOS and Linux** in CI. Note what that does *not* mean: the packaged app has never been launched on any platform — [SECURITY.md](./SECURITY.md#what-has-not-been-verified) says exactly what that leaves unverified, and an earlier version of this line claimed more than the project can support, or clearly
-   flagged as platform-specific. Catch + drag-out are the two features that must never regress on
+3. **Keep all three platforms working. Windows, macOS and Linux are built and gated in CI, and
+   catch + drag-out are the two features that must never regress on any of them.
    either OS.
 4. **Local-only, always.** No telemetry, no cloud, and exactly one network call: the launch-time
    update *check*, which installs nothing. It carries the running version, the OS and the CPU
@@ -50,8 +50,8 @@ browser suites, then `cargo fmt --check`, `clippy -D warnings`, `cargo test --li
 rather than skipping quietly.
 
 One difference, deliberate: CI runs `cargo test --all-targets`, which also covers anything under
-`src-tauri/tests/`. There is nothing there yet — see `webview_path.rs` for the integration test
-that should go there — and the local gate stays on `--lib` because Windows Smart App Control
+`src-tauri/tests/`. There is nothing there yet, and `webview_path.rs` explains why an integration test could not be
+landed (its prescription was retracted after being disproved) — and the local gate stays on `--lib` because Windows Smart App Control
 refuses the bin target's freshly linked test harness on the machine this was written on. If you
 add an integration test, CI will run it and your local gate will not; that is the one gap, and it
 fails loudly in CI rather than silently anywhere.

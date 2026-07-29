@@ -19,18 +19,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
     // Windows/Linux show the full-colour app icon; macOS gets a monochrome
     // glyph so it can be drawn as a template image (see below).
-    // macOS puts it beside the icon; Linux puts it on the AppIndicator label.
-    //
-    // This was macOS-only, under a comment reading "Windows has no equivalent,
-    // so there the tooltip is the only place the count can appear" — which did
-    // not consider Linux, where it is the *tooltip* that has no equivalent.
-    // `tray-icon`'s GTK backend implements `set_tooltip` as a silent no-op that
-    // discards its argument and returns `Ok`, and implements `set_title` as a
-    // real `set_label`. So on Linux the one call that works was compiled out
-    // and the one that was made did nothing — while `docs/USAGE.md` tells the
-    // Linux user the tray is their primary way in, because clicks do not reach
-    // the app there.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(target_os = "macos")]
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-macos.png"))?;
     #[cfg(not(target_os = "macos"))]
     let icon = app
@@ -95,9 +84,23 @@ pub fn set_capture_count<R: Runtime>(app: AppHandle<R>, count: usize) {
     };
     let _ = tray.set_tooltip(Some(label));
 
-    // macOS can put text beside a menu bar icon; Windows has no equivalent, so
-    // there the tooltip is the only place the count can appear.
-    #[cfg(target_os = "macos")]
+    // macOS puts text beside the menu bar icon; Linux puts it on the
+    // AppIndicator label. Windows is the one platform with no equivalent, so
+    // there the tooltip above really is the only place the count can appear.
+    //
+    // This was macOS-only, under a comment that named Windows and did not
+    // consider Linux — where it is the *tooltip* that has no equivalent:
+    // `tray-icon`'s GTK backend implements `set_tooltip` as a no-op that
+    // discards its argument and returns `Ok`, and `set_title` as a real
+    // `set_label`. So the one call that works was compiled out, on the
+    // platform where `docs/USAGE.md` tells the user the tray is their primary
+    // way in because clicks do not reach the app there.
+    //
+    // A previous attempt at this widened the wrong `cfg` — the icon selection
+    // in `init` — which on Linux left two `let icon` bindings, the first
+    // shadowed and unread, and `-D warnings` refuses that. The Linux CI leg
+    // could not compile, and the local gate could not see it.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     let _ = tray.set_title(if count == 0 {
         None
     } else {

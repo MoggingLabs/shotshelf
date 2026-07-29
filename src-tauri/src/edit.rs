@@ -50,16 +50,9 @@ pub fn allow_reading_edits<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn edits_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        // Local, not roaming: see `catch/clipboard.rs`. An edit is a picture
-        // of the user's screen, and `%APPDATA%` is copied to a network share
-        // under a roaming profile.
-        .app_local_data_dir()
-        .map_err(|err| err.to_string())?
-        .join(EDITS_DIR);
-    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
-    Ok(dir)
+    // Local, not roaming — `cache::local_dir` states why once, for all five
+    // places that need it. An edit is a picture of the user's screen.
+    crate::cache::local_dir(app, EDITS_DIR)
 }
 
 /// Put two captures side by side, with what changed outlined on the second.

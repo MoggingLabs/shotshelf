@@ -31,7 +31,6 @@ import {
 import { ColumnQueue, type HoldReason } from "./column.ts";
 import { armDrag, beginDrag } from "./drag.ts";
 import { columnHeight } from "./geometry.ts";
-import { groupByDay } from "./view/groups.ts";
 import { Selection } from "./selection.ts";
 import { ShelfStore } from "./store.ts";
 import { type Capture, captureId, isEditable, type ShelfItem } from "./types.ts";
@@ -338,7 +337,6 @@ export class Shelf {
     );
   }
 
-  /** What the shelf is showing, in the order it is showing it. */
   /**
    * The captures in the order they are **on screen**, which is what the arrows
    * and shift-ranges walk.
@@ -362,11 +360,15 @@ export class Shelf {
    */
   #visibleIds(): string[] {
     if (this.#mode === "column") return this.#columnItems().map((item) => item.id);
-    // The same grouping the view renders, flattened. One function decides the
-    // order; this asks it rather than guessing.
-    return groupByDay(this.#store.items()).flatMap((group) =>
-      group.items.map((item) => item.id),
-    );
+    // Read off the DOM, by the thing that drew it.
+    //
+    // This derived the browse order itself — first as `store.items()`, which
+    // was simply the wrong order, then as `groupByDay(store.items())`, which
+    // was the right one computed a second time. Both are the same mistake at
+    // different depths: two places deciding one rule and agreeing by
+    // convention. The view is the authority on what is on screen because the
+    // view is what put it there.
+    return this.#view.visibleOrder();
   }
 
   /**

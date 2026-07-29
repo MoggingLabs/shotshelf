@@ -190,19 +190,24 @@ pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) {
         return;
     };
 
-    let (max_width, max_height) = match shelf.primary_monitor().or_else(|_| shelf.current_monitor())
-    {
-        Ok(Some(monitor)) => {
-            let scale = monitor.scale_factor();
-            let area = monitor.work_area();
-            (
-                f64::from(area.size.width) / scale * PREVIEW_FRACTION,
-                f64::from(area.size.height) / scale * PREVIEW_FRACTION,
-            )
-        }
+    // Through `monitor_for`, like `place`. This kept its own
+    // `primary_monitor().or_else(…)` — which never fires the fallback, because
+    // "no primary monitor" is `Ok(None)` and `or_else` only takes `Err` — so on
+    // Wayland it fell into the catch-all arm and returned before `set_size`,
+    // `center`, `show`, `set_focus` and `mark_opened`. The quick look did
+    // nothing at all, silently. `monitor_for` was extracted to fix exactly
+    // that and its docstring names *this* function as a casualty; only `place`
+    // was converted.
+    let Some(monitor) = monitor_for(&shelf) else {
         // Nothing to measure against, so nothing sensible to resize to.
-        _ => return,
+        return;
     };
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    let (max_width, max_height) = (
+        f64::from(area.size.width) / scale * PREVIEW_FRACTION,
+        f64::from(area.size.height) / scale * PREVIEW_FRACTION,
+    );
 
     // A sane aspect or nothing: a zero or negative one would divide by zero,
     // and it arrives from the front-end.

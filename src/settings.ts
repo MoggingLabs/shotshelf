@@ -81,9 +81,24 @@ export function currentSettings(): Settings {
  */
 let loaded = false;
 
-/** How many times to re-ask before giving up. The race is milliseconds wide. */
-const LOAD_ATTEMPTS = 5;
-const LOAD_RETRY_MS = 120;
+/**
+ * How long to keep re-asking before giving up — five seconds.
+ *
+ * "The race is milliseconds wide" is what this used to say, at 5 × 120 ms, and
+ * it is not: `get_settings` cannot answer until `app.manage(stored)`, which
+ * comes after `settings::load` reads `app_config_dir` — `%APPDATA%` under a
+ * roaming or redirected profile, where every read is an SMB round trip. That
+ * is the same argument `main.ts` used to raise the catch engine's budget to a
+ * minute, and it applies here unchanged; the correction landed in one file and
+ * not the other.
+ *
+ * Giving up early is not merely a slow start. `persistPinned` refuses to write
+ * when settings were never loaded — that guard is what stops an empty list
+ * overwriting the user's pins — so an exhausted retry leaves the shelf running
+ * with no pins and no way to save one for the rest of the session.
+ */
+const LOAD_ATTEMPTS = 20;
+const LOAD_RETRY_MS = 250;
 
 async function readStored(): Promise<Settings> {
   let last: unknown;

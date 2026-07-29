@@ -17,7 +17,7 @@ an always-on-top shelf. This guide takes you from download to first drag-out.
 ### Windows 11
 
 1. Download `Shotshelf_<version>_x64_en-US.msi` (or `Shotshelf_<version>_x64-setup.exe`).
-2. Run it. The installer is per-user, so it needs no administrator rights.
+2. Run it. The installer is per-user and needs no administrator rights; the **`.msi`** is per-machine and will ask for them.
 3. Launch **Shotshelf** from the Start menu.
 
 If SmartScreen warns that the publisher is unknown, the build you have is **unsigned** — check

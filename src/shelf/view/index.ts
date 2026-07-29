@@ -65,6 +65,21 @@ export class ShelfView {
   }
 
   /** The full shelf, grouped by day, newest first. */
+  /**
+   * The ids in the order they are on screen right now.
+   *
+   * Asked of the thing that actually drew the DOM, rather than derived a
+   * second time from the same input. Both were computing `groupByDay(items)`
+   * and agreeing by convention — the facade's copy is what walked the wrong
+   * order in the first place, and the next browse-view feature (a pinned-first
+   * section, a filter, a search box) would have changed one and not the other.
+   */
+  visibleOrder(): string[] {
+    return [...this.#list.querySelectorAll<HTMLElement>(".tile")].flatMap((tile) =>
+      tile.dataset["id"] === undefined ? [] : [tile.dataset["id"]],
+    );
+  }
+
   renderBrowse(items: readonly ShelfItem[]): void {
     this.#list.dataset["view"] = "browse";
 

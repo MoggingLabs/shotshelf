@@ -326,8 +326,8 @@ round-trip to Apple's notary service before Gatekeeper will open it.
 
 ### The update feed
 
-Update artifacts (and their `.sig` files) are produced **only when `TAURI_SIGNING_PRIVATE_KEY` is
-set** — an unsigned one is rejected by every installed app, and Tauri refuses to build one
+Update artifacts (and their `.sig` files) need **both** `bundle.createUpdaterArtifacts` in
+`tauri.conf.json` — which is on — and `TAURI_SIGNING_PRIVATE_KEY` in the environment — an unsigned one is rejected by every installed app, and Tauri refuses to build one
 without the key. A build without it still produces perfectly good installers.
 
 The app asks the endpoint in `tauri.conf.json`, with `{{target}}`, `{{arch}}` and

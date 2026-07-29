@@ -403,10 +403,8 @@ fn file_uri(path: &Path) -> String {
 /// Written out once because the drag plugin takes a path to a preview image,
 /// not bytes.
 fn video_preview<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|err| err.to_string())?;
+    // Local app data, never roaming — see `cache::local_dir`.
+    let dir = crate::cache::local_dir(app, "")?;
     std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
 
     let preview = dir.join("video-drag-preview.png");

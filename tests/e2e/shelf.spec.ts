@@ -291,7 +291,13 @@ test("a pin is not saved when the stored settings could never be read", async ({
   await land(page, FIXTURE.wide);
   await openBrowse(page);
 
-  await expect(page.locator("#shelf-alert")).toHaveText(/Settings could not be loaded/);
+  // Waits out the retry deliberately. `readStored` re-asks for five seconds
+  // before it gives up — a settings read can lose a start-up race, and giving
+  // up in 600 ms was under the delay it exists for — so the report arrives
+  // after the watch-folder message, which shares this one strip.
+  await expect(page.locator("#shelf-alert")).toHaveText(/Settings could not be loaded/, {
+    timeout: 15_000,
+  });
   await page.evaluate(() => window.__shotshelf__.clearCalls());
 
   await page.locator(".tile__action--pin").click();

@@ -118,11 +118,6 @@ impl SettingsStore {
         self.persist_local();
     }
 
-    /// Write both files.
-    ///
-    /// Two files, because they have different rules about leaving the machine.
-    /// The preferences file carries everything except `pinned`; the pins file
-    /// carries only `pinned`, and lives where nothing syncs it.
     /// The newest capture the shelf has been told about, in Unix ms.
     pub fn last_capture_ms(&self) -> u64 {
         *self
@@ -170,6 +165,14 @@ impl SettingsStore {
         }
     }
 
+    /// Write both files.
+    ///
+    /// Two, because they have different rules about leaving the machine: the
+    /// preferences file carries everything except `pinned`, and the local file
+    /// carries the pins *and* the capture watermark and lives where nothing
+    /// syncs it. A pin toggle and a capture both take `persist_local` alone —
+    /// see `note_capture` for why rewriting preferences per screenshot was a
+    /// bug rather than a cost.
     fn persist(&self, settings: &Settings) {
         let preferences = Settings {
             pinned: Vec::new(),
@@ -315,8 +318,7 @@ pub struct LocalState {
 /// the machine, and five hundred of their paths syncing to a file share is that
 /// promise broken by the settings file.
 fn pins_path<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
-    let dir = app.path().app_local_data_dir().ok()?;
-    Some(dir.join("pinned.json"))
+    Some(crate::cache::local_dir(app, "").ok()?.join("pinned.json"))
 }
 
 /// The watermark from the local state file, or zero if there is not one yet.

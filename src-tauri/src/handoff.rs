@@ -218,12 +218,12 @@ mod tests {
         //
         // The reach is narrow: a Windows filename cannot contain `:`, so this
         // needs a path from a synced or network volume. Narrow is not a reason
-        // to leave the assertion unwritten, and it is why the containment is
-        // asserted here rather than the two names being merged — `handoff_name`
-        // stays `OsString` for captures whose names are not valid UTF-8, which
-        // `safe_stem` does not.
+        // to leave the assertion unwritten. The two names are one function now
+        // — `handoff_name` delegates to `edit::safe_stem` — so what each module
+        // keeps is its own containment assertion, because each joins onto a
+        // directory of its own.
         let dir = Path::new(if cfg!(windows) {
-            r"C:\cache\handoffbc"
+            r"C:\cache\handoff\abc"
         } else {
             "/cache/handoff/abc"
         });

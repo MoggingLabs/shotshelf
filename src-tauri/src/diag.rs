@@ -55,7 +55,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 
 /// Where the log goes, once the app handle is available.
 ///
@@ -84,7 +84,10 @@ const MAX_LOG_BYTES: u64 = 512 * 1024;
 /// and the roaming profile is copied to a network share at logoff. Same rule
 /// `catch/clipboard.rs` states for captures themselves.
 pub fn init<R: Runtime>(app: &AppHandle<R>) {
-    let Ok(dir) = app.path().app_local_data_dir() else {
+    // Local app data, never roaming — see `cache::local_dir`. This file names
+    // what the app was doing, and the roaming profile is copied to a network
+    // share at logoff.
+    let Ok(dir) = crate::cache::local_dir(app, "") else {
         return;
     };
     init_in(&dir);

@@ -717,11 +717,34 @@ mod tests {
         );
         let newest = newest_of(&chosen).expect("something was chosen");
 
-        assert_eq!(newest, chosen.iter().map(|c| c.ts).max().unwrap());
-        assert!(
-            chosen.iter().all(|capture| capture.ts <= newest),
-            "the watermark must cover every capture handed over",
+        // Against `to_backfill`'s output, not against `newest_of`'s own body.
+        //
+        // The first version of this asserted
+        // `newest == chosen.iter().map(|c| c.ts).max().unwrap()`, which is the
+        // function compared to itself and cannot fail. What matters is the
+        // relationship to the *next* launch: feed the watermark back in and
+        // nothing already handed over may come again.
+        let next_launch = to_backfill(
+            vec![
+                ordinary(600, "older.png"),
+                ordinary(60, "newest.png"),
+                ordinary(300, "middle.png"),
+            ],
+            now(),
+            newest,
         );
+        assert!(
+            next_launch.is_empty(),
+            "a relaunch re-offered captures the last one already handed over: {:?}",
+            next_launch.iter().map(|c| &c.path).collect::<Vec<_>>(),
+        );
+
+        // Specifically the newest, not the last element: the list is handed
+        // over oldest-first, so taking the tail would leave the watermark
+        // behind and re-offer the newest capture on every launch, for ever.
+        let tail = chosen.last().expect("something was chosen").ts;
+        assert!(newest >= tail);
+
         // And a launch with nothing to bring back must not move it at all —
         // moving it forward on an empty answer would skip captures taken
         // between now and the next launch.

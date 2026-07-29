@@ -146,11 +146,16 @@ mod tests {
     // does anything else that takes an `AppHandle`.
     //
     // **The scope, stated properly.** Not a list of stragglers: it is every
-    // registered command that takes an `AppHandle` — all of them bar
-    // `enrich::ocr::text_recognition_available`, which takes none and is
-    // tested directly — and the whole `AppHandle` shell beneath them. Stated
-    // without a count, for the reason this file's header gives: it once said
-    // "six commands" when there were seven. `share.rs`, `edit.rs`, `poster.rs`, `window.rs`,
+    // registered command whose arguments cannot be built in a test — an
+    // `AppHandle` for most, a `tauri::State` for `get_settings` and
+    // `set_pinned` — and the whole shell beneath them. The one exception is
+    // `enrich::ocr::text_recognition_available`, which takes nothing and is
+    // tested directly.
+    //
+    // Stated without a count, and this sentence has now been wrong three
+    // ways: "six commands" when there were seven, then a false universal, then
+    // "all bar one" when it is three. A criterion is checkable; a tally is
+    // just a fact that goes stale. `share.rs`, `edit.rs`, `poster.rs`, `window.rs`,
     // `catch/mod.rs` (including `catch_backfill` and `catch_watch_dirs`),
     // `catch/folders.rs`, `catch/paths.rs`, `catch/clipboard.rs`, `tray.rs`,
     // `hotkey.rs`, `update.rs`, `imaging/mod.rs`, `diag.rs`, `settings::load`,
