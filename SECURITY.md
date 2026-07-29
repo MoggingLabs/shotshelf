@@ -32,7 +32,22 @@ tokens visible on screen, private messages. Shotshelf's core privacy guarantee:
   Turning the check off sends nothing at all and opens no socket. It is `checkForUpdates` in
   `settings.json` — a hand-edit, not a control in the Settings panel, which has four and does not
   include this one. Saying "in Settings" implied a switch that does not exist.
-- Thumbnails, the capture index, and settings live **only** on the local device.
+- Nothing Shotshelf stores leaves the machine by any route Shotshelf controls, and no capture
+  and no path to one is ever written somewhere that syncs.
+
+  Stated that way because the blunter version — "settings live **only** on the local
+  device" — was not true and the difference is the whole reason for the two-file split.
+  `settings.json` is in the **roaming** profile: on Windows `app_config_dir()` and
+  `app_data_dir()` are the same directory, and a managed profile copies it to a network share
+  at logoff. That is deliberate for a hotkey and an item cap, which should follow you between
+  machines. It is why `pinned.json` — the only file naming captures — lives in
+  `%LOCALAPPDATA%` instead, why `settings::persist` blanks `pinned` before writing, and why
+  `scripts/check-dirs.mjs` and `src-tauri/clippy.toml` both refuse to let another module
+  resolve a root for itself.
+
+  There is also no "capture index" and there are no thumbnail files: cards render from the
+  capture itself through `convertFileSrc`, and the only derived images on disk are video
+  poster frames in the cache directory.
 - Any change that would introduce a network call touching captures is a privacy regression and will
   be rejected.
 

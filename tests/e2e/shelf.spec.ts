@@ -42,15 +42,15 @@ test("the column is sized to exactly the cards it holds", async ({ page }) => {
   await land(page, FIXTURE.wide, { ts: 1 });
   await expect(page.locator(".tile")).toHaveCount(1);
   // 112 for the card + 24 of padding and border. Measured against the shipping app.
-  expect(await lastShowHeight(page)).toBe(136);
+  expect(await cardHeight(page)).toBe(136);
 
   await land(page, FIXTURE.tall, { ts: 2 });
   await expect(page.locator(".tile")).toHaveCount(2);
-  expect(await lastShowHeight(page)).toBe(257);
+  expect(await cardHeight(page)).toBe(257);
 
   await land(page, FIXTURE.square, { ts: 3 });
   await expect(page.locator(".tile")).toHaveCount(3);
-  expect(await lastShowHeight(page)).toBe(378);
+  expect(await cardHeight(page)).toBe(378);
 });
 
 test("the column never grows past what fits on screen", async ({ page }) => {
@@ -58,7 +58,7 @@ test("the column never grows past what fits on screen", async ({ page }) => {
   for (let index = 0; index < 9; index += 1) await land(page, FIXTURE.wide, { ts: index });
 
   // Five cards' worth, and it scrolls beyond that rather than growing off the top.
-  expect(await lastShowHeight(page)).toBe(5 * 112 + 4 * 9 + 24);
+  expect(await cardHeight(page)).toBe(5 * 112 + 4 * 9 + 24);
 });
 
 test("a card leaves the column after its minute but stays on the shelf", async ({ page }) => {
@@ -247,6 +247,25 @@ async function settleLaunch(page: import("@playwright/test").Page): Promise<void
 async function lastShowHeight(page: import("@playwright/test").Page): Promise<number | undefined> {
   const calls = await page.evaluate(() => window.__shotshelf__.callsTo("show_shelf"));
   return calls.at(-1)?.args["height"] as number | undefined;
+}
+
+/**
+ * The card part of the requested height, with the alert strip's share removed.
+ *
+ * The column is sized for everything in it, and since the strip stopped being
+ * hidden by shape that includes the strip — a boot with no watched folders says
+ * so, and that message is genuinely on screen. These tests are about the *card*
+ * arithmetic, so the measured strip comes back off rather than being baked into
+ * three magic numbers that would then drift with the stylesheet.
+ *
+ * `tests/visual/layout.spec.ts` is what asserts the strip's share is added.
+ */
+async function cardHeight(page: import("@playwright/test").Page): Promise<number | undefined> {
+  const asked = await lastShowHeight(page);
+  const strip = await page
+    .locator("#shelf-alert")
+    .evaluate((el: HTMLElement) => (el.hasAttribute("hidden") ? 0 : el.offsetHeight));
+  return asked === undefined ? undefined : asked - strip;
 }
 
 test("a card is labelled with what was in front when it was taken", async ({ page }) => {

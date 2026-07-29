@@ -65,6 +65,24 @@ export class Popover {
     void invoke("show_shelf", { focus: false, height: this.#shelf.columnHeight() });
   }
 
+  /**
+   * The column's contents changed height without a card arriving or leaving.
+   *
+   * Distinct from `onColumnChange`, and that distinction is the point: that
+   * method also owns "the column is empty, so put it away", which is right for
+   * a card ageing out and catastrophically wrong here. Routing the alert strip
+   * through it meant a message arriving while the column held nothing dismissed
+   * the shelf — including, in the editor, one raised *by* the thing the user
+   * was doing.
+   *
+   * Does nothing when the shelf is open or the column is not on screen: there
+   * is no column to resize in either case, and `showColumn` would put one there.
+   */
+  resizeColumn(): void {
+    if (this.#opened || this.#shelf.columnIsEmpty) return;
+    this.showColumn();
+  }
+
   /** Ask Rust to put the window away, and drop our own state with it. */
   dismiss(): void {
     this.adoptHidden();

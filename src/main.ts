@@ -18,7 +18,13 @@ import { currentSettings, initSettings, settingsOpen } from "./settings.ts";
 import { textRecognitionAvailable } from "./shelf/bridge.ts";
 import { Shelf, type Capture } from "./shelf/index.ts";
 import { until, type Wait } from "./retry.ts";
-import { noteScanUnavailable, noteWatchUnavailable, say, showWatchState } from "./status.ts";
+import {
+  noteScanUnavailable,
+  noteWatchUnavailable,
+  onAlertChange,
+  say,
+  showWatchState,
+} from "./status.ts";
 
 // Windows rounds the window through DWM at a fixed 8px, so the panel's own
 // radius has to match it there — see `window::round_corners`. The user agent is
@@ -190,6 +196,15 @@ function subscribe(registration: Promise<unknown>, lost: string): void {
 // Note what is deliberately absent: nothing dismisses on focus loss. An opened
 // popover is sticky by design, and the column is never focused in the first
 // place — it is the card timers that end it.
+// The alert strip is part of the column's height, so its appearing or going
+// away is a resize — without this the message was readable and the card it was
+// about was clipped by however tall the message happened to be.
+//
+// `resizeColumn`, never `onColumnChange`: that one also puts an empty column
+// away, so wiring the strip to it made an alert raised while the column held
+// nothing dismiss the shelf.
+onAlertChange(() => popover.resizeColumn());
+
 subscribe(
   shelfWindow.onFocusChanged(({ payload: focused }) => popover.onFocusChanged(focused)),
   "Shotshelf may not notice when it loses focus. Restarting should fix it.",

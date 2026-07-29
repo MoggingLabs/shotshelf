@@ -26,7 +26,13 @@ with whoever produced it before continuing. Signed builds install without a warn
 
 ### macOS
 
-1. Download `Shotshelf_<version>_aarch64.dmg` (Apple Silicon) or `..._x64.dmg` (Intel).
+1. Download `Shotshelf_<version>_aarch64.dmg`.
+
+   **Apple Silicon only.** The release workflow has one macOS runner and builds for its own
+   architecture with no `--target` and no universal binary, so no Intel `.dmg` is produced —
+   and an `aarch64` app does not launch on an Intel Mac at all. This page used to offer an
+   `..._x64.dmg` that has never existed. On an Intel Mac, build from source as under Linux
+   below.
 2. Open it and drag **Shotshelf** into Applications.
 3. Launch it from Applications.
 
@@ -44,9 +50,13 @@ already written.
 
 There is no Linux download. Shotshelf compiles, lints and links on Linux — CI builds it on
 every change — but nobody has yet run it on a Linux desktop, so it ships without an installer
-rather than shipping unverified. To try it, build from source: install `libwebkit2gtk-4.1-dev`,
-`libayatana-appindicator3-dev`, `librsvg2-dev`, `libxdo-dev` and `patchelf`, then
-`npm ci && npm run tauri build`. The tray needs an AppIndicator host — GNOME needs the
+rather than shipping unverified. To try it, build from source: install `build-essential`,
+`libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `libxdo-dev`,
+`libssl-dev` and `patchelf`, then `npm ci && npm run tauri build`. (`libssl-dev` is not
+optional: the updater pulls `reqwest` → `native-tls` → `openssl-sys`, which fails to link
+without it. This list used to omit it and `build-essential`, so the one documented route a
+Linux user has did not work when followed verbatim; `.github/workflows/ci.yml` installs the
+same set.) The tray needs an AppIndicator host — GNOME needs the
 AppIndicator extension; KDE, Xfce and Cinnamon have one already.
 
 One thing works differently there, imposed by the tray protocol rather than by choice: Linux
@@ -127,7 +137,7 @@ shows rather defeats the point.
 | Key | What it does |
 | :-- | :-- |
 | `↑` `↓` | Move between captures, in the order they are shown |
-| `Space` | Open the picked capture at readable size, and close it again |
+| `Space` | Open the picked **image** at readable size, and close it again — recordings have no preview |
 | `Enter` | Copy it to the clipboard |
 | `Delete` | Take it off the shelf — **the file stays on disk** |
 | `e` | Mark the picked capture up |

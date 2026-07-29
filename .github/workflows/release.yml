@@ -85,6 +85,19 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # The toolchain, before the gate rather than after it.
+      #
+      # `npm run gate` runs `cargo fmt --check`, `clippy -D warnings`,
+      # `cargo test` and `cargo build`. With these two steps below the gate, all
+      # four ran on whatever Rust the runner image happened to ship, uncached —
+      # a different compiler from the one `ci.yml` checks with and from the one
+      # that goes on to build the bundle a few steps later.
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
       # The gate, before anything is bundled.
       #
       # This workflow triggers on a `v*` tag and `ci.yml` does not — so a tag
@@ -98,12 +111,6 @@ jobs:
 
       - name: Build frontend
         run: npm run build
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
 
       - name: Bundle installers
         run: npm run release
@@ -119,6 +126,31 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
+      # A release with signing configured but broken must not look like a good
+      # one.
+      #
+      # `if-no-files-found: error` checks the *aggregate*, so it cannot see
+      # this: with a typo'd or expired key, `build-release.mjs` never sets
+      # `createUpdaterArtifacts`, Windows still uploads two installers and macOS
+      # still uploads a `.dmg` — the job goes green having produced no updater
+      # payload and no signature at all. Nothing else in the repo checks that a
+      # `.sig` exists.
+      #
+      # Conditional on the secret, because an unsigned build is a supported and
+      # documented outcome. The failure being caught is "you meant to sign and
+      # did not", which is silent in every other signal.
+      - name: Check the signed artifacts were actually signed
+        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        shell: bash
+        run: |
+          signatures=$(find src-tauri/target/release/bundle -type f -name '*.sig' | wc -l)
+          if [ "$signatures" -eq 0 ]; then
+            echo "::error::a signing key is configured but no .sig was produced." \
+                 "The updater payload would be unusable; check the key and its password."
+            exit 1
+          fi
+          echo "Produced $signatures signature(s)."
+
       # Proves the sidecar actually made it inside, rather than only into the
       # build directory — a bundle without ffmpeg still runs, it just silently
       # stops making poster frames.
@@ -132,8 +164,16 @@ jobs:
           echo "--- ffmpeg alongside the binary ---"
           find src-tauri/target/release -maxdepth 1 -name 'ffmpeg*' -exec ls -lh {} \;
 
+      # Named with the ref, so a hand-dispatched build cannot be mistaken for a
+      # tagged release.
+      #
+      # `workflow_dispatch` runs from a branch, where `github.ref_type` is
+      # `branch`, so the tag-vs-version check above is skipped — correctly,
+      # since there is no tag to check. What was wrong is that the result was
+      # then indistinguishable: the artifact was `shotshelf-windows-latest`
+      # either way, with no ref and no version anywhere in the name.
       - uses: actions/upload-artifact@v7
         with:
-          name: shotshelf-${{ matrix.os }}
+          name: shotshelf-${{ matrix.os }}-${{ github.ref_name }}
           path: ${{ matrix.artifacts }}
           if-no-files-found: error

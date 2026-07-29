@@ -44,6 +44,7 @@ import {
 import { ColumnQueue, type HoldReason } from "./column.ts";
 import { armDrag, beginDrag } from "./drag.ts";
 import { columnHeight } from "./geometry.ts";
+import { alertHeight } from "../status.ts";
 import { inHandoverOrder, Selection } from "./selection.ts";
 import { ShelfStore } from "./store.ts";
 import { type Capture, captureId, isEditable, type ShelfItem } from "./types.ts";
@@ -162,7 +163,7 @@ export class Shelf {
 
   /** Window height the column needs for what it is holding. */
   columnHeight(): number {
-    return columnHeight(this.#column.size);
+    return columnHeight(this.#column.size, alertHeight());
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────

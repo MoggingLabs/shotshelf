@@ -25,8 +25,19 @@ export const COLUMN_MAX_CARDS = 5;
  * Always sized for at least one card: the column is only ever on screen
  * because something landed in it, and a request for zero is a race between a
  * card expiring and the resize that follows, not a real empty column.
+ *
+ * `alsoShowing` is the height of anything in the column that is not a card —
+ * today only the alert strip. It is *measured* by the caller rather than being
+ * a constant here, because the strip's height depends on how far its message
+ * wraps, and no number in this file can know that.
+ *
+ * Without the term, making the strip visible in the column took its space out
+ * of the cards: `.shelf__alert` is `flex: none` and `.shelf__body` is
+ * `flex: 1`, inside a window still sized to 136px for one card. The message
+ * became readable and clipped the capture it was about, which is a poor trade
+ * for a message that is usually about that capture.
  */
-export function columnHeight(cards: number): number {
+export function columnHeight(cards: number, alsoShowing = 0): number {
   const shown = Math.min(Math.max(cards, 1), COLUMN_MAX_CARDS);
-  return shown * CARD_HEIGHT + (shown - 1) * CARD_GAP + COLUMN_PADDING;
+  return shown * CARD_HEIGHT + (shown - 1) * CARD_GAP + COLUMN_PADDING + alsoShowing;
 }

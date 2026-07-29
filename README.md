@@ -105,7 +105,7 @@ registers no login item and writes nothing to a startup folder — an app that a
 startup without being asked is a bad neighbour, and registering a login item is something that
 should be offered in Settings rather than assumed — which is work this branch has not done. Until then: on Windows put a shortcut
 in `shell:startup`, on macOS add it under System Settings → General → Login Items, on Linux drop
-a `.desktop` file in `~/.config/autostart`. A launch picks up anything from the previous 24
+a `.desktop` file in `~/.config/autostart`. A launch picks up up to twenty captures from the previous 24
 hours, so a late start is not a lost morning.
 
 Identical commands on every OS. The shelf is a popover that rests in the bottom-right corner of
@@ -126,7 +126,8 @@ app-icon.png    icon source; regenerate the set with `npm run tauri icon app-ico
 ```
 
 Most of the per-OS code sits behind `cfg` gates that only the matching host compiles, so CI
-builds all three. Every push and PR runs, on **windows-latest, macos-latest and ubuntu-latest**:
+builds all three. Every push to `main` and every pull request runs, on **windows-latest,
+macos-latest and ubuntu-latest**:
 
 | Gate | What it catches |
 | :-- | :-- |
@@ -210,7 +211,8 @@ The gear in the title strip opens the whole surface: how long captures **stay**,
 shelf **holds**, whether to **send smaller copies**, and the **hotkey**. That's the entire list of *controls*,
 and it's meant to stay short.
 
-Two hand-editable JSON files, on device, never synced — and they are two on purpose:
+Two hand-editable JSON files, and they are two on purpose — one of them *does* sync, which is
+exactly why the other one exists:
 
 | | Preferences | Pinned captures |
 | :-- | :-- | :-- |
@@ -349,10 +351,17 @@ caller is current. The manifest shape:
   "pub_date": "2026-07-27T12:00:00Z",
   "platforms": {
     "windows-x86_64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf_0.2.0_x64-setup.exe" },
-    "darwin-aarch64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf_0.2.0_aarch64.app.tar.gz" }
+    "darwin-aarch64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf.app.tar.gz" }
   }
 }
 ```
+
+The macOS filename carries **no version and no architecture** — `tauri-bundler` builds it as
+`<product name>.app.tar.gz`, and that is what the workflow uploads. This example used to name
+`Shotshelf_0.2.0_aarch64.app.tar.gz`, which is not produced by anything, so an operator
+following it published a URL that 404s for every macOS client. Because the name never changes,
+each release overwrites the last one if you copy artifacts into a single directory — give the
+hosted copy a versioned name of your own and point the manifest at that.
 
 The **public** half of the updater key is in `tauri.conf.json`; the private half must never be
 committed — `*.key` is git-ignored. Regenerate the pair with

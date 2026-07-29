@@ -212,6 +212,26 @@ test("a failure is readable in the peeked column, where the failures happen", as
 
   await expect(page.locator("#shelf-alert")).toBeVisible();
   await expect(page.locator("#shelf-alert")).toContainText("0.3.0");
+
+  // And the window was asked to grow by exactly what the strip takes.
+  //
+  // Making the message visible moved its height out of the card area:
+  // `.shelf__alert` is `flex: none` inside a `flex: 1` body, in a window still
+  // sized for one card. The message became readable and clipped the capture it
+  // was usually about.
+  const asked = await page.evaluate(() => {
+    const calls = window.__shotshelf__.callsTo("show_shelf");
+    return calls.at(-1)?.args["height"] as number | undefined;
+  });
+  // `offsetHeight`, not `clientHeight`: the strip has a 1px top border and it
+  // occupies a pixel of the window like any other.
+  const strip = await page.locator("#shelf-alert").evaluate((el: HTMLElement) => el.offsetHeight);
+  const cards = await page.locator(".tile").count();
+
+  // Through the same constants the stylesheet is mirrored against, so this
+  // cannot drift from the card metrics the rest of this file maintains.
+  expect(strip).toBeGreaterThan(0);
+  expect(asked).toBe(cards * CARD_HEIGHT + (cards - 1) * CARD_GAP + COLUMN_PADDING + strip);
 });
 
 test("the CSS mirrors the card metrics the column window is sized against", async ({ page }) => {

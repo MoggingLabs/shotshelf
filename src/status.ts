@@ -31,7 +31,38 @@ export function say(message: string): void {
 
   window.clearTimeout(alertTimer);
   alertTimer = window.setTimeout(hush, ALERT_MS);
+  resized?.();
 }
+
+/**
+ * How tall the strip currently is, or zero when it is not showing.
+ *
+ * Measured rather than derived from a constant: the height depends on how far
+ * the message wraps at the column's width, so a number in `geometry.ts` would
+ * be right for one message and wrong for the next.
+ *
+ * `offsetHeight` is zero for a `display: none` element, so the `hidden` check
+ * is belt and braces — but it states the intent, and this is the file that
+ * owns whether the strip is showing.
+ */
+export function alertHeight(): number {
+  const alert = maybeEl<HTMLElement>("#shelf-alert");
+  if (!alert || alert.hasAttribute("hidden")) return 0;
+  return alert.offsetHeight;
+}
+
+/**
+ * Told when the strip appears or goes away, so the column can resize.
+ *
+ * A callback rather than an import of the popover: this module reports state
+ * and knows nothing about windows, and the sizing decision stays with the
+ * thing that owns the window. `main.ts` is where the two meet.
+ */
+export function onAlertChange(listener: () => void): void {
+  resized = listener;
+}
+
+let resized: (() => void) | undefined;
 
 /** Take the strip down, and stop it coming back on an old timer. */
 function hush(): void {
@@ -40,6 +71,7 @@ function hush(): void {
   if (!alert) return;
   alert.textContent = "";
   alert.setAttribute("hidden", "");
+  resized?.();
 }
 
 /**
