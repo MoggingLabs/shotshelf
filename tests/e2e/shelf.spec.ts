@@ -17,6 +17,7 @@ import {
   openBrowse,
   test,
   CAPTURE_EVENT,
+  PROBLEM_EVENT,
   UPDATE_EVENT,
 } from "../harness/app.ts";
 import engineStarting from "../fixtures/engine-starting.json" with { type: "json" };
@@ -205,7 +206,14 @@ test("the pin control shows its own state, not whichever button came first", asy
   await expect(pin).toHaveClass(/tile__action--on/);
   await expect(pin).toHaveAttribute("title", /unpin/i);
   // And nothing else was relabelled or lit.
-  await expect(others.filter({ has: page.locator(".tile__action--on") })).toHaveCount(0);
+  //
+  // A compound selector, not `filter({ has })`: `has` matches elements with a
+  // *descendant* matching the inner locator, and a `.tile__action` that carries
+  // `--on` itself has no such descendant — so that form yielded zero whether or
+  // not the class was there, and the assertion could not fail.
+  await expect(page.locator(".tile__action:not(.tile__action--pin).tile__action--on")).toHaveCount(
+    0,
+  );
   const labels = await others.evaluateAll((nodes) =>
     nodes.map((node) => node.getAttribute("title") ?? ""),
   );
@@ -593,3 +601,161 @@ test("a pin that could not be saved says so instead of lighting the star in sile
 // the shelf — and every arrangement of that I tried either missed the redraw or
 // measured the dismissal instead. A test that passes for the wrong reason is
 // worse than none here, so this says what is uncovered.
+
+test("captures older than the retention window are let go, and the setting is the one that says so", async ({
+  page,
+}) => {
+  // "Keep for" had no end-to-end coverage of any kind.
+  //
+  // `ShelfStore.sweep` is unit-tested as a pure function, and nothing tested
+  // that the shelf ever hands it the user's setting: replacing
+  // `this.#store.sweep(this.#options.limits().retentionHours)` with
+  // `this.#store.sweep(null)` left lint, knip, `tsc`, every unit test and every
+  // browser test green — one of the four controls in the Settings panel, and a
+  // promise in both README.md and docs/USAGE.md, reduced to a no-op that keeps
+  // everything for ever.
+  await page.clock.install();
+  await bootShelf(page, { settings: { retentionHours: 1 } });
+
+  const now = await page.evaluate(() => Date.now());
+  await land(page, "/shots/yesterday.png", { ts: now - 2 * 3_600_000 });
+  await land(page, "/shots/just-now.png", { ts: now });
+  await expect(page.locator(".tile")).toHaveCount(2);
+
+  // One tick of the sweep timer.
+  await page.clock.runFor(15_000);
+
+  await expect(page.locator(".tile")).toHaveCount(1);
+  await expect(page.locator(".tile")).toHaveAttribute("title", /just-now\.png/);
+});
+
+test("a longer retention window keeps what a shorter one would drop", async ({ page }) => {
+  // The other half, and the half that pins the *setting* rather than the sweep.
+  //
+  // Without it, hard-coding any non-null window — `sweep(1)` — passes the test
+  // above while ignoring what the user chose. Same capture, same elapsed time,
+  // opposite outcome, and the only difference is the number in settings.
+  await page.clock.install();
+  await bootShelf(page, { settings: { retentionHours: 24 } });
+
+  const now = await page.evaluate(() => Date.now());
+  await land(page, "/shots/two-hours-old.png", { ts: now - 2 * 3_600_000 });
+
+  await page.clock.runFor(15_000);
+
+  await expect(page.locator(".tile")).toHaveCount(1);
+});
+
+test("a recording that ages out has its cached poster frame forgotten", async ({ page }) => {
+  // The invariant the module header states — "`#release` is the single way a
+  // capture leaves… all three routes have to clean up a recording's cached
+  // poster frame" — was guarded by nothing.
+  //
+  // Moving the `forgetVideo` call out of `#release` and into `remove()`, so only
+  // the × cleans up, left every gate green. That is the exact bug the header
+  // records as history: every recording evicted by the item cap or the
+  // retention sweep leaks its cached JPEG, and the only backstop is a
+  // half-hourly prune bounded at 750 entries, so a long tray session
+  // accumulates dead frames.
+  //
+  // Asserted on the route that is *not* the ×, because that is the one a
+  // caller-local fix breaks.
+  await page.clock.install();
+  await bootShelf(page, { settings: { retentionHours: 1 } });
+
+  const now = await page.evaluate(() => Date.now());
+  await land(page, "/clips/yesterday.mp4", { kind: "video", ts: now - 2 * 3_600_000 });
+  await expect(page.locator(".tile")).toHaveCount(1);
+
+  // The tile asks for its own details on the way in; only what the eviction
+  // does is interesting.
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+  await page.clock.runFor(15_000);
+
+  await expect(page.locator(".tile")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.__shotshelf__.callsTo("forget_video").map((call) => call.args["path"]),
+      ),
+    )
+    .toEqual(["/clips/yesterday.mp4"]);
+});
+
+test("a recording removed by hand has its cached poster frame forgotten too", async ({ page }) => {
+  // The × route, so the pair covers both sides of the shared method rather
+  // than trading one uncovered route for another.
+  await bootShelf(page);
+  await land(page, "/clips/keeper.mp4", { kind: "video" });
+
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+  await page.locator(".tile").hover();
+  await page.locator(".tile__action--remove").click();
+
+  await expect(page.locator(".tile")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.__shotshelf__.callsTo("forget_video").map((call) => call.args["path"]),
+      ),
+    )
+    .toEqual(["/clips/keeper.mp4"]);
+});
+
+test("a quick look that cannot resize the window says so instead of opening into a column", async ({
+  page,
+}) => {
+  // `preview_shelf` used to be a command returning `()`, so when `preview`
+  // could not identify a monitor it returned before `set_size`, `center`,
+  // `show`, `set_focus` *and* `mark_opened` while still reporting success. The
+  // front end's `await` resolved and mounted a full-size picture into the 225px
+  // column — and because `mark_opened` never fired, the next capture resized
+  // the window to column height underneath it.
+  //
+  // Reachable whenever no monitor can be identified: a disconnected RDP
+  // session, every display asleep. `open` and `peek` degrade sensibly there;
+  // only this one bailed out halfway.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.evaluate(() =>
+    window.__shotshelf__.reject(
+      "preview_shelf",
+      "no monitor could be identified, so the shelf cannot be resized",
+    ),
+  );
+
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press(" ");
+
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+  await expect(page.locator("#shelf-alert")).toContainText(/could not be opened/i);
+  // And nothing was mounted into a window that never grew.
+  await expect(page.locator(".preview")).toHaveCount(0);
+});
+
+test("a capture the engine could not save is reported on screen", async ({ page }) => {
+  // The catch engine had no channel to the alert strip at all: the crate
+  // emitted four events and `main.ts` listened for those four, so a clipboard
+  // image that could not be written reached `shotshelf.log` and nothing else.
+  //
+  // That is the one capture with no other copy — Win+Shift+S and ⌘⌃⇧4 exist
+  // only in the clipboard until Shotshelf writes them — so a full disk or an
+  // unwritable profile destroyed the screenshot outright while the user saw
+  // only a shelf that did not appear, which docs/USAGE.md's troubleshooting
+  // table blames on the folder not being watched.
+  //
+  // The name comes from the fixture Rust asserts its constant against, so a
+  // rename fails on one side or the other rather than silently detaching the
+  // listener.
+  await bootShelf(page);
+  await page.evaluate(
+    ([event, message]) => window.__shotshelf__.emit(event, message),
+    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+  );
+
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+  await expect(page.locator("#shelf-alert")).toContainText(/could not be saved/i);
+  // Rust composes the sentence — the reason has to survive the trip.
+  await expect(page.locator("#shelf-alert")).toContainText(/no space left/i);
+});

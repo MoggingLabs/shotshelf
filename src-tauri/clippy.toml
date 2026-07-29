@@ -58,7 +58,7 @@ disallowed-methods = [
   # Clippy resolves the path, so UFCS and aliases are the same call. The three
   # legitimate granters carry a named `#[allow]`, which makes each one a
   # decision in a diff rather than an entry in a list.
-  { path = "tauri::scope::fs::Scope::allow_directory", reason = "opens every file beside the one named; grant `allow_file` unless the folder itself is the unit" },
+  { path = "tauri::scope::fs::Scope::allow_directory", reason = "opens every file beside the one named; only the three modules whose grants are folders by design may call it" },
 ]
 
 disallowed-types = [

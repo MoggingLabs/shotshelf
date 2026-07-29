@@ -100,9 +100,13 @@ fn spawn_worker<R: Runtime>(app: AppHandle<R>, rx: mpsc::Receiver<()>, sink: Arc
 
             match write_capture(&app, &bytes) {
                 Ok(path) => sink.emit(&app, &path, CaptureKind::Image, Source::Clipboard),
-                Err(err) => {
-                    crate::diag::warn(&format!("could not save the clipboard image: {err}"))
-                }
+                // On screen, not only in the log. This is the one capture with
+                // no other copy: the bytes are in the clipboard and nowhere
+                // else, so failing to write them loses the screenshot outright.
+                Err(err) => super::report_problem(
+                    &app,
+                    &format!("That screenshot could not be saved: {err}"),
+                ),
             }
         }
     });

@@ -232,6 +232,19 @@ if (!import.meta.env.DEV) {
 
 // ── Events out of Rust ───────────────────────────────────────────────────
 
+// A capture that never made it, said out loud.
+//
+// The catch engine had no channel to the alert strip at all: a clipboard image
+// that could not be written went to `shotshelf.log` and nowhere else, and since
+// the clipboard copy is the *only* copy, a full disk destroyed the screenshot
+// while the user saw nothing but a shelf that did not appear.
+//
+// Rust composes the sentence, because only Rust knows what failed.
+subscribe(
+  listen<string>("capture://problem", ({ payload }) => say(payload)),
+  "Shotshelf will not be able to tell you when a capture goes missing.",
+);
+
 subscribe(
   listen<Capture>("capture://new", ({ payload }) => popover.catch(payload)),
   "New captures will not appear on the shelf. Restarting should fix it.",

@@ -331,6 +331,100 @@ fn is_readable(path: &Path) -> bool {
 mod tests {
     use super::*;
 
+    /// A file on disk with `bytes` in it, and a `Pending` that has never seen it.
+    fn waiting_on(name: &str, bytes: usize, kind: CaptureKind) -> (PathBuf, Pending) {
+        let dir = std::env::temp_dir().join("shotshelf-settle-test");
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        let path = dir.join(name);
+        std::fs::write(&path, vec![0u8; bytes]).expect("a file to settle");
+        (
+            path,
+            Pending {
+                kind,
+                last_len: 0,
+                stable_ticks: 0,
+                first_seen: Instant::now(),
+            },
+        )
+    }
+
+    #[test]
+    fn a_screenshot_settles_in_one_quiet_tick_and_a_recording_does_not() {
+        // `settle` had no test at all, so swapping the two arms of its
+        // `match state.kind` — a one-line edit — left all 135 tests and clippy
+        // green. Swapped, a recording is emitted after a single 350 ms tick,
+        // which is the truncated-drag failure `VIDEO_STABLE_TICKS` exists to
+        // prevent; and a screenshot takes 3.2 s, past `ECHO_GRACE`, so every
+        // Win+PrtSc shelves twice and leaves a duplicate PNG behind.
+        //
+        // The first call only records the length — a file whose size is new is
+        // never stable — so both kinds need one call to observe and then as
+        // many quiet ticks as their budget asks for.
+        let (shot, mut shot_state) = waiting_on("shot.png", 16, CaptureKind::Image);
+        assert!(
+            matches!(settle(&shot, &mut shot_state), Settled::Waiting),
+            "the first sight of a file only measures it"
+        );
+        for _ in 0..IMAGE_STABLE_TICKS {
+            assert!(matches!(settle(&shot, &mut shot_state), Settled::Ready));
+        }
+
+        let (clip, mut clip_state) = waiting_on("clip.mp4", 48, CaptureKind::Video);
+        assert!(matches!(settle(&clip, &mut clip_state), Settled::Waiting));
+        // One tick short of the budget, a recording is still not believed —
+        // this is the ffmpeg stall the constant is sized for.
+        for tick in 1..VIDEO_STABLE_TICKS {
+            assert!(
+                matches!(settle(&clip, &mut clip_state), Settled::Waiting),
+                "a recording quiet for only {tick} tick(s) is not finished"
+            );
+        }
+        assert!(matches!(settle(&clip, &mut clip_state), Settled::Ready));
+
+        // And a file that grows resets the count rather than accumulating it.
+        let (growing, mut growing_state) = waiting_on("growing.png", 16, CaptureKind::Image);
+        assert!(matches!(
+            settle(&growing, &mut growing_state),
+            Settled::Waiting
+        ));
+        std::fs::write(&growing, vec![0u8; 32]).expect("it grows");
+        assert!(
+            matches!(settle(&growing, &mut growing_state), Settled::Waiting),
+            "a file that changed size starts its count again"
+        );
+
+        for path in [shot, clip, growing] {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn the_slowest_image_budget_is_the_one_settle_actually_applies() {
+        // `SLOWEST_IMAGE` is derived from `IMAGE_STABLE_TICKS` so that
+        // `clipboard.rs`'s `ECHO_GRACE` moves whenever this does — its docstring
+        // says "now the edit moves both". Nothing checked that `settle` still
+        // *uses* the constant the derivation was computed from, which is the
+        // half that makes the derivation mean anything.
+        let (shot, mut state) = waiting_on("budget.png", 16, CaptureKind::Image);
+
+        let mut ticks = 0u32;
+        // The first call measures; count only the quiet ticks after it.
+        assert!(matches!(settle(&shot, &mut state), Settled::Waiting));
+        while !matches!(settle(&shot, &mut state), Settled::Ready) {
+            ticks += 1;
+            assert!(ticks < 100, "a still file must settle");
+        }
+        ticks += 1;
+
+        assert_eq!(
+            SLOWEST_IMAGE,
+            DEBOUNCE + SETTLE_TICK * ticks,
+            "SLOWEST_IMAGE no longer describes how long settle really takes"
+        );
+
+        let _ = std::fs::remove_file(shot);
+    }
+
     #[test]
     fn ignores_half_written_and_sidecar_files() {
         // Every one of these has actually turned up in a watched folder.

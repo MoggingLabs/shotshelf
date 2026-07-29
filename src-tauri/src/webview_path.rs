@@ -44,6 +44,23 @@ pub fn absolute(path: &str) -> Result<PathBuf, String> {
     Ok(source)
 }
 
+/// How this module says a capture's file has gone.
+///
+/// A named constant because the front end matches on it. `src/shelf/view/tile.ts` reads
+/// `String(error).includes(…)` to tell a recording that has been deleted from
+/// one that is there but unreadable — no ffmpeg, an unsupported container — and
+/// shows the ⚠ glyph for the first and nothing for the second. That was one
+/// sentence in three hand-maintained copies across two languages, with nothing
+/// joining them: this literal, the front end's substring, and a third copy in a
+/// spec stub. Rewording it here left every gate green while `docs/USAGE.md`'s
+/// "a tile shows ⚠ when the file has been moved or deleted" quietly went back to
+/// being true of images only — the exact regression the comment at that branch
+/// says it was written to fix.
+///
+/// Joined through `tests/fixtures/capture-missing.json`, the way [`crate::catch::STARTING`]
+/// is through `engine-starting.json`.
+pub const MISSING: &str = "is no longer on disk";
+
 /// Resolve a webview-supplied path to a capture this app is allowed to read.
 ///
 /// For every caller that goes on to *read* the file. Three checks:
@@ -72,7 +89,7 @@ pub fn existing_file<R: Runtime>(app: &AppHandle<R>, path: &str) -> Result<PathB
     let source = absolute(path)?;
 
     if !source.is_file() {
-        return Err(format!("{path} is no longer on disk"));
+        return Err(format!("{path} {MISSING}"));
     }
     if !app.asset_protocol_scope().is_allowed(&source) {
         return Err(format!(
@@ -121,6 +138,22 @@ pub fn read_capture(path: &Path) -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_missing_sentence_matches_what_the_front_end_looks_for() {
+        // Both sides of one string, joined through the fixture rather than
+        // agreeing by hand. `src/shelf/view/tile.ts` matches on a substring of
+        // this to decide whether a recording gets the ⚠ glyph, and a spec
+        // rejects `video_details` with it.
+        let shared: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/capture-missing.json"))
+                .expect("the shared fixture parses");
+        assert_eq!(
+            shared["missing"].as_str(),
+            Some(MISSING),
+            "the sentence and the fixture the front end reads have drifted",
+        );
+    }
 
     #[test]
     fn a_relative_path_is_refused() {

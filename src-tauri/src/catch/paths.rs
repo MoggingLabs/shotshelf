@@ -140,27 +140,44 @@ fn defaults<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
     )
 }
 
-/// The macOS candidate list: the configured location *and* `~/Desktop`.
+/// The macOS candidate list: the configured location if it is really there,
+/// otherwise `~/Desktop`.
 ///
-/// Not `cfg`-gated, so it has a test on every platform. The decision it holds
-/// was `configured.or(fallback)`, which branches on `Option`-ness and not on
-/// whether the folder is there: `screencapture_location` returns `Some(..)` for
-/// any non-empty `defaults read`, with no `is_dir` check and no requirement
-/// that the path be absolute. One stale preference — an unmounted volume, a
-/// deleted folder — took the fallback out of play, `settle` dropped the dead
-/// path, and macOS ended with *nothing* watched on a machine whose `~/Desktop`
-/// is right there. It is the only platform whose list had a single element.
+/// Not `cfg`-gated, so it has a test on every platform.
 ///
-/// Both, because that is what makes Windows and Linux survive a bad entry:
-/// `settle` filters what does not exist and de-duplicates the rest, so naming
-/// the same folder twice costs nothing.
+/// This was `configured.or(fallback)`, which branches on `Option`-ness and not
+/// on whether the folder exists: `screencapture_location` returns `Some(..)` for
+/// any non-empty `defaults read`, with no `is_dir` check and no requirement that
+/// the path be absolute. One stale preference — an unmounted volume, a deleted
+/// folder — took the fallback out of play, `settle` dropped the dead path, and
+/// macOS ended with *nothing* watched on a machine whose `~/Desktop` is right
+/// there. It is the only platform whose list had a single element.
+///
+/// The fix for that was briefly "push both", which fixed the emptiness and
+/// bought a worse problem: a Mac that has deliberately moved its screenshots
+/// elsewhere had its **whole Desktop** watched anyway — every image and video
+/// sitting in it granted to the webview, up to twenty of them backfilled onto
+/// the shelf as captures, and the column popping when anything was saved there.
+/// README.md, the folder table in `docs/USAGE.md` and that file's own
+/// broad-watching disclosure all said "else"/"otherwise", and all three were
+/// then wrong about the one platform they were describing.
+///
+/// Checking the folder instead of the `Option` fixes the original defect
+/// without widening anything: a configured location that is not a directory is
+/// not a place captures are landing right now, so `~/Desktop` takes over — and
+/// when the configured one is real, it is the only thing watched, which is what
+/// every document already promised.
 // Compiled everywhere, called from the macOS branch and from the test below.
 // That is the point: while this decision lived inside `cfg(macos)` it was
 // unreachable from the machine this is developed on, which is how it shipped.
 // `dead_code` only — nothing here silences a `clippy.toml` rule.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn macos_candidates(configured: Option<PathBuf>, desktop: Option<PathBuf>) -> Vec<PathBuf> {
-    [configured, desktop].into_iter().flatten().collect()
+    configured
+        .filter(|dir| dir.is_dir())
+        .or(desktop)
+        .into_iter()
+        .collect()
 }
 
 /// Reads `defaults read com.apple.screencapture location`. This is a local
@@ -265,19 +282,39 @@ mod tests {
         // `cfg(macos)` function: it was unreachable from this machine, which is
         // how it shipped.
         let gone = PathBuf::from("/Volumes/gone/Shots");
-        let desktop = PathBuf::from("/Users/someone/Desktop");
+        let desktop = std::env::temp_dir().join("shotshelf-macos-desktop-test");
+        std::fs::create_dir_all(&desktop).expect("a real desktop");
 
-        let both = macos_candidates(Some(gone.clone()), Some(desktop.clone()));
-        assert!(
-            both.contains(&gone),
-            "the configured location is still first choice"
+        assert_eq!(
+            macos_candidates(Some(gone.clone()), Some(desktop.clone())),
+            vec![desktop.clone()],
+            "a configured location that is not there hands over to the desktop"
         );
-        assert!(both.contains(&desktop), "and the fallback is still offered");
+
+        // The other half, and the one that keeps the watch list narrow: a
+        // configured location that really exists is watched *instead of* the
+        // desktop, not as well as it. Pushing both was the previous fix, and it
+        // meant a Mac that had deliberately moved its screenshots elsewhere had
+        // its whole Desktop watched, granted to the webview and backfilled —
+        // while all three documents said "otherwise".
+        let real = std::env::temp_dir().join("shotshelf-macos-configured-test");
+        std::fs::create_dir_all(&real).expect("a real configured folder");
+        assert_eq!(
+            macos_candidates(Some(real.clone()), Some(desktop.clone())),
+            vec![real.clone()],
+            "a configured location that is there is the only one watched"
+        );
 
         // Either one missing is not an error; `settle` filters the rest.
-        assert_eq!(macos_candidates(None, Some(desktop.clone())), vec![desktop]);
-        assert_eq!(macos_candidates(Some(gone.clone()), None), vec![gone]);
+        assert_eq!(
+            macos_candidates(None, Some(desktop.clone())),
+            vec![desktop.clone()]
+        );
+        assert_eq!(macos_candidates(Some(gone), None), Vec::<PathBuf>::new());
         assert!(macos_candidates(None, None).is_empty());
+
+        let _ = std::fs::remove_dir_all(&desktop);
+        let _ = std::fs::remove_dir_all(&real);
     }
 
     use super::*;

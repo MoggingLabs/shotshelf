@@ -7,7 +7,26 @@
  * the data it is showing.
  */
 
-export type CaptureKind = "image" | "video";
+/**
+ * The two things a capture can be, exactly as Rust spells them on the wire.
+ *
+ * A value rather than a bare type, for the same reason [`SECRET_KINDS`] is one:
+ * a bare union type-checks against itself and joins nothing. Rust's spelling
+ * comes from a single `#[serde(rename_all = "lowercase")]` on `CaptureKind`,
+ * and changing that attribute compiled, passed clippy, and passed all 135 Rust
+ * tests — while every `capture://new` payload carried a `kind` this union does
+ * not admit, so `isImage` was false for images, recordings rendered as broken
+ * stills, and `prepare_drag` and `copy_capture` — which take a `CaptureKind`
+ * *from* the webview — rejected every drag-out and every copy.
+ *
+ * The front-end suites cannot catch that on their own: `tauri-mock.ts` replaces
+ * `__TAURI_INTERNALS__` wholesale, so no spec ever runs a real `#[tauri::command]`.
+ * `tests/fixtures/capture-kinds.json` is the join, and a test on each side
+ * asserts against it, so a rename fails on whichever side forgot.
+ */
+export const CAPTURE_KINDS = ["image", "video"] as const;
+
+export type CaptureKind = (typeof CAPTURE_KINDS)[number];
 
 /**
  * What was in front when a capture landed.

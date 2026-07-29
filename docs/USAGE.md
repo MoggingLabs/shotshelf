@@ -52,12 +52,16 @@ There is no Linux download. Shotshelf compiles, lints and links on Linux — CI 
 every change — but nobody has yet run it on a Linux desktop, so it ships without an installer
 rather than shipping unverified. To try it, build from source: install `build-essential`,
 `libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `libxdo-dev`,
-`libssl-dev` and `patchelf`, then `npm ci && npm run tauri build`. (`libssl-dev` is not
-optional: the updater pulls `reqwest` → `native-tls` → `openssl-sys`, which fails to link
-without it. This list used to omit it and `build-essential`, so the one documented route a
-Linux user has did not work when followed verbatim; `.github/workflows/ci.yml` installs the
-same set.) The tray needs an AppIndicator host — GNOME needs the
-AppIndicator extension; KDE, Xfce and Cinnamon have one already.
+`libssl-dev` and `patchelf`, then `npm ci && npm run tauri build`. This list used to omit
+`libssl-dev` and `build-essential`, so the one documented route a Linux user has did not work
+when followed verbatim; `.github/workflows/ci.yml` installs exactly this set on every build,
+which is the evidence it is the right one. (No reason is offered here for any individual
+package. An earlier version of this sentence justified `libssl-dev` by saying the updater pulls
+`reqwest` → `native-tls` → `openssl-sys`; the lockfile contains none of those last two, because
+`reqwest` resolves to rustls. It is the webkit2gtk/libsoup side that wants OpenSSL headers, and
+rather than replace one guess with another the list is now simply what CI proves builds.) The
+tray needs an AppIndicator host — GNOME needs the AppIndicator extension; KDE, Xfce and
+Cinnamon have one already.
 
 Three things work differently there. The first is imposed by the drag protocol: the URIs Shotshelf
 advertises when you drag a capture out are built by the drag library, which does not
@@ -269,9 +273,12 @@ relaunch knows not to bring back something you removed. The same local-data fold
 both are re-derivable and safe to delete.
 
 If either settings file is ever unreadable, Shotshelf sets it aside as `<name>.corrupt` (then
-`.corrupt.1`, up to five) rather than overwriting it, and says so in the log — the file is
-hand-repairable and losing it loses your pins. Those copies name captures, so delete them
-along with `pinned.json` if you are removing Shotshelf's data.
+`.corrupt.1`, up to five) rather than overwriting it, and says so in the log. Both are
+hand-repairable, and what losing one costs differs: `settings.json` holds your preferences,
+while `pinned.json` holds the pins — so only that one, and only its `.corrupt` copies, name
+captures. Delete those along with `pinned.json` if you are removing Shotshelf's data. The
+preferences file never contains a capture path, by construction: pins are blanked before it is
+written, which is the whole point of keeping the two apart.
 
 **On Linux, a shortcut can look registered without being.** The library behind it grabs keys
 through X11 only, and its register call returns success even when the grab never happened — so

@@ -410,6 +410,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_uri_is_what_the_clipboard_plugin_accepts_on_this_platform() {
+        // `file_uri` itself had no test on any platform. The only thing covered
+        // was `percent_encode_path`, which is the helper for the *Linux* branch
+        // — the one branch not compiled on Windows or macOS — so the function
+        // whose own docstring records two shipped blockers from this three-way
+        // switch was never called by a test at all.
+        //
+        // One test, three `cfg` arms: each CI leg asserts the contract of the
+        // branch it actually builds, which is the most a compile-time switch
+        // allows. A space in the name is the case that separates them, and it
+        // is in every default recording filename on both desktop platforms.
+        let path = if cfg!(target_os = "windows") {
+            PathBuf::from(r"C:\Users\me\Screen Recording 1.mp4")
+        } else {
+            PathBuf::from("/home/me/Screen Recording 1.mp4")
+        };
+        let uri = file_uri(&path);
+
+        #[cfg(target_os = "windows")]
+        {
+            // The plugin rejects a `file://` prefix here outright.
+            assert!(
+                !uri.starts_with("file://"),
+                "Windows takes a bare path, not a URI: {uri}"
+            );
+            assert_eq!(uri, path.to_string_lossy());
+        }
+        #[cfg(target_os = "macos")]
+        {
+            // Prefixed and *not* encoded: `clipboard-rs` puts the string
+            // verbatim into `NSFilenamesPboardType`, so a receiver that strips
+            // the scheme must be left a real pathname.
+            assert_eq!(uri, "file:///home/me/Screen Recording 1.mp4");
+            assert!(!uri.contains("%20"), "macOS must not percent-encode: {uri}");
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            // A `text/uri-list`, where a raw space is malformed.
+            assert_eq!(uri, "file:///home/me/Screen%20Recording%201.mp4");
+        }
+    }
+
+    #[test]
     fn a_recording_uri_is_encoded_for_the_names_recordings_actually_have() {
         // Only recordings reach `file_uri`, and every platform's default
         // recording name contains spaces — so the one path that needed

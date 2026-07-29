@@ -136,3 +136,35 @@ test("a plugin command is not ours to check", () => {
   });
   assert.ok(result.ok, result.output);
 });
+
+test("a command invoked with single quotes or backticks is seen", () => {
+  // Two rounds edited the quote handling in this regex and neither added a
+  // test: every fixture above invokes with double quotes, so narrowing the
+  // class back to `"` alone left all seven green.
+  //
+  // Both are ordinary TypeScript — Prettier's default is double quotes, but a
+  // template literal is how anyone writing `invoke(`plugin:${name}|go`)` spells
+  // it — and a call the scanner cannot see is a command that reads as
+  // unreachable. That fails the gate for the *wrong* reason today, and would
+  // pass an unregistered command the moment the last double-quoted caller went.
+  const wired = check({
+    "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
+    "src/app.ts": `invoke('wired_command', {});`,
+  });
+  assert.ok(wired.ok, wired.output);
+
+  const backticked = check({
+    "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
+    "src/app.ts": "invoke(`wired_command`, {});",
+  });
+  assert.ok(backticked.ok, backticked.output);
+
+  // And the other direction: a *missing* command is still reported when it is
+  // named with either quote, rather than being silently unseen.
+  const missing = check({
+    "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
+    "src/app.ts": `invoke("wired_command", {});\ninvoke('never_existed', {});`,
+  });
+  assert.equal(missing.ok, false, "a single-quoted invoke of a missing command must fail");
+  assert.match(missing.output, /never_existed/);
+});

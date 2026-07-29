@@ -86,7 +86,35 @@ const WINDOW_EVENTS: &str = include_str!("../../tests/fixtures/window-events.jso
 /// until dismissed by hand — contradicting its own contract.
 fn mark_opened<R: Runtime>(shelf: &WebviewWindow<R>, deliberate: bool) {
     set_opened(true);
-    let _ = shelf.emit(OPENED_EVENT, deliberate);
+    attempt(
+        "announce that the shelf opened",
+        shelf.emit(OPENED_EVENT, deliberate),
+    );
+}
+
+/// Do a window operation, and say so in the log if it does not happen.
+///
+/// Every `set_size`, `show`, `set_focus`, `center`, `hide` and `emit` in this
+/// module used to be `let _ = …`, discarding the one piece of evidence that
+/// anything went wrong — in a file whose own `place`, `monitor_for` and
+/// `toggle` report the identical class of failure four lines away, and beside
+/// `catch::CaptureSink`, which handles the very same `emit` with a full `match`.
+/// One module, two error policies, nothing saying which applied where.
+///
+/// The emit at the end of [`hide`] is the one that makes this matter: `lib.rs`
+/// spells out what it costs when that event does not land — the front end goes
+/// on believing the shelf is open, so every later capture is filed away
+/// silently instead of popping the column. One keystroke, two features dead,
+/// and `docs/USAGE.md` sends the user to `shotshelf.log` for exactly that
+/// symptom, which said nothing.
+///
+/// Not a `Result`: a window that will not resize is worth recording, not worth
+/// abandoning the rest of the sequence for. [`preview`] is the exception and
+/// says why.
+fn attempt<T>(what: &str, outcome: tauri::Result<T>) {
+    if let Err(err) = outcome {
+        crate::diag::warn(&format!("could not {what}: {err}"));
+    }
 }
 
 /// How far the popover sits from the corner it rests in.
@@ -186,10 +214,13 @@ pub fn open<R: Runtime>(app: &AppHandle<R>, deliberate: bool) {
         return;
     };
 
-    let _ = shelf.set_size(tauri::LogicalSize::new(BROWSE_SIZE.0, BROWSE_SIZE.1));
+    attempt(
+        "resize the shelf to the browse grid",
+        shelf.set_size(tauri::LogicalSize::new(BROWSE_SIZE.0, BROWSE_SIZE.1)),
+    );
     place(&shelf, BROWSE_SIZE);
-    let _ = shelf.show();
-    let _ = shelf.set_focus();
+    attempt("show the shelf", shelf.show());
+    attempt("focus the shelf", shelf.set_focus());
     mark_opened(&shelf, deliberate);
 }
 
@@ -212,12 +243,15 @@ pub fn peek<R: Runtime>(app: &AppHandle<R>, height: f64) {
     } else {
         80.0
     };
-    let _ = shelf.set_size(tauri::LogicalSize::new(COLUMN_WIDTH, height));
+    attempt(
+        "resize the shelf to the column",
+        shelf.set_size(tauri::LogicalSize::new(COLUMN_WIDTH, height)),
+    );
     // Re-place on every peek: the column grows a card at a time, and it is
     // pinned by its bottom-right corner, so a taller one has to move up to keep
     // that corner where it was.
     place(&shelf, (COLUMN_WIDTH, height));
-    let _ = shelf.show();
+    attempt("show the column", shelf.show());
 }
 
 /// The largest a preview may be, as a fraction of the screen's work area.
@@ -243,9 +277,9 @@ const PREVIEW_FRACTION: f64 = 0.72;
 /// ever read it, and both were right not to: the toolbar takes a share of the
 /// window, and the webview has not necessarily laid out at the new size by the
 /// time this returns. Both fit their content to the box they actually get.
-pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) {
+pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) -> Result<(), String> {
     let Some(shelf) = app.get_webview_window(SHELF) else {
-        return;
+        return Err("the shelf window is not there".to_owned());
     };
 
     // Through `monitor_for`, like `place`. This kept its own
@@ -257,8 +291,19 @@ pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) {
     // that and its docstring names *this* function as a casualty; only `place`
     // was converted.
     let Some(monitor) = monitor_for(&shelf) else {
-        // Nothing to measure against, so nothing sensible to resize to.
-        return;
+        // Nothing to measure against, so nothing sensible to resize to — and
+        // unlike every other operation in this module, stopping here is not a
+        // cosmetic loss. This returns before `set_size`, `center`, `show`,
+        // `set_focus` *and* `mark_opened`, so the window keeps its 225px column
+        // shape while the front end's `await` resolves and mounts a full-size
+        // picture or an editor into it. Worse, `mark_opened` never firing
+        // leaves the front end's `#opened` false, so the next capture resizes
+        // the window to column height underneath the open overlay.
+        //
+        // So this one reports. `showPreview` already has a `.catch` that puts a
+        // sentence on the alert strip; the caller can decide not to open rather
+        // than open into a window that never grew.
+        return Err("no monitor could be identified, so the shelf cannot be resized".to_owned());
     };
     let scale = monitor.scale_factor();
     let area = monitor.work_area();
@@ -279,14 +324,18 @@ pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) {
     let width = max_width.min(max_height * aspect).max(BROWSE_SIZE.0);
     let height = (width / aspect).min(max_height).max(200.0);
 
-    let _ = shelf.set_size(tauri::LogicalSize::new(width, height));
-    let _ = shelf.center();
-    let _ = shelf.show();
-    let _ = shelf.set_focus();
+    attempt(
+        "resize the shelf for a preview",
+        shelf.set_size(tauri::LogicalSize::new(width, height)),
+    );
+    attempt("centre the shelf", shelf.center());
+    attempt("show the preview", shelf.show());
+    attempt("focus the preview", shelf.set_focus());
     // Safe when already browsing: `adoptBrowse` is front-end state only and
     // never calls back into Rust, so this cannot re-enter.
     // A quick look is the user asking, so the launch appearance stands down.
     mark_opened(&shelf, true);
+    Ok(())
 }
 
 pub fn hide<R: Runtime>(app: &AppHandle<R>) {
@@ -294,13 +343,16 @@ pub fn hide<R: Runtime>(app: &AppHandle<R>) {
         return;
     };
     set_opened(false);
-    let _ = shelf.hide();
+    attempt("hide the shelf", shelf.hide());
 
     // The front-end keeps its own "did you ask for this?" flag, and a close
     // from the tray icon, the tray menu or the hotkey never passes through it.
     // Without this it goes on believing the shelf is open and files every later
     // capture away silently instead of popping the column.
-    let _ = shelf.emit(HIDDEN_EVENT, ());
+    attempt(
+        "announce that the shelf closed",
+        shelf.emit(HIDDEN_EVENT, ()),
+    );
 
     // No `app.hide()` here, on any platform.
     //
@@ -448,8 +500,8 @@ pub fn hide_shelf<R: Runtime>(app: AppHandle<R>) {
 ///
 /// Only Rust knows the work area, so only Rust can choose the size.
 #[tauri::command]
-pub fn preview_shelf<R: Runtime>(app: AppHandle<R>, aspect: f64) {
-    preview(&app, aspect);
+pub fn preview_shelf<R: Runtime>(app: AppHandle<R>, aspect: f64) -> Result<(), String> {
+    preview(&app, aspect)
 }
 
 #[cfg(test)]
@@ -480,6 +532,10 @@ mod tests {
         assert_eq!(
             shared["capture"].as_str(),
             Some(crate::catch::CAPTURE_EVENT)
+        );
+        assert_eq!(
+            shared["problem"].as_str(),
+            Some(crate::catch::PROBLEM_EVENT)
         );
         assert_eq!(shared["update"].as_str(), Some(crate::update::UPDATE_EVENT));
     }

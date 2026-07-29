@@ -18,7 +18,15 @@
  */
 
 import { CARD_GAP, CARD_HEIGHT, COLUMN_PADDING } from "../../src/shelf/geometry.ts";
-import { bootShelf, expect, FIXTURE, land, openBrowse, test } from "../harness/app.ts";
+import {
+  bootShelf,
+  expect,
+  FIXTURE,
+  land,
+  launchAppearance,
+  openBrowse,
+  test,
+} from "../harness/app.ts";
 
 test("adopting an open does not ask Rust to open again", async ({ page }) => {
   await bootShelf(page);
@@ -188,7 +196,7 @@ test("the launch appearance is not cancelled by its own open", async ({ page }) 
 
   // Exactly what Rust does at launch: the open event with `deliberate: false`,
   // followed by the focus it takes on its way up.
-  await page.evaluate(() => window.__shotshelf__.emit("shelf://opened", false));
+  await launchAppearance(page);
   await page.evaluate(() => window.__shotshelf__.emit("tauri://focus", null));
 
   await page.clock.runFor(5_000);
@@ -200,11 +208,11 @@ test("a deliberate open during those four seconds keeps the shelf up", async ({ 
   // by a timer armed before it.
   await page.clock.install();
   await bootShelf(page);
-  await page.evaluate(() => window.__shotshelf__.emit("shelf://opened", false));
+  await launchAppearance(page);
   await page.clock.runFor(2_000);
   await page.evaluate(() => window.__shotshelf__.clearCalls());
 
-  await page.evaluate(() => window.__shotshelf__.emit("shelf://opened", true));
+  await openBrowse(page);
   await page.clock.runFor(5_000);
 
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
@@ -221,7 +229,7 @@ test("a capture arriving during the launch appearance still pops the column", as
   // Exactly what `lib.rs` does at launch: open with `deliberate: false`.
   await page.clock.install();
   await bootShelf(page);
-  await page.evaluate(() => window.__shotshelf__.emit("shelf://opened", false));
+  await launchAppearance(page);
   await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "browse");
 
   await land(page, FIXTURE.wide);
@@ -308,7 +316,7 @@ test("a capture leaving during the launch appearance does not hide the window", 
   await page.clock.install();
   await bootShelf(page);
   await land(page, FIXTURE.wide);
-  await page.evaluate(() => window.__shotshelf__.emit("shelf://opened", false));
+  await launchAppearance(page);
   await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "browse");
   await page.evaluate(() => window.__shotshelf__.clearCalls());
 

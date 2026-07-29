@@ -250,12 +250,12 @@ which is how a relaunch knows not to bring back something you removed.
 
 Retention is in hours and accepts fractions, which is the only practical way to watch expiry work without waiting an hour.
 
-On Wayland it does not: a Wayland client has no protocol for choosing its own position, so the
-shelf appears wherever the compositor puts it. Everywhere else, the popover places itself in the
-corner each time it opens, measured against the monitor's work
+The popover places itself in the corner each time it opens, measured against the monitor's work
 area rather than its full size — so it clears the taskbar wherever that sits, and rearranging
 displays needs no setting at all. The column is pinned by that same corner, so as it grows it
-moves upward and the newest card stays where your eye already is.
+moves upward and the newest card stays where your eye already is. On Wayland it does not: a
+Wayland client has no protocol for choosing its own position, so the shelf appears wherever the
+compositor puts it.
 
 ### Recordings
 
@@ -305,12 +305,20 @@ and the app menu. No filesystem, no clipboard, no shell, no network.
 Thumbnails are rendered straight from disk over Tauri's asset protocol, never inlined as
 base64. That protocol is scoped shut by default, and the scope is granted at **runtime** from
 the same resolved watch list the engine uses, non-recursively, plus the clipboard folder, the
-edits directory and the poster cache. Each pinned capture is granted too, **by file rather than
-by directory**, so that captures restored at launch render before the engine finishes starting
-without opening the folders they happen to sit in. No count is given here: it depends on how
-many watch folders the OS turns out to have, and two earlier versions of this sentence quoted
-numbers that were wrong. `webview_path::existing_file` consults
-exactly this scope before Rust reads any capture.
+edits directory and the poster cache. **The stored pin list grants nothing.** No count is given
+here either: it depends on how many watch folders the OS turns out to have, and two earlier
+versions of this sentence quoted numbers that were wrong.
+`webview_path::existing_file` consults exactly this scope before Rust reads any capture.
+
+Pins are the interesting case, and this paragraph twice described a mechanism the code does not
+have. A capture restored at launch is drawn before the engine has resolved the watch list, so
+its thumbnail can be asked for while the scope is still shut. That was fixed once by granting
+each stored pin — first by directory, then by file — and both are the same mistake at different
+sizes: `pinned.json` is a plain file the user can edit, and two commands let the webview write
+it, so one added path plus a restart admitted an arbitrary file to `describe_capture`,
+`copy_capture` and `prepare_drag`. The race is real; the grant was the wrong end of it. The
+front end redraws those tiles once the catch engine reports ready, which fixes the rendering
+without widening what Rust will read.
 A static scope in `tauri.conf.json` could not express the macOS location, which is only known
 after `defaults read` has run, nor a `SHOTSHELF_WATCH_DIRS` override. The asset URL differs by
 platform (`http://asset.localhost/…` on Windows, `asset://localhost/…` on macOS **and

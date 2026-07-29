@@ -260,3 +260,18 @@ test("the arrows walk the order on screen, not the order captures arrived", asyn
   await page.keyboard.press("ArrowDown");
   await expect(page.locator(".tile").nth(1)).toHaveClass(/tile--picked/);
 });
+
+test("backspace takes it off the shelf, the same as delete", async ({ page }) => {
+  // `docs/USAGE.md` promises "Delete or Backspace", and a census of every key
+  // any spec presses turned up no Backspace anywhere: dropping the
+  // `case "Backspace"` label left the whole gate green while half the
+  // documented gesture stopped working. On a Mac keyboard with no Delete key
+  // it is the *only* half.
+  await threeOpen(page);
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator(".tile--picked")).toHaveCount(1);
+
+  await page.keyboard.press("Backspace");
+
+  await expect(page.locator(".tile")).toHaveCount(2);
+});

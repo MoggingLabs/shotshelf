@@ -71,68 +71,127 @@ const ROAMING = "dirs::preferences";
 const ROAMING_CALLER = "src-tauri/src/settings.rs";
 
 /**
- * The modules whose asset-protocol grants are whole folders on purpose.
- *
- * `src-tauri/src/catch/mod.rs` grants the watch list and the clipboard folder, whose
- * contents are captures by definition; `src-tauri/src/poster.rs` and `src-tauri/src/edit.rs` grant caches
- * Shotshelf itself writes. Anything else wanting the webview to read a file
- * should name that file.
- */
-/**
- * How many `#[allow(clippy::disallowed_methods)]` each file may carry.
+ * Every lint each file is allowed to silence, by name.
  *
  * Every rule in `clippy.toml` — the roaming root, the four `PathResolver`
- * functions, `Scope::allow_directory` — is silenced by one of these at the call.
- * That attribute is three words, copy-pasteable, and there are already eight of
- * them in the tree to copy from, so a reviewer added one to `handoff.rs` next to
- * `Scope::allow_directory(&scope, …)` and to `diag.rs` next to
- * `roots::preferences(app)` and both gates reported success: clippy was
+ * functions, `Scope::allow_directory` — is silenced by one of these at the call,
+ * and the attribute is three words and copy-pasteable. A reviewer added one to
+ * `handoff.rs` beside `Scope::allow_directory(&scope, …)` and one to `diag.rs`
+ * beside `roots::preferences(app)`, and both gates reported success: clippy was
  * silenced, and the checks below match spellings that UFCS and module aliases
- * walk past.
+ * walk past. The two gates were each other's blind spot only for *where a call
+ * is written*; neither covered the escape hatch itself, which is the same hole
+ * in both. This table is what covers it.
  *
- * Counting them here is what closes that. The two gates were each other's
- * blind spot only for *where a call is written*; neither covered *the escape
- * hatch itself*, which is the same hole in both. Adding an allowance now needs a
- * line in this table — a diff, which is what the whole arrangement claimed to
- * be and was not.
+ * Three rounds of this rule were written as a list of attribute *spellings*, and
+ * each was walked past by a spelling nobody had listed: UFCS, then the inner
+ * `#![allow(…)]` form, then `#[expect]`. The fourth bypass was five at once —
+ * `#[allow(clippy::disallowed_methods, clippy::disallowed_types)]`,
+ * `#[expect(…, reason = "…")]` (the form clippy itself recommends),
+ * `#[allow(unused, clippy::disallowed_methods)]`, `#[cfg_attr(all(), allow(…))]`
+ * and `#[allow(clippy :: disallowed_methods)]` — because the pattern admitted
+ * exactly one lint name and then demanded a closing paren. A reviewer used the
+ * comma form to route the diagnostic log, which `dirs.rs` and `SECURITY.md` both
+ * name as the thing that must never roam, into `%APPDATA%` with this script at
+ * exit 0 *and* clippy green.
+ *
+ * So this stops matching spellings. [`silencedIn`] finds attributes by balancing
+ * brackets, strips whitespace, and reads the lint names out of the ones that are
+ * an `allow` or an `expect` — which is decidable, where "did I list every way to
+ * write this attribute" is not.
+ *
+ * Names, not a count. A count is substitutable: `src-tauri/src/imaging/compare.rs` is entitled
+ * to three cast allowances, and with a bare `3` one of them could become
+ * `disallowed_methods` without moving the number.
+ *
+ * The consequence is that *any* clippy allowance needs a line here, not only the
+ * ones touching `clippy.toml`. That is the point — an allowance is a decision,
+ * and the four cast ones below are decisions too. They are cheap to add and the
+ * diff is the record.
  */
-/**
- * Every way to switch the `clippy.toml` rules off.
- *
- * A substring match on `#[allow(clippy::disallowed_methods)]` counted one
- * spelling of several. `#![allow(…)]` — the inner, module-scope form — does not
- * contain it, because of the `!`; nor does `#[allow(clippy::all)]`, nor
- * `#[allow(warnings)]`. Each of those silences the rules for everything below
- * it, and a reviewer used the first to move the hand-off cache — directories
- * named after the captures they hold — into the roaming profile with every gate
- * green.
- *
- * The asymmetry made it specifically a hole for *new* offenders: a file already
- * in the table below cannot switch to the inner form, because its count would
- * drop and the exact-equality check fires. A file with no entry counted zero,
- * expected zero, and passed.
- *
- * Both documents that warn about the inner form — `src-tauri/clippy.toml` and
- * `src-tauri/src/dirs.rs` — named it as the dangerous one while neither gate
- * looked for it.
- */
-// Anchored to the start of a line, so the two files that *warn* about the
-// inner form in prose are not counted as using it.
-const SILENCERS =
-  /^[^\S\r\n]*#!?\[\s*(?:allow|expect)\s*\(\s*(?:clippy::(?:disallowed_methods|disallowed_types|all)|warnings)\s*\)\s*\]/gm;
-
 const ALLOWANCES = new Map([
   // Resolves every root; one per resolving statement, never file-scope.
-  ["src-tauri/src/dirs.rs", 3],
+  ["src-tauri/src/dirs.rs", [
+    "clippy::disallowed_methods",
+    "clippy::disallowed_methods",
+    "clippy::disallowed_methods",
+  ]],
   // The watch list and the clipboard folder.
-  ["src-tauri/src/catch/mod.rs", 1],
+  ["src-tauri/src/catch/mod.rs", ["clippy::disallowed_methods"]],
   // Caches Shotshelf writes itself.
-  ["src-tauri/src/poster.rs", 1],
-  ["src-tauri/src/edit.rs", 1],
+  ["src-tauri/src/poster.rs", ["clippy::disallowed_methods"]],
+  ["src-tauri/src/edit.rs", ["clippy::disallowed_methods"]],
   // The one permitted reach into the roaming profile.
-  ["src-tauri/src/settings.rs", 1],
+  ["src-tauri/src/settings.rs", ["clippy::disallowed_methods"]],
+  // Casts whose range is guarded at the call site, not root resolution.
+  ["src-tauri/src/enrich/foreground.rs", ["clippy::cast_sign_loss"]],
+  ["src-tauri/src/imaging/compare.rs", [
+    "clippy::cast_precision_loss",
+    "clippy::cast_sign_loss",
+    "clippy::cast_sign_loss",
+  ]],
 ]);
 
+/**
+ * The lints an attribute silences, in source order.
+ *
+ * Anchored to the start of a line so the files that *warn* about these forms in
+ * prose are not counted as using them, then balanced across brackets so a
+ * `cfg_attr` wrapper, a `reason = "…"`, or several lints in one attribute are
+ * all read rather than missed. String literals are skipped, so a `)` inside a
+ * reason cannot end the attribute early.
+ *
+ * @param {string} source
+ * @returns {string[]}
+ */
+function silencedIn(source) {
+  const found = [];
+
+  for (const start of source.matchAll(/^[^\S\r\n]*#!?\[/gm)) {
+    const open = start.index + start[0].length - 1;
+    let depth = 0;
+    let end = -1;
+
+    for (let i = open; i < source.length; i += 1) {
+      const char = source[i];
+      if (char === '"') {
+        i += 1;
+        while (i < source.length && source[i] !== '"') i += source[i] === "\\" ? 2 : 1;
+        continue;
+      }
+      if (char === "[" || char === "(") depth += 1;
+      else if (char === "]" || char === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end === -1) continue;
+
+    // Whitespace gone, so `clippy :: disallowed_methods` reads the same as the
+    // ordinary spelling. The prefix class keeps identifiers that merely end in
+    // `allow` from counting.
+    const body = source.slice(open + 1, end).replace(/\s+/g, "");
+    if (!/(?:^|[(,])(?:allow|expect)\(/.test(body)) continue;
+
+    found.push(...[...body.matchAll(/clippy::[a-z_]+/g)].map((lint) => lint[0]));
+    // `warnings` is every lint at once, clippy's included, and names no group.
+    if (/(?:^|[(,])warnings(?=[,)])/.test(body)) found.push("warnings");
+  }
+
+  return found;
+}
+
+/**
+ * The modules whose asset-protocol grants are whole folders on purpose.
+ *
+ * `src-tauri/src/catch/mod.rs` grants the watch list and the clipboard folder,
+ * whose contents are captures by definition; `src-tauri/src/poster.rs` and
+ * `src-tauri/src/edit.rs` grant caches Shotshelf itself writes. Anything else
+ * wanting the webview to read a file has to argue for it here first.
+ */
 const DIRECTORY_GRANTERS = new Set([
   "src-tauri/src/catch/mod.rs",
   "src-tauri/src/poster.rs",
@@ -185,9 +244,18 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
   // definition, and it was briefly used for the parent of every **pinned**
   // capture. `pinned.json` is hand-editable and two commands let the webview
   // write it, so one edited path opened a whole directory for the session —
-  // `Scope` only ever adds. The fix was `allow_file`, and this keeps it that
-  // way by holding `allow_directory` to the modules whose grants are folders
-  // by design — the set below, no count here.
+  // `Scope` only ever adds.
+  //
+  // The fix was not `allow_file`, which an earlier version of this comment
+  // claimed. Granting each stored pin by file has the same defect one size
+  // smaller: `allowed_pins` keeps any path that parses as absolute, so one
+  // hand-edited pin plus a restart still admits an arbitrary file to
+  // `describe_capture`, `copy_capture` and `prepare_drag`. The stored pin list
+  // grants nothing at all now — `src-tauri/src/lib.rs` says so at the site and
+  // says why — and the tiles that used to need it are redrawn by the front end
+  // once the catch engine reports ready. So this rule holds `allow_directory`
+  // to the modules whose grants are folders by design, and there is no
+  // by-file escape hatch behind it.
   //
   // Two limits, both real, and `clippy.toml` now carries this rule as a
   // `disallowed-methods` entry because of the second one.
@@ -217,8 +285,9 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
   if (source.includes("allow_directory(") && !DIRECTORY_GRANTERS.has(normalised)) {
     problems.push(
       `  ${normalised}: calls \`allow_directory\`, which opens every file beside ` +
-        `the one named. Only ${[...DIRECTORY_GRANTERS].join(", ")} may — everything ` +
-        `else grants \`allow_file\`, by name.`,
+        `the one named. Only ${[...DIRECTORY_GRANTERS].join(", ")} may, because ` +
+        `their grants are folders by design. A module that needs one has to join ` +
+        `that set here, in a diff.`,
     );
   }
 
@@ -226,15 +295,15 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
   //
   // Deliberately outside the `resolvesRootsByDesign` exemption: `dirs.rs` is
   // allowed to resolve roots, not to grant itself extra allowances.
-  const allowances = [...source.matchAll(SILENCERS)].length;
-  const permitted = ALLOWANCES.get(normalised) ?? 0;
-  if (allowances !== permitted) {
+  const silenced = silencedIn(source).sort();
+  const permitted = [...(ALLOWANCES.get(normalised) ?? [])].sort();
+  if (silenced.join(", ") !== permitted.join(", ")) {
     problems.push(
-      `  ${normalised}: carries ${allowances} \`#[allow(clippy::disallowed_methods)]\`, ` +
-        `and ${permitted} ${permitted === 1 ? "is" : "are"} accounted for in check-dirs.mjs. ` +
-        `Such an attribute silences the \`clippy.toml\` rules for everything below it, so ` +
-          `adding one is a ` +
-        `decision, not a formality — say why in the table there.`,
+      `  ${normalised}: silences [${silenced.join(", ") || "nothing"}], ` +
+        `and check-dirs.mjs accounts for [${permitted.join(", ") || "nothing"}]. ` +
+        `An \`allow\` or \`expect\` naming a clippy lint switches off part of ` +
+        `\`clippy.toml\` for everything below it, so adding one is a decision, ` +
+        `not a formality — say why in the table there.`,
     );
   }
 

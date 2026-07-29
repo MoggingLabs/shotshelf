@@ -112,10 +112,16 @@ export default defineConfig({
   // The built bundle, not the dev server: the gate should run against what
   // actually ships, and Vite's dev transform is not that.
   webServer: {
-    // `--host 127.0.0.1` is load-bearing: left to itself Vite binds localhost
-    // as IPv6 only, and Playwright's readiness probe hits 127.0.0.1 and waits
-    // out its whole timeout against a server that is already up.
-    command: "npm run build && npx vite preview --port 4173 --strictPort --host 127.0.0.1",
+    // Through `npm run preview`, so there is one definition of how the built
+    // bundle is served.
+    //
+    // These flags are load-bearing: left to itself Vite binds localhost as IPv6
+    // only, and Playwright's readiness probe hits 127.0.0.1 and waits out its
+    // whole timeout against a server that is already up. They used to live only
+    // here, while `package.json` carried a bare `vite preview` that nothing
+    // invoked — so the one script a person would reach for was the one that
+    // reproduced the bug this comment describes.
+    command: "npm run build && npm run preview",
     url: "http://127.0.0.1:4173",
     // Never reused, including locally, and this is not a performance oversight.
     //

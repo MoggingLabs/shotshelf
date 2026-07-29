@@ -13,6 +13,7 @@
 
 import { CARD_GAP, CARD_HEIGHT, COLUMN_PADDING } from "../../src/shelf/geometry.ts";
 import { SECRET_KINDS } from "../../src/shelf/types.ts";
+import captureMissing from "../fixtures/capture-missing.json" with { type: "json" };
 import {
   bootShelf,
   expect,
@@ -101,6 +102,30 @@ test("a capture whose file has gone shows a warning rather than a hole", async (
   await land(page, FIXTURE.missing);
 
   // The fixture route 404s this one, so the real image error path runs.
+  await expect(page.locator(".tile__thumb--missing")).toBeVisible();
+});
+
+test("a recording whose file has gone shows the same warning", async ({ page }) => {
+  // The recording half of the test above, and it had none.
+  //
+  // An image reaches the ⚠ through the `<img>` error handler; a recording can
+  // only reach it through `video_details` failing, and `tile.ts` tells "deleted"
+  // apart from "there but unreadable" by matching Rust's wording. Every
+  // `video_details` stub in the suite either resolved or rejected with "ffmpeg
+  // unavailable", so that branch had no coverage at all: deleting it left the
+  // whole gate green, and `docs/USAGE.md`'s promise that ⚠ means the file has
+  // been moved or deleted went back to being true of images only.
+  //
+  // Rejected with the sentence read from the fixture Rust asserts against, not
+  // a fourth hand-written copy — rewording `webview_path::MISSING` has to fail
+  // on one side or the other.
+  await bootShelf(page);
+  await page.evaluate(
+    (message) => window.__shotshelf__.reject("video_details", message),
+    `/clips/gone.mp4 ${captureMissing.missing}`,
+  );
+  await land(page, "/clips/gone.mp4", { kind: "video" });
+
   await expect(page.locator(".tile__thumb--missing")).toBeVisible();
 });
 

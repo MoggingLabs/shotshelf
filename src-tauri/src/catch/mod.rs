@@ -25,6 +25,31 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 /// Event the shelf front-end listens on. Payload is [`Capture`].
 pub const CAPTURE_EVENT: &str = "capture://new";
 
+/// A capture that was lost on the way in. Payload is a sentence for the user.
+///
+/// The only channel from the catch engine to the alert strip, and until now
+/// there was none: the crate emitted four events and `src/main.ts` listened for
+/// those four, so a capture that could not be saved was written to
+/// `shotshelf.log` and nowhere else.
+///
+/// That gap mattered most where it was least recoverable. A clipboard capture —
+/// Win+Shift+S, ⌘⌃⇧4 — has no file anywhere until this process writes one, so a
+/// full disk or an unwritable profile destroys the only copy that exists, and
+/// what the user saw was the shelf simply not appearing. `docs/USAGE.md`'s
+/// troubleshooting table attributes that to a folder not being watched, which
+/// sends them looking in the wrong place entirely.
+///
+/// Deliberately not clipboard-specific: any capture-level failure belongs here.
+pub const PROBLEM_EVENT: &str = "capture://problem";
+
+/// Tell the user a capture did not make it, and say the same thing in the log.
+pub(crate) fn report_problem<R: Runtime>(app: &AppHandle<R>, message: &str) {
+    crate::diag::warn(message);
+    if let Err(err) = app.emit(PROBLEM_EVENT, message) {
+        crate::diag::warn(&format!("could not report that to the shelf: {err}"));
+    }
+}
+
 /// A capture fires once inside this window however many filesystem events the
 /// OS produced for it.
 const DEDUPE_WINDOW: Duration = Duration::from_secs(3);
@@ -214,6 +239,13 @@ pub struct CatchEngine {
     /// status line stopped reporting it, and two lists with no way to tell
     /// which answers "is it working" is worse than one.
     watching: Mutex<Option<Vec<PathBuf>>>,
+    /// When the watcher started, which is the boundary backfill needs.
+    ///
+    /// `notify` reports events, not history: it can only tell us about writes
+    /// that happen after it registers. So "the watcher will emit this one" is
+    /// true exactly of files whose last write landed at or after this moment,
+    /// and false — permanently — of everything before it.
+    watching_since: Mutex<Option<SystemTime>>,
     /// Dropping the watch stops the `notify` threads.
     _folders: Mutex<Option<folders::FolderWatch>>,
 }
@@ -222,6 +254,11 @@ impl CatchEngine {
     /// The resolved watch list, or `None` while the engine is still starting.
     fn watching(&self) -> Option<Vec<PathBuf>> {
         lock(&self.watching).clone()
+    }
+
+    /// When the watcher registered. `None` while the engine is still starting.
+    fn watching_since(&self) -> Option<SystemTime> {
+        *lock(&self.watching_since)
     }
 }
 
@@ -232,6 +269,7 @@ impl CatchEngine {
 pub fn reserve<R: Runtime>(app: &AppHandle<R>) {
     app.manage(CatchEngine {
         watching: Mutex::new(None),
+        watching_since: Mutex::new(None),
         _folders: Mutex::new(None),
     });
 }
@@ -277,6 +315,11 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
     // was shown, precisely so the commands below never see it missing.
     if let Some(engine) = app.try_state::<CatchEngine>() {
         *lock(&engine.watching) = Some(watching);
+        // Stamped here rather than at the top of `start`: everything above is
+        // resolving paths, and the watcher is not listening until it is built.
+        // Erring late would open the gap this exists to close, so this is the
+        // earliest moment it is honest to claim.
+        *lock(&engine.watching_since) = Some(SystemTime::now());
         *lock(&engine._folders) = folders;
     }
 }
@@ -300,17 +343,34 @@ const BACKFILL_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 /// default item cap, so a backfill never evicts anything the user pinned.
 const BACKFILL_LIMIT: usize = 20;
 
-/// How recently a file may have changed and still count as finished.
+/// Where backfill stops and the watcher takes over.
 ///
 /// A recording in progress has an mtime of *now*. The watcher has a whole
 /// settle loop for that — stability ticks, an empty-file timeout — and a
 /// backfill cannot run one, because it gets a single look at the folder. So it
-/// declines anything this recent and leaves it to the watcher, which is already
-/// watching that folder and will emit it properly once it stops growing.
+/// declines anything the watcher will handle and leaves it there.
 ///
-/// That also removes the only way the two paths could double-shelve one
-/// capture: a file the watcher is about to emit is a file backfill skips.
-const BACKFILL_SETTLED: Duration = Duration::from_secs(5);
+/// The boundary is **when the watcher started**, not "five seconds ago", which
+/// is what this was. `notify` reports events, not history, so it can only emit
+/// a file that was written to after it registered — and `catch_backfill` cannot
+/// run until `start` has finished, so the watcher is always already up by then.
+/// A fixed five-second grace therefore skipped every file whose writes finished
+/// in the moments *before* registration: too recent for backfill, and invisible
+/// to a watcher that was not yet listening.
+///
+/// It was permanent, too. `CaptureSink::emit` moves the watermark with
+/// wall-clock emit time while this filter compares file mtimes, so the first
+/// live capture pushed the watermark past those files for good and no later
+/// launch would offer them either.
+///
+/// Using the registration moment keeps both properties the grace had. A file
+/// still being written has an mtime of now, which is after registration, so it
+/// is still left to the settle loop; and a file the watcher is about to emit is
+/// still a file backfill skips, so the two paths cannot double-shelve one
+/// capture.
+fn watcher_took_over(watching_since: SystemTime) -> SystemTime {
+    watching_since
+}
 
 /// Captures that landed while Shotshelf was not running.
 ///
@@ -347,7 +407,11 @@ pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Capture
         .await
         .unwrap_or_default();
 
-    let chosen = to_backfill(found, SystemTime::now(), since);
+    // `watching()` answered `Some` above, so this cannot be missing — but
+    // falling back to "now" rather than unwrapping keeps the worst case at
+    // "behaves as the old five-second rule did", not a panic in the launch path.
+    let watching_since = engine.watching_since().unwrap_or_else(SystemTime::now);
+    let chosen = to_backfill(found, SystemTime::now(), since, watching_since);
 
     // Move the watermark past what is being handed over.
     //
@@ -432,9 +496,10 @@ fn to_backfill(
     mut found: Vec<(SystemTime, PathBuf, CaptureKind)>,
     now: SystemTime,
     since_ms: u64,
+    watching_since: SystemTime,
 ) -> Vec<Capture> {
     let cutoff = now - BACKFILL_WINDOW;
-    let settled = now - BACKFILL_SETTLED;
+    let settled = watcher_took_over(watching_since);
 
     found.retain(|(modified, _, _)| {
         // Newer than the newest capture the shelf has already seen.
@@ -446,7 +511,7 @@ fn to_backfill(
         // retention had already expired. A user who curates their shelf and
         // then reboots got all twenty back. `Remove` and a naive backfill
         // cancel each other out exactly.
-        as_ms(*modified) > since_ms && *modified >= cutoff && *modified <= settled
+        as_ms(*modified) > since_ms && *modified >= cutoff && *modified < settled
     });
 
     // Newest first to apply the cap, so the cap keeps the most recent...
@@ -621,13 +686,85 @@ mod tests {
         )
     }
 
-    /// Old enough to have settled, recent enough to be inside the window.
+    /// How long ago the watcher came up, in these tests.
+    const WATCH_STARTED_SECS: u64 = 5;
+
+    /// The moment `folders::start` finished — the boundary backfill stops at.
+    fn watcher_started() -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - WATCH_STARTED_SECS)
+    }
+
+    /// `to_backfill` with the watcher-start argument these tests all share.
+    fn backfill(
+        found: Vec<(SystemTime, PathBuf, CaptureKind)>,
+        now: SystemTime,
+        since_ms: u64,
+    ) -> Vec<Capture> {
+        to_backfill(found, now, since_ms, watcher_started())
+    }
+
+    /// Written before the watcher was listening, and inside the window.
+    ///
+    /// One second clear of the boundary rather than exactly on it: a file whose
+    /// last write lands *at* the registration moment is the watcher's, because
+    /// the comparison is strict in that direction on purpose — leaving it to
+    /// backfill as well is how one capture would be shelved twice.
     fn ordinary(secs_ago: u64, name: &str) -> (SystemTime, PathBuf, CaptureKind) {
-        seen(secs_ago + BACKFILL_SETTLED.as_secs(), name)
+        seen(secs_ago + WATCH_STARTED_SECS + 1, name)
     }
 
     fn names(chosen: &[Capture]) -> Vec<&str> {
         chosen.iter().map(|c| c.path.as_str()).collect()
+    }
+
+    #[test]
+    fn the_kinds_on_the_wire_are_the_ones_the_front_end_knows() {
+        // One `#[serde(rename_all = …)]` was the whole agreement between this
+        // enum and `src/shelf/types.ts`, and nothing joined them. Changing the
+        // attribute to `"UPPERCASE"` compiled, passed clippy and passed all 135
+        // tests in this crate — while in the real app the kind crosses in both
+        // directions, so it broke everything at once: outbound, every
+        // `capture://new` carried a `kind` the TypeScript union does not admit,
+        // so `isImage` was false for images (no editor, no compare, no preview)
+        // and recordings rendered as broken stills and got credential-scanned;
+        // inbound, `copy_capture` and `prepare_drag` take a `CaptureKind` *from*
+        // the webview, so serde refused `"image"` and every drag-out and every
+        // copy failed.
+        //
+        // No browser spec could see it either — the e2e harness replaces
+        // `__TAURI_INTERNALS__` wholesale, so nothing there runs a real command.
+        //
+        // Exhaustive by the compiler, the way `secret-kinds.json` is: adding a
+        // variant stops this compiling until it is named, and naming it fails
+        // until the fixture and the TypeScript union agree.
+        let expected: Vec<String> =
+            serde_json::from_str(include_str!("../../../tests/fixtures/capture-kinds.json"))
+                .expect("the shared kinds fixture parses");
+
+        let all = [CaptureKind::Image, CaptureKind::Video];
+        let mut on_the_wire = Vec::new();
+        for kind in all {
+            // No wildcard arm — that is the whole mechanism.
+            let spelling = match kind {
+                CaptureKind::Image => "image",
+                CaptureKind::Video => "video",
+            };
+
+            // Asserted through serde rather than against the literal above,
+            // which would only compare this test to itself.
+            let serialised = serde_json::to_value(kind).expect("a capture kind serialises");
+            assert_eq!(
+                serialised,
+                serde_json::Value::String(spelling.to_owned()),
+                "{kind:?} does not serialise as the front end reads it"
+            );
+            on_the_wire.push(spelling.to_owned());
+        }
+
+        assert_eq!(
+            on_the_wire, expected,
+            "the wire spellings have drifted from tests/fixtures/capture-kinds.json"
+        );
     }
 
     #[test]
@@ -650,7 +787,7 @@ mod tests {
         // from a watcher, and a watcher only runs while the app does — so
         // before this, every restart lost everything taken since the last one
         // while the README claimed it "catches every new screenshot".
-        let chosen = to_backfill(
+        let chosen = backfill(
             vec![
                 ordinary(60, "newest.png"),
                 ordinary(600, "older.png"),
@@ -675,7 +812,7 @@ mod tests {
         // retention clock every launch — so with a one-hour window they would
         // never expire at all.
         let taken = ordinary(3_600, "an-hour-ago.png");
-        let chosen = to_backfill(vec![taken.clone()], now(), 0);
+        let chosen = backfill(vec![taken.clone()], now(), 0);
 
         assert_eq!(chosen.len(), 1);
         assert_eq!(chosen[0].ts, as_ms(taken.0));
@@ -691,7 +828,7 @@ mod tests {
         // reboots got all of it back. The watermark is what makes `Remove`
         // stick across a restart.
         let watermark = as_ms(ordinary(300, "x").0);
-        let chosen = to_backfill(
+        let chosen = backfill(
             vec![
                 ordinary(600, "removed-last-session.png"),
                 ordinary(300, "exactly-the-watermark.png"),
@@ -715,7 +852,7 @@ mod tests {
         // it here would hand over a truncated file — the exact failure
         // `folders.rs` exists to prevent. Leaving it also removes the only way
         // the two paths could double-shelve one capture.
-        let chosen = to_backfill(
+        let chosen = backfill(
             vec![
                 seen(1, "recording-in-progress.mp4"),
                 ordinary(60, "finished.png"),
@@ -733,7 +870,7 @@ mod tests {
         // the window is history the user already has a folder for, and a
         // machine with four thousand screenshots must not have them all
         // shelved.
-        let stale = to_backfill(
+        let stale = backfill(
             vec![ordinary(BACKFILL_WINDOW.as_secs() + 60, "last-week.png")],
             now(),
             0,
@@ -750,7 +887,7 @@ mod tests {
         flood.rotate_left(37);
         flood.swap(0, BACKFILL_LIMIT * 2);
 
-        let capped = to_backfill(flood, now(), 0);
+        let capped = backfill(flood, now(), 0);
         assert_eq!(capped.len(), BACKFILL_LIMIT);
         // The cap keeps the newest — `shot0` is the most recent, `shot99` the
         // oldest — whatever order they were found in.
@@ -758,6 +895,47 @@ mod tests {
         assert!(
             !names(&capped).contains(&"shot99.png"),
             "the oldest did not"
+        );
+    }
+
+    #[test]
+    fn a_capture_written_just_before_the_watcher_started_is_still_brought_back() {
+        // The gap this boundary exists to close.
+        //
+        // `notify` reports events, not history, so a file whose writes finished
+        // before registration produces none — ever. The rule used to be "skip
+        // anything modified in the last five seconds, the watcher has it", and
+        // for the seconds either side of start-up that was simply false: too
+        // recent for backfill, invisible to a watcher that was not yet
+        // listening. Permanently, too, because `CaptureSink::emit` moves the
+        // watermark by wall-clock emit time while this filter reads mtimes, so
+        // the first live capture pushed the watermark past it for good.
+        //
+        // Its own watcher start, deliberately: a launch that has just finished
+        // starting up is the only arrangement where the gap opens, and the
+        // shared helper puts the watcher five seconds back, which is far enough
+        // that the old five-second grace happened to admit the file anyway.
+        //
+        // One second ago, then, and a screenshot taken two seconds ago — while
+        // Shotshelf was still coming up. Under the old rule that file was
+        // inside the grace and skipped as "the watcher has it"; the watcher had
+        // not started yet, so nothing had it.
+        let started_just_now = SystemTime::UNIX_EPOCH + Duration::from_secs(NOW_SECS - 1);
+        let during_launch = seen(2, "taken-during-launch.png");
+        let chosen = to_backfill(vec![during_launch], now(), 0, started_just_now);
+        assert_eq!(
+            names(&chosen),
+            vec!["taken-during-launch.png"],
+            "a capture the watcher could not have seen has to come from backfill"
+        );
+
+        // And the other side of the boundary still belongs to the watcher, so
+        // the two paths cannot both shelve one capture: written after
+        // registration, and still growing.
+        let after = seen(0, "still-being-written.mp4");
+        assert!(
+            to_backfill(vec![after], now(), 0, started_just_now).is_empty(),
+            "a file written after the watcher came up is the watcher's to emit"
         );
     }
 
@@ -772,7 +950,7 @@ mod tests {
         // the shelf's newest-on-top order matches when they were taken, so
         // taking the final element would leave the watermark behind the newest
         // capture and re-offer it forever.
-        let chosen = to_backfill(
+        let chosen = backfill(
             vec![
                 ordinary(600, "older.png"),
                 ordinary(60, "newest.png"),
@@ -790,7 +968,7 @@ mod tests {
         // function compared to itself and cannot fail. What matters is the
         // relationship to the *next* launch: feed the watermark back in and
         // nothing already handed over may come again.
-        let next_launch = to_backfill(
+        let next_launch = backfill(
             vec![
                 ordinary(600, "older.png"),
                 ordinary(60, "newest.png"),
@@ -832,7 +1010,7 @@ mod tests {
         // taken before this process existed, and reading it now would answer
         // "Shotshelf" — labelling every recovered card with the app that
         // recovered it.
-        let chosen = to_backfill(vec![ordinary(60, "yesterday.png")], now(), 0);
+        let chosen = backfill(vec![ordinary(60, "yesterday.png")], now(), 0);
         assert!(chosen[0].context.is_empty());
     }
 

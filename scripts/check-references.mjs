@@ -133,6 +133,38 @@ function commentsIn(file, source) {
   if (file.endsWith(".css")) {
     return unwrap([...source.matchAll(/\/\*[\s\S]*?\*\//g)].map((match) => match[0]).join("\n"));
   }
+  // JSON has no comment syntax at all, so its prose *is* its string values.
+  //
+  // Without this branch the two JSON globs fell through to the `/* */` and `//`
+  // extraction below and produced nothing — so the capabilities file and
+  // `tauri.conf.json` were listed, read, and silently contributed no references
+  // for two rounds, while the comment beside the globs said they were here
+  // because nothing read them. A gate against overclaiming, overclaiming.
+  //
+  // Only the string values: a key is a schema name, not a claim, and the
+  // rules below fire only on backticked tokens anyway.
+  if (file.endsWith(".json")) {
+    /** @type {string[]} */
+    const strings = [];
+    /** @param {unknown} node */
+    const collect = (node) => {
+      if (typeof node === "string") strings.push(node);
+      else if (Array.isArray(node)) node.forEach(collect);
+      else if (node !== null && typeof node === "object") Object.values(node).forEach(collect);
+    };
+
+    try {
+      collect(JSON.parse(source));
+    } catch (error) {
+      // Loudly, with the filename. Returning nothing here would be the same
+      // silence this branch exists to end.
+      throw new Error(`${file} is not valid JSON`, { cause: error });
+    }
+
+    // Each value unwrapped on its own, so a title in one cannot pair with a
+    // spec name in another — the same rule the line-comment runs follow.
+    return strings.map(unwrap).join("\n");
+  }
 
   const comments = [];
   // Block comments, including Rust's and JSDoc.
@@ -260,7 +292,20 @@ function report(file, reference, why) {
   problems.push(`  ${file}: \`${reference}\` — ${why}`);
 }
 
-for (const file of SOURCE_GLOBS.flatMap((glob) => globSync(glob))) {
+// A glob that matches nothing is a tree nobody is checking.
+//
+// The success line used to count *globs*, so it reported fifteen source trees
+// while two of them contributed no references at all. A pattern that has stopped
+// matching — a renamed directory, a moved config — now says so instead of
+// quietly shrinking the gate.
+const EMPTY_GLOBS = SOURCE_GLOBS.filter((glob) => globSync(glob).length === 0);
+for (const glob of EMPTY_GLOBS) {
+  problems.push(`  ${glob}: matches no files, so nothing in that tree is checked.`);
+}
+
+const SOURCES = SOURCE_GLOBS.flatMap((glob) => globSync(glob));
+
+for (const file of SOURCES) {
   const source = readFileSync(file, "utf8");
   const prose = commentsIn(file, source);
 
@@ -365,7 +410,11 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-console.info(`Checked comment references across ${SOURCE_GLOBS.length} source trees.`);
+// Files, not globs. The count people read should be the work actually done.
+console.info(
+  `Checked comment references in ${SOURCES.length} files ` +
+    `across ${SOURCE_GLOBS.length} source trees.`,
+);
 
 /**
  * Every directory a reference in this file could sensibly be relative to.

@@ -7,6 +7,7 @@
  */
 
 import { bootShelf, expect, FIXTURE, land, openBrowse, test } from "../harness/app.ts";
+import captureMissing from "../fixtures/capture-missing.json" with { type: "json" };
 
 /**
  * Press a card on its picture.
@@ -20,16 +21,22 @@ import { bootShelf, expect, FIXTURE, land, openBrowse, test } from "../harness/a
 async function pressCard(
   page: import("@playwright/test").Page,
   index: number,
-  modifiers: { shift?: boolean; ctrl?: boolean } = {},
+  modifiers: { shift?: boolean; ctrl?: boolean; meta?: boolean } = {},
 ): Promise<void> {
   const card = page.locator(".tile").nth(index);
   await card.scrollIntoViewIfNeeded();
   const box = await card.boundingBox();
   expect(box).not.toBeNull();
 
-  const keys: ("Shift" | "Control")[] = [];
+  // `Meta` separately from `Control`, not through Playwright's `ControlOrMeta`,
+  // which resolves by *host* — so on every runner this project uses it is
+  // Control, and the `event.metaKey` half of `#pick` had never been pressed.
+  // Dropping it left the suite green while ⌘-click, the only multi-select
+  // gesture a Mac user has, stopped working.
+  const keys: ("Shift" | "Control" | "Meta")[] = [];
   if (modifiers.shift) keys.push("Shift");
   if (modifiers.ctrl) keys.push("Control");
+  if (modifiers.meta) keys.push("Meta");
 
   for (const key of keys) await page.keyboard.down(key);
   await page.mouse.move(box!.x + 20, box!.y + 25);
@@ -259,8 +266,11 @@ test("a drag that cannot start says so instead of doing nothing", async ({ page 
   // stayed green throughout.
   await bootShelf(page);
   await land(page, FIXTURE.wide);
-  await page.evaluate(() =>
-    window.__shotshelf__.reject("prepare_drag", "that capture is no longer on disk"),
+  // The sentence read from the fixture Rust asserts against, rather than a
+  // third hand-written copy of it.
+  await page.evaluate(
+    (message) => window.__shotshelf__.reject("prepare_drag", message),
+    `that capture ${captureMissing.missing}`,
   );
 
   const tile = page.locator(".tile");
@@ -271,4 +281,20 @@ test("a drag that cannot start says so instead of doing nothing", async ({ page 
 
   await expect(page.locator("#shelf-alert")).toBeVisible();
   await expect(page.locator("#shelf-alert")).toContainText(/could not be dragged out/i);
+});
+
+test("command-click adds a second, the same as ctrl-click", async ({ page }) => {
+  // `#pick` accepts `event.ctrlKey || event.metaKey`, and every spec pressed
+  // Control: dropping `|| event.metaKey` left the whole suite green while
+  // ⌘-click — the gesture docs/USAGE.md documents for Mac, and the only
+  // multi-select a Mac user has — silently became a plain click that dropped
+  // the rest of the selection.
+  //
+  // Playwright's `ControlOrMeta` would not have caught it either: it resolves
+  // against the *host*, so on every runner this project uses it is Control.
+  await threeCaptures(page);
+  await pressCard(page, 0);
+  await pressCard(page, 2, { meta: true });
+
+  await expect(page.locator(".tile--picked")).toHaveCount(2);
 });

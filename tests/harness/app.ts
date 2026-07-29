@@ -29,6 +29,15 @@ const WINDOW_EVENTS = {
   opened: windowEvents.opened,
   hidden: windowEvents.hidden,
   deliberate: windowEvents.deliberate,
+  // The launch appearance's payload, and it had no reader here at all.
+  //
+  // A fixture entry only one side reads is not a join: the Rust test compared
+  // `launch` to a `false` written in the test beside it, and the three specs
+  // that model a launch appearance hard-coded their own `false`. So flipping
+  // `window::open(app.handle(), false)` to `true` at start-up — leaving the
+  // launch appearance up for ever, which is the bug an earlier round fixed —
+  // was invisible to every gate. Now the value flows.
+  launch: windowEvents.launch,
 };
 
 /**
@@ -45,6 +54,8 @@ const WINDOW_EVENTS = {
  */
 export const CAPTURE_EVENT = windowEvents.capture;
 export const UPDATE_EVENT = windowEvents.update;
+/** The catch engine's one channel for a capture it could not save. */
+export const PROBLEM_EVENT = windowEvents.problem;
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 
@@ -178,6 +189,23 @@ export async function openBrowse(page: Page): Promise<void> {
   await page.evaluate(
     ([event, deliberate]) => window.__shotshelf__.emit(event, deliberate),
     [WINDOW_EVENTS.opened, WINDOW_EVENTS.deliberate] as const,
+  );
+}
+
+/**
+ * The appearance nobody asked for: the four-second one at start-up.
+ *
+ * Same event as [`openBrowse`], opposite payload — and that payload is what
+ * lets the appearance keep its own dismissal timer instead of standing it down.
+ * Read from the fixture rather than written as `false` at each call site, which
+ * is what three specs did while the Rust test compared the fixture to a literal
+ * beside itself. Nothing joined the two, so the boolean the launch depends on
+ * could be flipped at its one call site with every gate green.
+ */
+export async function launchAppearance(page: Page): Promise<void> {
+  await page.evaluate(
+    ([event, launch]) => window.__shotshelf__.emit(event, launch),
+    [WINDOW_EVENTS.opened, WINDOW_EVENTS.launch] as const,
   );
 }
 

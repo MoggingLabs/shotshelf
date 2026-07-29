@@ -162,3 +162,46 @@ test("the column makes room for whatever else is in it", () => {
   assert.equal(columnHeight(1, 47), oneCard + 47, "the strip is added, not absorbed");
   assert.equal(columnHeight(3, 0), columnHeight(3), "and zero changes nothing");
 });
+
+test("releasing a hold nobody was holding does not restart the clock", () => {
+  // The `holdersBefore > 0` half of the transition guard had no test: dropping
+  // it left every unit and browser test green, and the whole point of the guard
+  // is written three lines above it — a repeatedly-toggled reason must not keep
+  // a card alive indefinitely.
+  //
+  // `hold(reason, false)` on an unheld column is the ordinary case, not a
+  // contrived one: `pointerleave` fires without a matching `pointerenter` when
+  // the column is rebuilt under a stationary cursor, which is exactly what
+  // happens each time a capture lands while the pointer rests on the shelf. So
+  // a steady stream of captures would push the deadline forward for ever and
+  // the column would never age out.
+  const column = new ColumnQueue();
+  column.add("a", 0);
+
+  // Not held, so this is a release from zero holders.
+  column.hold("pointer", false, COLUMN_MS - 1);
+
+  assert.equal(
+    column.expire(COLUMN_MS + 1),
+    true,
+    "the card still expires on the deadline it was given",
+  );
+  assert.ok(column.isEmpty);
+});
+
+test("releasing the last real hold does restart the clock", () => {
+  // The other half, so the pair pins the transition rather than just one side
+  // of it: deleting `#refreshAll(now)` outright has to fail too.
+  const column = new ColumnQueue();
+  column.add("a", 0);
+
+  column.hold("pointer", true, 1);
+  column.hold("pointer", false, COLUMN_MS - 1);
+
+  assert.equal(
+    column.expire(COLUMN_MS + 1),
+    false,
+    "the released card was given a fresh full window",
+  );
+  assert.equal(column.expire(COLUMN_MS * 2), true, "and it expires a window later");
+});

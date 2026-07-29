@@ -695,7 +695,10 @@ test("the edit control is out of reach while the editor is open", async ({ page 
   await drag(page, [30, 25], [170, 95]);
 
   await expect(page.locator("#shelf-edit")).toBeHidden();
-  await expect(page.locator("#shelf-compare")).toBeHidden();
+  // No `#shelf-compare` assertion here: this test opens the editor with one
+  // capture picked, so `comparable` is already false and asserting it hidden
+  // holds whether or not the overlay is part of the expression. The test below
+  // is the one that can fail.
 
   // And even reached directly — the handler, not the button — it refuses
   // rather than replacing. Dispatched programmatically because Playwright
@@ -997,4 +1000,89 @@ test("a redaction previews as what it will do, not as a box around it", async ({
   expect(midDrag[0]).toBeLessThan(40);
   expect(midDrag[1]).toBeLessThan(40);
   expect(midDrag[2]).toBeLessThan(40);
+});
+
+test("the compare control is out of reach while the editor is open", async ({ page }) => {
+  // The companion to "the edit control is out of reach", and the one that bites.
+  //
+  // That test opened the editor with a single capture picked, so `comparable`
+  // was already false and its `#shelf-compare` assertion held with or without
+  // the overlay term — deleting `busyOverlay ||` from the compare line in
+  // `main.ts` left the whole suite green.
+  //
+  // Two picked images is the reachable case: `e` reaches `editPicked`, which
+  // opens the editor on the *first* picked capture whatever the count, so the
+  // selection is still comparable while the overlay is up. The overlay
+  // deliberately does not cover the title strip — that is the window's only
+  // drag handle — so an unguarded Compare sits there live and clickable, and
+  // pressing it starts a comparison in the middle of someone's annotation.
+  await bootShelf(page);
+  await page.evaluate(() => {
+    window.__shotshelf__.respond("preview_shelf", null);
+    window.__shotshelf__.respond("save_edit", "/edits/wide (edited).png");
+  });
+  await land(page, FIXTURE.wide, { ts: 1 });
+  await land(page, FIXTURE.tall, { ts: 2 });
+  await openBrowse(page);
+
+  const cards = page.locator(".tile");
+  await cards.nth(0).click();
+  await cards.nth(1).click({ modifiers: ["ControlOrMeta"] });
+
+  // Two images: Compare is exactly what the shelf offers here.
+  await expect(page.locator("#shelf-compare")).toBeVisible();
+
+  await page.keyboard.press("e");
+  await expect(page.locator(".editor__canvas")).toBeVisible();
+
+  await expect(page.locator("#shelf-compare")).toBeHidden();
+});
+
+test("ctrl+z takes back the last mark", async ({ page }) => {
+  // The shortcut had no test at all — the undo test above clicks the button.
+  //
+  // A census of every key any spec pressed turned up no `z` anywhere, so
+  // deleting `shelf.undoEdit()` from the `case "z"` branch left the whole gate
+  // green, while docs/USAGE.md promises Ctrl+Z undoes the last mark including a
+  // crop. The editor's marks are destructive and there is no redo, so the
+  // shortcut not working is work permanently lost.
+  await openEditor(page);
+
+  const clean = await inkAt(page, 25, 25);
+  await drag(page, [25, 25], [150, 90]);
+  expect(await inkAt(page, 25, 25)).not.toEqual(clean);
+
+  await page.keyboard.press("ControlOrMeta+z");
+  expect(await inkAt(page, 25, 25)).toEqual(clean);
+});
+
+test("capslock does not put the editor out of reach", async ({ page }) => {
+  // `event.key` reports the character produced, so with CapsLock on it is "E",
+  // not "e" — which fell through every branch of the switch and left the editor
+  // and undo unreachable. The lower-casing that fixes it is one of the four
+  // things `main.ts`'s header says the file owns outright, and no spec had ever
+  // pressed a capital.
+  //
+  // Shift is how Playwright produces one; the app cannot tell the two apart,
+  // which is the whole point of folding the case rather than reading modifiers.
+  await bootShelf(page);
+  await page.evaluate(() => {
+    window.__shotshelf__.respond("preview_shelf", null);
+    window.__shotshelf__.respond("save_edit", "/edits/wide (edited).png");
+  });
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.keyboard.press("ArrowDown");
+
+  await page.keyboard.press("Shift+E");
+  await expect(page.locator(".editor__canvas")).toBeVisible();
+
+  // And the same for undo, which shares the fold and is additionally gated by
+  // the `shelf.editing` guard three lines above it.
+  const clean = await inkAt(page, 25, 25);
+  await drag(page, [25, 25], [150, 90]);
+  expect(await inkAt(page, 25, 25)).not.toEqual(clean);
+
+  await page.keyboard.press("ControlOrMeta+Shift+Z");
+  expect(await inkAt(page, 25, 25)).toEqual(clean);
 });
