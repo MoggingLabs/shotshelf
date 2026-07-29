@@ -123,9 +123,17 @@ dependency works. The measured consequences are narrower and specific:
   skipped. That is the only place the local gate and CI differ, and it is stated in README and
   CONTRIBUTING as well as here.
 - `tauri`'s `test` feature, which would let Rust tests construct an `App` and reach the command
-  tier, could not be landed: three wirings all died at load with `STATUS_ENTRYPOINT_NOT_FOUND`
-  because this crate builds as a `cdylib`. The route that should work is an integration test
-  under `src-tauri/tests/`, and it is documented in `webview_path.rs` rather than half-attempted.
+  tier, could not be landed: three wirings all compiled and all died at load with
+  `STATUS_ENTRYPOINT_NOT_FOUND`. **The cause is unidentified.** An earlier version of this bullet
+  blamed the crate building as a `cdylib` and prescribed an integration test under
+  `src-tauri/tests/` as the fix. Both were wrong and both were disproved by experiment: a `--lib`
+  test binary is a standalone executable that never links the `cdylib`, and an integration test
+  that merely names `shotshelf_lib::run` fails identically while one containing `2 + 2` passes.
+  What distinguishes them is whether the linked object graph reaches the Tauri runtime — nothing
+  about that is crate-shaped, so it is most likely local to this machine, the same policy estate
+  that refuses the packaged app. `webview_path.rs` carries the full account. This bullet is what a
+  reader of a security document sees first, and it repeated the retracted version for a round
+  after the retraction.
 
 None of these can leak a capture off the machine — the network surface is one URL, and the CSP
 that seals the webview is written to allow nothing else. But that policy is itself on the list

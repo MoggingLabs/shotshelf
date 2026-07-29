@@ -380,13 +380,7 @@ fn cache_key(source: &Path, meta: &std::fs::Metadata) -> String {
 }
 
 fn poster_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|err| err.to_string())?
-        .join("posters");
-    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
-    Ok(dir)
+    crate::cache::dir(app, "posters")
 }
 
 #[cfg(test)]

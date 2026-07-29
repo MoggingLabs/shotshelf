@@ -195,6 +195,19 @@ const SCAN_CACHE_LIMIT: usize = 500;
 /// recogniser that never returns costs one tile rather than the feature.
 const SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// A process-wide concurrency limit, created once.
+///
+/// Three verbatim copies of this `OnceLock`/`Arc`/`Semaphore` dance existed —
+/// two of them nine lines apart in this file, one in `poster.rs` — differing
+/// only in the bound. Three copies of a concurrency primitive with no shared
+/// name is the kind of thing that grows a fourth.
+pub(crate) fn limit(
+    cell: &'static std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>>,
+    permits: usize,
+) -> &'static std::sync::Arc<tokio::sync::Semaphore> {
+    cell.get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(permits)))
+}
+
 /// How many captures may be *sized* at once.
 ///
 /// `prepare_drag` and `copy_capture` decode, Lanczos3-resize and re-encode a
@@ -271,7 +284,7 @@ where
 fn sizing_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
     static LIMIT: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
         std::sync::OnceLock::new();
-    LIMIT.get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(SIZING_CONCURRENCY)))
+    limit(&LIMIT, SIZING_CONCURRENCY)
 }
 
 /// How many captures may be read at once.
@@ -303,7 +316,7 @@ fn scan_cache() -> &'static std::sync::Mutex<std::collections::HashMap<ScanKey, 
 fn scan_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
     static LIMIT: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
         std::sync::OnceLock::new();
-    LIMIT.get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(SCAN_CONCURRENCY)))
+    limit(&LIMIT, SCAN_CONCURRENCY)
 }
 
 /// Clipboard fallback, for the apps that will take a paste but not a drop.
@@ -362,16 +375,28 @@ enum Payload {
     File(String),
 }
 
-/// The clipboard plugin wants a bare path on Windows and a `file://` URI
-/// everywhere else, and rejects the wrong one outright.
+/// What the clipboard plugin wants for a file, per platform.
+///
+/// **Windows and macOS want a bare path.** This used to say macOS wanted a
+/// `file://` URI and that the plugin "rejects the wrong one outright" — both
+/// false. `clipboard-rs`'s macOS backend hands the strings straight to
+/// `NSFilenamesPboardType`, which is a property list of POSIX paths: it does
+/// not convert and it does not reject, so a URI went onto the pasteboard
+/// verbatim and pasted as nothing usable.
+///
+/// **X11 wants a `file://` URI in `text/uri-list`**, which must be
+/// percent-encoded — and this emitted raw spaces. Reachable only for
+/// recordings, whose default names on every platform contain spaces
+/// (`Screen Recording 2026-07-27 at 15.22.33.mov`, `Screencast from ....webm`),
+/// so the one path that needed encoding was the one that always had spaces.
 fn file_uri(path: &Path) -> String {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         path.to_string_lossy().into_owned()
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        format!("file://{}", path.to_string_lossy())
+        format!("file://{}", percent_encode_path(&path.to_string_lossy()))
     }
 }
 
@@ -392,9 +417,45 @@ fn video_preview<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     Ok(preview)
 }
 
+/// Percent-encode a path for a `file://` URI, leaving the separators alone.
+///
+/// Deliberately conservative: everything outside the unreserved set and `/` is
+/// escaped, which is always valid even where it is not required.
+#[cfg_attr(any(target_os = "windows", target_os = "macos"), allow(dead_code))]
+fn percent_encode_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for byte in path.bytes() {
+        let keep = byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~' | b'/');
+        if keep {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_recording_uri_is_encoded_for_the_names_recordings_actually_have() {
+        // Only recordings reach `file_uri`, and every platform's default
+        // recording name contains spaces — so the one path that needed
+        // percent-encoding was the one that always had characters requiring it.
+        // A raw space makes a `text/uri-list` entry malformed.
+        let encoded = percent_encode_path("/home/someone/Videos/Screencast from 2026-07-27.webm");
+        assert!(
+            !encoded.contains(' '),
+            "a raw space is not a legal URI: {encoded}"
+        );
+        assert!(encoded.contains("%20"));
+        // Separators stay separators, or it is not a path any more.
+        assert!(encoded.starts_with("/home/someone/Videos/"));
+        // And an ordinary name is left alone.
+        assert_eq!(percent_encode_path("/a/b-c_d.mp4"), "/a/b-c_d.mp4");
+    }
 
     #[test]
     fn a_scan_key_names_a_version_of_a_file_not_just_a_path() {

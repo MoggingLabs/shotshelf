@@ -19,7 +19,18 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
     // Windows/Linux show the full-colour app icon; macOS gets a monochrome
     // glyph so it can be drawn as a template image (see below).
-    #[cfg(target_os = "macos")]
+    // macOS puts it beside the icon; Linux puts it on the AppIndicator label.
+    //
+    // This was macOS-only, under a comment reading "Windows has no equivalent,
+    // so there the tooltip is the only place the count can appear" — which did
+    // not consider Linux, where it is the *tooltip* that has no equivalent.
+    // `tray-icon`'s GTK backend implements `set_tooltip` as a silent no-op that
+    // discards its argument and returns `Ok`, and implements `set_title` as a
+    // real `set_label`. So on Linux the one call that works was compiled out
+    // and the one that was made did nothing — while `docs/USAGE.md` tells the
+    // Linux user the tray is their primary way in, because clicks do not reach
+    // the app there.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-macos.png"))?;
     #[cfg(not(target_os = "macos"))]
     let icon = app

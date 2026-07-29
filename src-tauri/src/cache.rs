@@ -21,6 +21,8 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use tauri::{AppHandle, Manager, Runtime};
+
 /// What one cache entry is.
 ///
 /// The hand-off cache keys a *directory* per capture version, because the copy
@@ -87,6 +89,23 @@ pub fn prune(dir: &Path, limit: usize, kind: Entry) {
             Entry::Directory => std::fs::remove_dir_all(&stale),
         };
     }
+}
+
+/// A named directory under the app's cache root, created if it is not there.
+///
+/// Both caches resolved this themselves, in bodies identical but for the name.
+/// This module exists because "two caches wrote the same rule out themselves,
+/// in shapes different enough that a reader could not tell they were the same
+/// rule" — the pruning and the keying moved here and the *directory* was left
+/// behind in both callers, which is the same observation one level down.
+pub fn dir<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|err| err.to_string())?
+        .join(name);
+    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    Ok(dir)
 }
 
 /// Which *version of which file* a piece of derived data belongs to.

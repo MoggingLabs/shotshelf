@@ -145,9 +145,12 @@ mod tests {
     // `existing_file`'s **scope check has no automated coverage**, and neither
     // does anything else that takes an `AppHandle`.
     //
-    // **The scope, stated properly.** Not a list of stragglers: it is *every
-    // one of the seventeen registered commands* and the whole `AppHandle`
-    // shell beneath them. `share.rs`, `edit.rs`, `poster.rs`, `window.rs`,
+    // **The scope, stated properly.** Not a list of stragglers: it is every
+    // registered command that takes an `AppHandle` — all of them bar
+    // `enrich::ocr::text_recognition_available`, which takes none and is
+    // tested directly — and the whole `AppHandle` shell beneath them. Stated
+    // without a count, for the reason this file's header gives: it once said
+    // "six commands" when there were seven. `share.rs`, `edit.rs`, `poster.rs`, `window.rs`,
     // `catch/mod.rs` (including `catch_backfill` and `catch_watch_dirs`),
     // `catch/folders.rs`, `catch/paths.rs`, `catch/clipboard.rs`, `tray.rs`,
     // `hotkey.rs`, `update.rs`, `imaging/mod.rs`, `diag.rs`, `settings::load`,
@@ -185,8 +188,13 @@ mod tests {
     // about the failure is crate-shaped, which makes it most likely local — the
     // same Smart App Control and WebView2 estate that refuses the packaged app.
     // The way to find out is to land the mock-runtime test and let CI answer on
-    // three OSes; `--all-targets` is used by both the gate and CI precisely so
-    // such a test would run rather than be silently skipped. It is not landed
+    // three OSes. **CI** runs `--all-targets` precisely so such a test would be
+    // run rather than silently skipped; the local `npm run gate` runs `--lib`,
+    // because Smart App Control refuses the bin target's freshly linked test
+    // harness here. Add a test under `src-tauri/tests/` and CI will run it and
+    // your local gate will not — a difference stated in README, CONTRIBUTING
+    // and SECURITY.md, and stated backwards right here, in the one paragraph
+    // that reasons about why it matters. It is not landed
     // here because a change that alters what the shipped binary links is not
     // something to push unverified from a machine that cannot launch it.
     //

@@ -16,7 +16,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 
 use crate::imaging::export;
 
@@ -124,13 +124,7 @@ fn handoff_name(source: &Path) -> String {
 }
 
 fn cache_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|err| err.to_string())?
-        .join(CACHE_DIR);
-    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
-    Ok(dir)
+    crate::cache::dir(app, CACHE_DIR)
 }
 
 /// A directory name identifying *which version of which file*.

@@ -68,13 +68,8 @@ fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
     // The primary monitor is where the taskbar and the tray icon live, so it is
     // the screen "the bottom-right corner" means, whatever monitor the window
     // happened to be on last.
-    let monitor = match shelf.primary_monitor().or_else(|_| shelf.current_monitor()) {
-        Ok(Some(monitor)) => monitor,
-        Ok(None) => return,
-        Err(err) => {
-            crate::diag::warn(&format!("could not read the monitor layout: {err}"));
-            return;
-        }
+    let Some(monitor) = monitor_for(shelf) else {
+        return;
     };
 
     let scale = monitor.scale_factor();
@@ -86,6 +81,31 @@ fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
 
     if let Err(err) = shelf.set_position(tauri::PhysicalPosition::new(x, y)) {
         crate::diag::warn(&format!("could not place the shelf: {err}"));
+    }
+}
+
+/// The monitor to place against: the primary one, or whatever the window is on.
+///
+/// `Result::or_else` only fires on `Err`, and "there is no primary monitor" is
+/// `Ok(None)` — so the fallback that reads `current_monitor` was unreachable in
+/// exactly the case it was written for, and the caller fell straight through to
+/// its early return. That is the documented answer from `gdk`'s
+/// `primary_monitor()` under Wayland, which is what `tao`'s Linux backend
+/// calls. `preview` returns *before* `set_size`, `center`, `show` and
+/// `mark_opened`, so on Wayland the quick look did nothing at all, silently;
+/// `place` returned before positioning, so the shelf never reached its corner.
+fn monitor_for<R: Runtime>(shelf: &WebviewWindow<R>) -> Option<tauri::Monitor> {
+    match shelf.primary_monitor() {
+        Ok(Some(monitor)) => return Some(monitor),
+        Ok(None) => {}
+        Err(err) => crate::diag::warn(&format!("could not read the monitor layout: {err}")),
+    }
+    match shelf.current_monitor() {
+        Ok(monitor) => monitor,
+        Err(err) => {
+            crate::diag::warn(&format!("could not read the current monitor: {err}"));
+            None
+        }
     }
 }
 
