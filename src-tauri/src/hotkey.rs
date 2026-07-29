@@ -3,6 +3,24 @@
 //! Registering a shortcut globally takes it away from every other app, so a
 //! failure here is worth saying out loud rather than swallowing — and the
 //! combination is a setting precisely because no default is right for everyone.
+//!
+//! **On Linux this can report success when the OS never took the key, and
+//! there is no fix available from here.** `global-hotkey`'s Linux backend is
+//! X11 only — `XGrabKey` through `x11rb` — and its `register` is
+//! `if let Ok(result) = rx.recv() { result?; } Ok(())`: when the worker
+//! thread is gone, because there is no reachable X display, `recv` returns
+//! `Err`, the arm is skipped and `Ok(())` is returned anyway. So under
+//! Wayland without XWayland the settings panel shows a live shortcut that
+//! does nothing, and `shotshelf.log` stays silent — against
+//! `docs/USAGE.md`'s promise that a taken combination "says so in its log".
+//!
+//! `is_registered` cannot close it: the plugin's map is written from the same
+//! `Ok`. Verifying would mean grabbing the key back and watching for an
+//! event, which is a synthetic keypress this app has no business making.
+//! Documented in `docs/USAGE.md` instead, next to the tray note — because
+//! `tray-icon`'s GTK constructor is infallible too, so on a desktop with
+//! neither a StatusNotifier host nor XWayland there is no way to summon the
+//! shelf once it is hidden.
 
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};

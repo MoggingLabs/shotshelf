@@ -271,6 +271,14 @@ If `pinned.json` is ever unreadable, Shotshelf sets it aside as `pinned.json.cor
 hand-repairable and losing it loses your pins. Those copies name captures, so delete them
 along with `pinned.json` if you are removing Shotshelf's data.
 
+**On Linux, a shortcut can look registered without being.** The library behind it grabs keys
+through X11 only, and its register call returns success even when the grab never happened — so
+under Wayland without XWayland the Settings panel shows a live combination that does nothing, and
+the log says nothing either. The tray has the same shape: its constructor cannot fail, so a desktop
+with no StatusNotifier host (stock GNOME, without the AppIndicator extension) gets no icon and no
+error. If both are unavailable, there is no way to summon the shelf once it is hidden — so on such
+a desktop, leave it showing.
+
 **About the default hotkey:** a global shortcut takes that combination away from every other
 app. On macOS `⌘⇧S` is Save As almost everywhere, so it's worth changing to something you don't
 otherwise use. If the combination is already taken, Shotshelf still runs — it just can't be

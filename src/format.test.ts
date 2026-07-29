@@ -17,11 +17,18 @@ test("a nonsensical size does not render as NaN", () => {
   assert.equal(formatBytes(-1), "—");
 });
 
-test("durations read as minutes and seconds", () => {
+test("durations read as minutes and seconds, and hours when there are any", () => {
   assert.equal(formatDuration(8_000), "0:08");
   assert.equal(formatDuration(65_000), "1:05");
-  assert.equal(formatDuration(3_723_000), "62:03");
   assert.equal(formatDuration(0), "0:00");
+
+  // This used to assert "62:03", pinning the absence of an hour field as though
+  // it were the rule. It is not a duration anyone writes, and `docs/USAGE.md`
+  // says the badge carries the recording's length. The hour appears only when
+  // there is one, so the common case stays two fields wide on a small badge.
+  assert.equal(formatDuration(3_723_000), "1:02:03");
+  assert.equal(formatDuration(3_599_000), "59:59", "the last second before an hour");
+  assert.equal(formatDuration(3_600_000), "1:00:00");
 });
 
 test("filenames come off both Windows and macOS paths", () => {

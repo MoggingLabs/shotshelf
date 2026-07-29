@@ -56,6 +56,12 @@ const SOURCE_GLOBS = [
   "src-tauri/src/**/*.rs",
   "src-tauri/build.rs",
   "src-tauri/*.toml",
+  // The capabilities file's `description` is a page and a half of prose
+  // naming other files, permissions and APIs — the justification for the
+  // app's whole confinement story — and nothing read it. `tauri.conf.json`
+  // is here for the same reason.
+  "src-tauri/capabilities/*.json",
+  "src-tauri/tauri.conf.json",
   "tests/**/*.ts",
   "scripts/*.mjs",
   "*.md",

@@ -6,11 +6,21 @@
  * protocol, neither of which exists under `node --test`.
  */
 
-/** `0:08`, `1:05`, `12:30`. */
+/**
+ * `0:08`, `1:05`, `12:30`, `1:02:03`.
+ *
+ * The hour field appears only when there is one, so the common case stays two
+ * fields wide on a small badge. Without it a one-hour screencast read `62:03`,
+ * which is not a duration anyone writes — and `docs/USAGE.md` says the badge
+ * carries "their length".
+ */
 export function formatDuration(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
   const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+  const rest = String(seconds % 60).padStart(2, "0");
+
+  if (minutes < 60) return `${minutes}:${rest}`;
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}:${rest}`;
 }
 
 /**

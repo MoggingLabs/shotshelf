@@ -79,6 +79,13 @@ fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
     let x = area.position.x + area.size.width as i32 - to_physical(size.0 + SCREEN_MARGIN);
     let y = area.position.y + area.size.height as i32 - to_physical(size.1 + SCREEN_MARGIN);
 
+    // On Linux this cannot fail and may not happen. `tao`'s GTK
+    // `set_outer_position` returns `()` and only posts a request, which
+    // becomes `gtk_window_move` — ignored under Wayland, where a client does
+    // not choose its own position. So the branch below is dead there and the
+    // shelf appears wherever the compositor puts it, which is not the corner
+    // `README.md` describes. Nothing here can change that; a Wayland client
+    // has no positioning protocol to use.
     if let Err(err) = shelf.set_position(tauri::PhysicalPosition::new(x, y)) {
         crate::diag::warn(&format!("could not place the shelf: {err}"));
     }
