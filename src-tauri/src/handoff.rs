@@ -25,7 +25,7 @@ use crate::imaging::export;
 const CACHE_DIR: &str = "handoff";
 
 /// How many sized copies to keep before the oldest are dropped.
-const CACHE_LIMIT: usize = 60;
+pub(crate) const CACHE_LIMIT: usize = 60;
 
 /// The file to hand to the OS for this capture.
 ///

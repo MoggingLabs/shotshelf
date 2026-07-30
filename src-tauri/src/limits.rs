@@ -111,9 +111,14 @@ pub(crate) const FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_
 /// Read for real only on Linux — the other two platforms use an OS recogniser
 /// with no child process — but compiled everywhere so the test below can assert
 /// the inequality on every platform rather than on one. Same shape as
-/// `catch/paths.rs`'s `under_home` and `share.rs`'s `percent_encode_path`, and
-/// scoped to exactly the platforms with no caller, so a genuinely dead constant
-/// still fails the build on Linux.
+/// `catch/paths.rs`'s `under_home` and `share.rs`'s `percent_encode_path`.
+///
+/// The allowance is `not(linux)`; the module that reads it is
+/// `not(any(windows, macos))`. Those are the same three OSes this app supports
+/// and differ only on a fourth, where the allowance would be applied to a
+/// constant that does have a caller — harmless, and it fails safe, because the
+/// allowance is never absent where the caller is. Said plainly because "scoped
+/// to exactly the platforms with no caller", which stood here, is not exact.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) const OCR_CHILD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
@@ -266,11 +271,16 @@ mod tests {
         // and the test below this one asserts it. Saying otherwise here was a
         // claim written from an older bug's shape, in the file that fixed it.
         //
-        // Also the reason this constant is here rather than in `ocr.rs`: it is
-        // `cfg(linux)`-only there, so on the other two platforms it would need a
-        // `dead_code` allowance. Asserting the relationship gives it a caller on
-        // every platform and gates the thing worth gating, which is better than
-        // an allowance that only says the constant is allowed to be unused.
+        // This does *not* replace the allowance above the constant, which is
+        // load-bearing: removing it fails the build on Windows and macOS, where
+        // the lib target has no caller. An assertion gives it a caller in the
+        // *test* target only. Both are needed, and the decision is recorded in
+        // `scripts/check-dirs.mjs`'s table as well.
+        //
+        // Said this way round because the comment here read "better than an
+        // allowance" — which would have a reader delete a line that keeps two
+        // of the three CI legs green, from the one platform where the build
+        // still passes without it.
         assert!(
             OCR_CHILD_TIMEOUT < SCAN_TIMEOUT,
             "the child outlives the permit: child {OCR_CHILD_TIMEOUT:?}, scan {SCAN_TIMEOUT:?}",

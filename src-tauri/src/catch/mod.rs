@@ -439,14 +439,14 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
 /// A day, not everything: this is for the gap between sessions, not for
 /// indexing a Pictures folder. Anything older is history the user already has a
 /// folder for.
-const BACKFILL_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
+pub(crate) const BACKFILL_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The most captures a launch will bring back.
 ///
 /// A hard bound, because the alternative is a first run on a machine with four
 /// thousand screenshots filling the shelf with a decade of them. Well under the
 /// default item cap, so a backfill never evicts anything the user pinned.
-const BACKFILL_LIMIT: usize = 20;
+pub(crate) const BACKFILL_LIMIT: usize = 20;
 
 /// Captures that landed while Shotshelf was not running.
 ///
@@ -608,12 +608,20 @@ fn settled(path: &Path, kind: CaptureKind, modified: SystemTime) -> bool {
 ///
 /// Splitting the helper out had moved the boundary and not the decision, which
 /// is the mistake `CaptureSink::note_folder_image` records making and fixing
-/// one file over. Here the decision is the returned value, so the tests that
-/// already assert what is chosen assert the watermark in the same breath.
+/// one file over. Here the decision *is* the returned value, so it is asserted
+/// where the choosing is already asserted — against `to_backfill`'s own answer
+/// rather than a second computation of it, which is what the old helper's test
+/// had been reduced to.
 ///
-/// What is left in the command is `store.note_capture(chosen.watermark)` — the
-/// storing, which needs an `AppHandle` and so lives in the tier nothing here
-/// can execute. That much is disclosed rather than claimed as covered.
+/// One test reads it, not all of them: the rest ask `backfill(…)` for the
+/// captures because that is what they are about. The claim here was once "the
+/// tests that already assert what is chosen assert the watermark in the same
+/// breath", which was a sentence about a shape rather than about the file.
+///
+/// What is left in the command is reading `chosen.watermark` and handing it to
+/// `note_capture` — the storing, which needs an `AppHandle` and so lives in the
+/// tier nothing here can execute. That much is disclosed rather than claimed as
+/// covered.
 pub(crate) struct Backfill {
     pub captures: Vec<Capture>,
     pub watermark: Option<u64>,
@@ -720,8 +728,12 @@ fn to_backfill(
     }
 }
 
-/// The newest timestamp among the captures being handed over, if any.
+/// A moment as Unix milliseconds, clamped rather than wrapped.
 ///
+/// This inherited the docstring of a `newest_of` helper that was folded into
+/// `Backfill` — a converter described as a `max()`. Nothing catches a docstring
+/// left behind by a deletion, which is why it is worth saying that is what
+/// happened.
 fn as_ms(at: SystemTime) -> u64 {
     at.duration_since(UNIX_EPOCH).map_or(0, |since| {
         u64::try_from(since.as_millis()).unwrap_or(u64::MAX)

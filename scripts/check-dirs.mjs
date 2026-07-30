@@ -359,7 +359,14 @@ const STRENGTH = ["allow", "warn", "deny", "forbid"];
   // enforcement is not confined to `rustflags`, and the next lever will not be
   // on any list either. This repository commits no cargo config and needs none,
   // so the rule is: there is not one. Adding one is a decision — it goes on the
-  // list below, in a diff, and is still read for weakening flags after that.
+  // list below, in a diff.
+  //
+  // `CARGO_CONFIGS` is empty, so the weakening scan under it is unreachable
+  // today. That is deliberate and stated rather than left to look like cover:
+  // refusing by existence is strictly stronger than reading flags, and the scan
+  // is what an allow-listed config would still have to pass. An empty hatch is
+  // the intended state — the alternative is one added under time pressure,
+  // which is how a gate stops biting.
   const CARGO_CONFIGS = new Set();
   for (const config of globSync([".cargo/config.toml", ".cargo/config", "*/.cargo/config*"])) {
     const named = config.replaceAll("\\", "/");

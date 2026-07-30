@@ -496,7 +496,7 @@ fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
 /// An unbounded set of either is its own kind of mess.
 ///
 /// They carry capture paths, so `docs/USAGE.md`'s uninstall list names them.
-const KEPT_CORRUPT: u32 = 5;
+pub(crate) const KEPT_CORRUPT: u32 = 5;
 
 /// Move an unreadable file somewhere the next write will not destroy it.
 ///

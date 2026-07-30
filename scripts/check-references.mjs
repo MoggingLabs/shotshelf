@@ -494,6 +494,41 @@ for (const [glob, count] of REFERENCES_PER_GLOB) {
   }
 }
 
+// Rule D: a number the usage guide promises the user is one the code uses.
+//
+// The three rules above resolve *names* — a path, a `module::item`, a spec
+// title. A number in prose is invisible to all of them, and `docs/USAGE.md`
+// quotes six: how many hand-off copies are kept, how many captures a launch
+// brings back and from how far back, how many corrupt settings files are set
+// aside, what a downscaled export is sized to, and how large the log grows
+// before it restarts. Every one was hand-copied, and all six agreed — which is
+// the state in which the seventh divergence is invisible. `lib.rs` records one
+// of these having gone the other way already, where the guide promised a
+// hand-off cache limit that nothing enforced within a session.
+//
+// The fixture is the join, as it is for the other contracts here, and
+// `src-tauri/src/documented.rs` holds the constants to the same file. Between
+// the two there is no edit that moves a number and leaves the guide saying the
+// old one.
+//
+// Presence, not position: this cannot tell which sentence a number belongs to,
+// and pretending otherwise would need the prose to be written for the gate.
+// What it catches is the real failure — a constant changed and the guide left
+// behind — because the old number stops appearing.
+const LIMITS = "tests/fixtures/documented-limits.json";
+const GUIDE = "docs/USAGE.md";
+const guide = readFileSync(GUIDE, "utf8");
+
+for (const [what, value] of Object.entries(JSON.parse(readFileSync(LIMITS, "utf8")))) {
+  // Not inside a longer number: 20 must not match 2048, nor 5 match 1568.
+  if (!new RegExp(String.raw`(?<![\d.])${value}(?![\d.])`).test(guide)) {
+    problems.push(
+      `  ${GUIDE}: no longer quotes the ${what} of ${value} that the code uses. ` +
+        `Either the guide is stale, or ${LIMITS} is.`,
+    );
+  }
+}
+
 if (problems.length > 0) {
   console.error(
     "\nComments naming things that do not exist:\n" +

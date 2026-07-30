@@ -14,6 +14,7 @@ mod cache;
 mod catch;
 mod diag;
 mod dirs;
+mod documented;
 mod edit;
 mod enrich;
 mod handoff;
@@ -173,10 +174,13 @@ pub fn run() {
 
             // A menu-bar app that starts by showing nothing at all looks
             // broken. Open it once so it can be found, then let it behave.
-            // The one appearance nobody asked for, which is why it puts itself
-            // away again. `false` is what lets the front end tell it apart from
-            // a tray or hotkey open — both of which come through this same
-            // function and emit the same event.
+            // The one appearance nobody asked for, which is why it puts
+            // itself away again — and why it is a differently named function
+            // from the tray and hotkey opens rather than the same one with a
+            // `false`. That bool was the whole distinction, at a call site
+            // nothing could execute; `window::Appearance` is what carries it
+            // now, and `Appearance::deliberate` is where it becomes the boolean
+            // the front end reads.
             window::open_at_launch(app.handle());
 
             Ok(())

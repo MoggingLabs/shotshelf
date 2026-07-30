@@ -76,7 +76,7 @@ fn writer() -> &'static Mutex<()> {
 /// line per capture is a slow leak. Restarted rather than rotated — one
 /// previous generation is not worth the complexity when the whole point is the
 /// last few minutes before something went wrong.
-const MAX_LOG_BYTES: u64 = 512 * 1024;
+pub(crate) const MAX_LOG_BYTES: u64 = 512 * 1024;
 
 /// Point diagnostics at the app's own data directory. Called once, at start-up.
 ///

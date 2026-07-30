@@ -79,7 +79,7 @@ fn mark_opened<R: Runtime>(shelf: &WebviewWindow<R>, appearance: Appearance) {
     set_opened(true);
     attempt(
         "announce that the shelf opened",
-        shelf.emit(OPENED_EVENT, appearance == Appearance::Deliberate),
+        shelf.emit(OPENED_EVENT, appearance.deliberate()),
     );
 }
 
@@ -102,6 +102,27 @@ pub(crate) enum Appearance {
     /// The launch appearance, which nobody asked for and which takes itself
     /// away again.
     Launch,
+}
+
+impl Appearance {
+    /// What goes on the wire, which the front end reads as "the user asked".
+    ///
+    /// A named method rather than `appearance == Appearance::Deliberate` inline
+    /// at the `emit`, because that expression was the last untested step of the
+    /// whole distinction: inverting it made every tray click, hotkey press and
+    /// editor-restore emit `false`, so `popover.ts` read each as the launch
+    /// appearance and dismissed the shelf the user had just opened four seconds
+    /// later — while the real launch appearance stayed up for good. Clippy and
+    /// all 160 tests were green.
+    ///
+    /// The enum had moved the risk from three call sites into one function, and
+    /// that function takes a `&WebviewWindow`, so nothing in the crate could
+    /// execute it. Same shape as `wanted`, `note_folder_image` and `make_room`:
+    /// the decision was on the untestable side of a boundary, and moving it one
+    /// function out is the whole fix.
+    pub(crate) const fn deliberate(self) -> bool {
+        matches!(self, Self::Deliberate)
+    }
 }
 
 /// Do a window operation, and say so in the log if it does not happen.
@@ -606,11 +627,18 @@ pub(crate) fn wanted(focus: bool, height: Option<f64>) -> Wanted {
 /// is `open(&app, true)`, which no longer exists.
 ///
 /// What does survive is calling the wrong *named* function — `open_at_launch`
-/// where `open_deliberately` belongs, or the equivalent inside either wrapper.
-/// Every tray click and hotkey press would then dismiss itself four seconds
-/// later, with clippy and all 160 tests green. [`Appearance`] is what makes
-/// that read wrong rather than look ordinary; it does not make it impossible,
-/// and nothing at this boundary can.
+/// where `open_deliberately` belongs, here or in `lib.rs`, or the equivalent
+/// inside either wrapper. Every tray click and hotkey press would then dismiss
+/// itself four seconds later, with clippy and every test green. [`Appearance`]
+/// is what makes that read wrong rather than look ordinary; it does not make it
+/// impossible, and nothing at this boundary can.
+///
+/// Not the `Appearance → bool` translation, though, which this used to leave
+/// implied. That was the last untested step of the distinction — inverting it
+/// had the same effect and the same silence — and it has a name and a test
+/// against the shared fixture now: [`Appearance::deliberate`]. The enum alone
+/// had moved the risk from three call sites into one function rather than
+/// removing it.
 #[tauri::command]
 pub fn show_shelf<R: Runtime>(app: AppHandle<R>, focus: bool, height: Option<f64>) {
     match wanted(focus, height) {
@@ -670,12 +698,24 @@ mod tests {
         assert_eq!(shared["opened"].as_str(), Some(OPENED_EVENT));
         assert_eq!(shared["hidden"].as_str(), Some(HIDDEN_EVENT));
 
-        // `mark_opened` passes `deliberate` straight through, so these are the
-        // two values it can emit. Written as the booleans rather than derived,
-        // because deriving them from the same expression the code uses would be
-        // the tautology this repo keeps finding.
+        // Both values, and *which appearance sends which* — the fixture pinned
+        // the two booleans and neither side pinned the mapping onto them, so
+        // the one expression that turns an `Appearance` into the wire boolean
+        // could be inverted with clippy and every test green. `mark_opened`
+        // takes a `&WebviewWindow`, so nothing here can execute it; the mapping
+        // is `Appearance::deliberate` for exactly that reason.
         assert_eq!(shared["deliberate"].as_bool(), Some(true));
         assert_eq!(shared["launch"].as_bool(), Some(false));
+        assert_eq!(
+            shared["deliberate"].as_bool(),
+            Some(Appearance::Deliberate.deliberate()),
+            "a deliberate open no longer tells the front end the user asked",
+        );
+        assert_eq!(
+            shared["launch"].as_bool(),
+            Some(Appearance::Launch.deliberate()),
+            "the launch appearance now claims the user asked for it",
+        );
 
         // The other two events cross the same boundary and had the same gap:
         // a constant on the Rust side that only its own file reads, and a

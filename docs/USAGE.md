@@ -273,7 +273,7 @@ relaunch knows not to bring back something you removed. The same local-data fold
 both are re-derivable and safe to delete.
 
 If either settings file is ever unreadable, Shotshelf sets it aside as `<name>.corrupt` (then
-`.corrupt.1`, up to five) rather than overwriting it, and says so in the log. Both are
+`.corrupt.1`, up to 5) rather than overwriting it, and says so in the log. Both are
 hand-repairable, and what losing one costs differs: `settings.json` holds your preferences,
 while `pinned.json` holds the pins. A live `settings.json` never contains a capture path, by
 construction — pins are blanked before it is written, which is the whole point of keeping the two

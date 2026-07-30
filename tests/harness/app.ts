@@ -38,12 +38,15 @@ const WINDOW_EVENTS = {
   // What that buys, precisely: the *name and payload* of the launch event now
   // have one definition, so a spec cannot model the launch appearance as a
   // deliberate open by writing the wrong boolean. What it does **not** buy —
-  // and an earlier version of this comment claimed it did — is any check on the
-  // call site: flipping `window::open(app.handle(), false)` to `true` in
-  // `lib.rs` still passes every gate, because no browser spec executes a
-  // `#[tauri::command]` and no Rust test observes that argument.
-  // `src-tauri/src/window.rs` states that limit correctly; this comment used to
-  // contradict it two files away.
+  // and an earlier version of this comment claimed it did — is any check on
+  // *which appearance a given call site asks for*. Rust now pins the mapping
+  // from `window::Appearance` onto these two booleans, so the translation
+  // cannot be inverted; what no gate can see is `lib.rs` calling
+  // `window::open_deliberately` where `window::open_at_launch` belongs, because
+  // no browser spec executes a `#[tauri::command]` and no Rust test observes
+  // which one ran. `src-tauri/src/window.rs` states that limit; this comment
+  // used to describe an older shape of it — a bool argument that no longer
+  // exists — two files away.
   launch: windowEvents.launch,
 };
 

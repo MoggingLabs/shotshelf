@@ -662,7 +662,13 @@ test("opening the editor from the column puts the shelf into the browse shape", 
 });
 
 test("a failed save is visible when the editor was opened from the column", async ({ page }) => {
-  await openEditorFromColumn(page);
+  // On a fake clock, because the thing being asserted takes itself down after
+  // twelve seconds of *real* time — `status.ts`'s `ALERT_MS`. Without it this
+  // spec is a race between the assertion and the strip's own timer, and it lost
+  // that race under parallel load: it failed once in a full run and passed on
+  // every isolated re-run. `playwright.config.ts` says a gate that passes on a
+  // retry is not a gate, so the dependency is removed rather than retried.
+  await openEditorFromColumn(page, { fakeClock: true });
   await drag(page, [30, 25], [170, 95]);
   await page.evaluate(() => window.__shotshelf__.reject("save_edit", "the disk is full"));
 
