@@ -91,12 +91,97 @@ pub fn local<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<PathBuf, Stri
     under(root, name)
 }
 
+/// A named subdirectory of one of this app's roots, created if absent.
+///
+/// The name must stay *under* the root, and this is the one place that can say
+/// so. `PathBuf::join` does not: given an absolute path it discards the root
+/// entirely, and given `..` it walks out. Every caller passes a literal today —
+/// `"posters"`, `"handoff"`, `"clipboard"`, `"edits"`, `""` — so nothing has
+/// ever escaped. That is exactly the state in which the first caller to pass a
+/// name from anywhere else does, silently, in the module whose whole subject is
+/// which root a file belongs in.
+///
+/// `edit.rs` already has this rule for the *filename* half — `safe_stem`, which
+/// `handoff.rs` shares — and states why: both modules join something onto a
+/// directory they own. So does this one, and it was the half without a rule.
+///
+/// Refused rather than sanitised: a name that escapes is a caller bug, and
+/// quietly rewriting it would hide the bug while inventing a directory nobody
+/// asked for. `safe_stem` sanitises because its input is a *capture's own
+/// filename*, which the app does not control; this one's input is a literal the
+/// app chooses.
 fn under(root: PathBuf, name: &str) -> Result<PathBuf, String> {
     let dir = if name.is_empty() {
         root
     } else {
+        if !contained(name) {
+            return Err(format!("{name} is not a name inside an app directory"));
+        }
         root.join(name)
     };
     std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
     Ok(dir)
+}
+
+/// Whether this names something *inside* a directory rather than a way out of
+/// one.
+///
+/// Both separators on every platform: a Windows path is legal in a Rust string
+/// on Linux, and this rule must not depend on which OS is reading it. A leading
+/// separator, a drive letter, a UNC prefix and any `..` component are all ways
+/// out; a `.` component is merely redundant and is refused with them because a
+/// caller writing one has not thought about this.
+fn contained(name: &str) -> bool {
+    const BACKSLASH: char = '\\';
+    if name.starts_with('/') || name.starts_with(BACKSLASH) || name.contains(':') {
+        return false;
+    }
+    name.split(['/', BACKSLASH])
+        .all(|part| !part.is_empty() && part != ".." && part != ".")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::contained;
+
+    #[test]
+    fn a_directory_name_has_to_stay_inside_the_root_it_is_joined_to() {
+        // The module that owns "which root a file belongs in" joined a
+        // caller-supplied name to that root with `PathBuf::join` and no rule.
+        // `join` discards the root entirely for an absolute path and walks out
+        // for `..`, so the one function whose whole subject is containment did
+        // not enforce it. Every caller passes a literal today, which is exactly
+        // the state in which the first one that does not escapes silently.
+        //
+        // `edit.rs` already had this rule for the *filename* half — `safe_stem`,
+        // shared with `handoff.rs` — and states the same reason: both join
+        // something onto a directory they own.
+        for name in ["posters", "handoff", "clipboard", "edits", "a/b", "a-b.c"] {
+            assert!(contained(name), "an ordinary name was refused: {name}");
+        }
+
+        // Ways out, in both separators on every platform: a Windows path is a
+        // legal Rust string on Linux, and this rule must not depend on which OS
+        // is reading it.
+        for name in [
+            "/etc",
+            r"\\server\share",
+            "C:/Windows",
+            "..",
+            "../elsewhere",
+            "a/../../elsewhere",
+            r"a\..\elsewhere",
+            // A `.` is only redundant, and is refused with the rest because a
+            // caller writing one has not thought about this.
+            "./posters",
+            // An empty component is a doubled separator, which is a caller bug
+            // wherever it came from.
+            "a//b",
+        ] {
+            assert!(
+                !contained(name),
+                "this escapes the root and was allowed: {name}"
+            );
+        }
+    }
 }
