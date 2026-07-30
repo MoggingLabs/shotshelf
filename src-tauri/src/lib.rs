@@ -72,7 +72,7 @@ pub fn run() {
             catch::catch_backfill,
             share::prepare_drag,
             share::copy_capture,
-            share::describe_capture,
+            enrich::scan::describe_capture,
             edit::compare_captures,
             edit::save_edit,
             enrich::ocr::text_recognition_available,

@@ -27,12 +27,24 @@
  * Believing the seam was here is how a reader would conclude the tests exercise
  * less of the app than they do.
  *
- * **Where the boundary runs.** This is the shelf's calls, not the app's:
- * `main.ts`, `popover.ts` and `settings.ts` invoke directly, because they are
- * outside the shelf. Within the shelf the rule is that view modules reach Rust
- * through here, and call back to `Shelf` only for what the shelf owns — what
- * is on it, and what the user is told. Copy was on both sides of that line
- * for a while and grew two failure reports as a result.
+ * **Where the boundary runs**, as a list rather than a description.
+ * `scripts/check-commands.mjs` holds `invoke` to four files: this one, and the
+ * three that each own a piece of Rust the shelf does not — the window
+ * (`popover.ts`), the settings panel (`settings.ts`) and start-up (`main.ts`).
+ * Anything else calling Rust fails that gate.
+ *
+ * It was a description, and two files described it differently: this header
+ * said "the shelf's calls, not the app's — `main.ts` … invoke[s] directly,
+ * because [it is] outside the shelf", while `editor/index.ts` said "the window
+ * itself goes through `bridge.ts` like every other view module". `main.ts`
+ * both imports from here and invokes directly, so it satisfied neither, and
+ * nothing decided which applied. A rule stated twice in prose is a rule that
+ * decides nothing.
+ *
+ * Within the shelf, view modules reach Rust through here and call back to
+ * `Shelf` only for what the shelf owns — what is on it, and what the user is
+ * told. Copy was on both sides of that line for a while and grew two failure
+ * reports as a result.
  *
  * Calls that are advisory rather than load-bearing swallow their errors here —
  * the tray count failing to update is not worth breaking a render over — and

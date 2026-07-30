@@ -23,6 +23,7 @@
 
 pub mod foreground;
 pub mod ocr;
+pub mod scan;
 pub mod secrets;
 
 use serde::Serialize;

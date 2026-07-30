@@ -171,9 +171,57 @@ if (unreachable.length > 0) {
   );
 }
 
-if (unreachable.length > 0 || staleExceptions.length > 0 || unregistered.length > 0) {
+// Where an `invoke` may appear, so the boundary is a rule rather than a claim.
+//
+// `bridge.ts`'s header states one: "This is the shelf's calls, not the app's:
+// `main.ts`, `popover.ts` and `settings.ts` invoke directly, because they are
+// outside the shelf." `src/editor/index.ts`'s header states a different one — "The
+// window itself goes through `bridge.ts` like every other view module" — and
+// `main.ts` imports from the bridge while also invoking directly, satisfying
+// neither. Nothing decided which applied, so both could be true of a file and
+// both could be false.
+//
+// The list is what decides now. It is short, every entry is a module that owns
+// something outside the shelf, and adding one is a diff someone reads. The
+// value of the rule is `bridge.ts`'s own argument for existing: a renamed
+// command "fails at runtime in whichever corner happens to call it", and
+// keeping the call sites countable is what makes that reviewable.
+const INVOKERS = new Set([
+  // The shelf's own calls, which is what this file is.
+  "src/shelf/bridge.ts",
+  // The window, the settings panel and the app's start-up — each owns a piece
+  // of Rust the shelf does not.
+  "src/popover.ts",
+  "src/settings.ts",
+  "src/main.ts",
+]);
+
+const strays = globSync("src/**/*.ts")
+  .filter((file) => !file.endsWith(".test.ts"))
+  .map((file) => file.replaceAll("\\", "/"))
+  .filter((file) => !INVOKERS.has(file))
+  .filter((file) => /\binvoke\s*[<(]/.test(stripComments(readFileSync(file, "utf8"))));
+
+if (strays.length > 0) {
+  console.error(
+    "\nFiles calling `invoke` that are not on the list in " +
+      `${import.meta.filename}:` +
+      "\n" +
+      strays.map((file) => `  ${file}`).join("\n") +
+      "\n\nEvery call site is one more corner a renamed command can fail in. " +
+      "Go through `src/shelf/bridge.ts`, or add the file above and say why.",
+  );
+}
+
+if (
+  unreachable.length > 0 ||
+  staleExceptions.length > 0 ||
+  unregistered.length > 0 ||
+  strays.length > 0
+) {
   process.exit(1);
 }
 console.info(
-  `Checked ${registered.length} registered commands, and ${new Set(invoked).size} invocations.`,
+  `Checked ${registered.length} registered commands, ${new Set(invoked).size} invocations, ` +
+    `and that only ${INVOKERS.size} files call \`invoke\`.`,
 );

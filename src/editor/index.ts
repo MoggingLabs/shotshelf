@@ -24,10 +24,11 @@ import { EditSession, type Rect, type Tool } from "./session.ts";
  * What the editor needs from the shelf that owns it.
  *
  * Only the two things the shelf genuinely owns: what is on it, and what the
- * user is told. The window itself goes through `bridge.ts` like every other
- * view module — this used to take `size` as an injected callback while
- * importing `saveEdit` directly, which declared a seam and then stepped over
- * it in the same file.
+ * user is told. The window goes through `bridge.ts`, which is where every call
+ * into Rust outside the four files `scripts/check-commands.mjs` permits has to
+ * go — this used to take `size` as an injected callback while importing
+ * `saveEdit` directly, which declared a seam and then stepped over it in the
+ * same file.
  */
 export interface EditorHost {
   /** An edit was saved; it joins the shelf as a capture of its own. */

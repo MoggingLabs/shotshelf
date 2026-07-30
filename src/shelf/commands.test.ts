@@ -10,6 +10,11 @@ import { test } from "node:test";
  *
  * It was fooled once: the caller check was a substring scan over every file in
  * `src/`, so a comment naming a command in quotes satisfied it, and the script
+ *
+ * The fixture calls live in `src/main.ts` rather than an invented one,
+ * because the same script now also holds `invoke` to a named list of files —
+ * and a synthetic tree that invokes from a file not on that list fails a rule
+ * these rows are not about.
  * reported a clean repo with zero invocations. A gate that silently stops
  * biting reports success identically to a clean tree — so it needs its own
  * evidence that it still fails when it should.
@@ -53,7 +58,7 @@ tauri::Builder::default()
 test("a command with a real caller passes", () => {
   const result = check({
     "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
-    "src/app.ts": `invoke("wired_command", {});`,
+    "src/main.ts": `invoke("wired_command", {});`,
   });
   assert.ok(result.ok, result.output);
 });
@@ -61,7 +66,7 @@ test("a command with a real caller passes", () => {
 test("a command with no caller fails", () => {
   const result = check({
     "src-tauri/src/lib.rs": LIB,
-    "src/app.ts": `invoke("wired_command", {});`,
+    "src/main.ts": `invoke("wired_command", {});`,
   });
   assert.equal(result.ok, false, "an unreachable command must fail the gate");
   assert.match(result.output, /orphan_command/);
@@ -72,7 +77,7 @@ test("a comment naming a command does not count as calling it", () => {
   // file passed on a repo where nothing invoked anything.
   const result = check({
     "src-tauri/src/lib.rs": LIB,
-    "src/app.ts": `// "wired_command" and "orphan_command" are handled elsewhere\n`,
+    "src/main.ts": `// "wired_command" and "orphan_command" are handled elsewhere\n`,
   });
   assert.equal(result.ok, false, "a comment is not a call site");
 });
@@ -82,7 +87,7 @@ test("a test naming a command does not count as calling it", () => {
   // app, which is the property being checked.
   const result = check({
     "src-tauri/src/lib.rs": LIB,
-    "src/app.ts": `invoke("wired_command", {});`,
+    "src/main.ts": `invoke("wired_command", {});`,
     // An `invoke(…)`, which is the only shape the scanner sees.
     //
     // This was a `respond(…)` call, which matches the invocation pattern
@@ -90,7 +95,7 @@ test("a test naming a command does not count as calling it", () => {
     // not the spec-file exclusion existed, and the assertion held either way.
     // The exclusion this test is named for was cancelled by its own fixture,
     // the same shape as a roaming fixture with no pins in it.
-    "src/app.test.ts": `invoke("orphan_command", {});`,
+    "src/main.test.ts": `invoke("orphan_command", {});`,
   });
   assert.equal(result.ok, false, "a test is not the app");
 });
@@ -110,7 +115,7 @@ test("a test naming a command does not count as calling it", () => {
 test("a command invoked but never registered fails", () => {
   const result = check({
     "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
-    "src/app.ts": `invoke("wired_command", {});\ninvoke("never_existed", {});`,
+    "src/main.ts": `invoke("wired_command", {});\ninvoke("never_existed", {});`,
   });
   assert.equal(result.ok, false, "a renamed command must fail the gate");
   assert.match(result.output, /never_existed/);
@@ -122,7 +127,7 @@ test("an untyped invoke is seen in both directions", () => {
   // this, which made the blind spot precisely the risky half.
   const result = check({
     "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
-    "src/app.ts": `void invoke("wired_command", {});\nawait invoke("gone_missing");`,
+    "src/main.ts": `void invoke("wired_command", {});\nawait invoke("gone_missing");`,
   });
   assert.equal(result.ok, false, "an untyped invoke of a missing command must fail");
   assert.match(result.output, /gone_missing/);
@@ -132,7 +137,7 @@ test("a plugin command is not ours to check", () => {
   // Namespaced commands belong to the plugin that registered them.
   const result = check({
     "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
-    "src/app.ts": `invoke("wired_command", {});\ninvoke("plugin:drag|start_drag", {});`,
+    "src/main.ts": `invoke("wired_command", {});\ninvoke("plugin:drag|start_drag", {});`,
   });
   assert.ok(result.ok, result.output);
 });
@@ -149,13 +154,13 @@ test("a command invoked with single quotes or backticks is seen", () => {
   // pass an unregistered command the moment the last double-quoted caller went.
   const wired = check({
     "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
-    "src/app.ts": `invoke('wired_command', {});`,
+    "src/main.ts": `invoke('wired_command', {});`,
   });
   assert.ok(wired.ok, wired.output);
 
   const backticked = check({
     "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
-    "src/app.ts": "invoke(`wired_command`, {});",
+    "src/main.ts": "invoke(`wired_command`, {});",
   });
   assert.ok(backticked.ok, backticked.output);
 
@@ -163,7 +168,7 @@ test("a command invoked with single quotes or backticks is seen", () => {
   // named with either quote, rather than being silently unseen.
   const missing = check({
     "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
-    "src/app.ts": `invoke("wired_command", {});\ninvoke('never_existed', {});`,
+    "src/main.ts": `invoke("wired_command", {});\ninvoke('never_existed', {});`,
   });
   assert.equal(missing.ok, false, "a single-quoted invoke of a missing command must fail");
   assert.match(missing.output, /never_existed/);
