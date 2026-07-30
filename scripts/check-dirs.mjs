@@ -207,6 +207,11 @@ const ALLOWANCES = new Map([
   // genuinely dead function still fails the build everywhere else.
   ["src-tauri/src/catch/paths.rs", ["dead_code", "dead_code"]],
   ["src-tauri/src/share.rs", ["dead_code"]],
+  // The OCR child's deadline, which only Linux reads but every platform tests:
+  // it has to stay under `SCAN_TIMEOUT` or a wedged child outlives the permit
+  // release, and the semaphore loses a permit for the session. Compiled
+  // everywhere so the inequality is asserted everywhere.
+  ["src-tauri/src/limits.rs", ["dead_code"]],
 ]);
 
 import {

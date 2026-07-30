@@ -496,7 +496,13 @@ fn round_corners<R: Runtime>(shelf: &WebviewWindow<R>) {
 /// `focus` and `height` are two booleans-worth of wire and only two of the
 /// four pairs mean anything. Naming the three makes the fourth a value the
 /// caller can be told about rather than a branch that quietly does nothing.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// `Debug` and `PartialEq` because the test compares these; no `Clone` or
+/// `Copy`, which it was written with and nothing needed — `wanted` returns by
+/// value and the one `match` moves out of it. `cache::Version` records what an
+/// unjustified derive costs: a sentence explaining a property no caller uses,
+/// which the next reader takes for a requirement.
+#[derive(Debug, PartialEq)]
 pub(crate) enum Wanted {
     /// The user asked for the shelf — hotkey, tray, dock. Takes focus.
     Deliberate,

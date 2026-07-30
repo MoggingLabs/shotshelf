@@ -87,6 +87,29 @@ pub(crate) const SCAN_TIMEOUT: std::time::Duration = std::time::Duration::from_s
 /// How long a poster frame may take.
 pub(crate) const FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
+/// How long Linux's `tesseract` child may run before it is killed.
+///
+/// A fourth deadline, and it was the one outside this file — under a header
+/// claiming to hold the set, and after a round that moved the other three here
+/// saying "reading them apart is what let one of them be forgotten".
+///
+/// It has to stay *under* [`SCAN_TIMEOUT`], and that is the whole reason it is
+/// here rather than in `ocr.rs`. The child is killed by its own deadline and
+/// the permit is released by the scan's; if this outgrew that, the scan would
+/// give up while the child ran on, and the next capture would find the
+/// semaphore one permit short — permanently, one wedge at a time, until
+/// credential scanning is silently dead for the session. Beside the constant it
+/// must stay under, the inequality is visible; a file apart, it is nobody's.
+///
+/// Read for real only on Linux — the other two platforms use an OS recogniser
+/// with no child process — but compiled everywhere so the test below can assert
+/// the inequality on every platform rather than on one. Same shape as
+/// `catch/paths.rs`'s `under_home` and `share.rs`'s `percent_encode_path`, and
+/// scoped to exactly the platforms with no caller, so a genuinely dead constant
+/// still fails the build on Linux.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) const OCR_CHILD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// How long a single sizing job may take before its permit is given back.
 ///
 /// Generous — a Lanczos3 resize of a 4K screenshot is real work, and a
@@ -219,6 +242,35 @@ mod tests {
                 "{permits} is not a usable bound"
             );
         }
+    }
+
+    #[test]
+    fn a_child_is_killed_before_the_job_holding_its_permit_gives_up() {
+        // The inequality the OCR deadline only makes sense relative to, and it
+        // lived in another file with nothing stating it.
+        //
+        // `under_limit` releases the permit when `SCAN_TIMEOUT` expires; the
+        // Linux child is killed when `OCR_CHILD_TIMEOUT` does. Reverse them and
+        // the scan gives up while the child runs on — so the next capture finds
+        // the semaphore one permit short, permanently, one wedge at a time,
+        // until credential scanning is silently dead for the session.
+        //
+        // Also the reason this constant is here rather than in `ocr.rs`: it is
+        // `cfg(linux)`-only there, so on the other two platforms it would need a
+        // `dead_code` allowance. Asserting the relationship gives it a caller on
+        // every platform and gates the thing worth gating, which is better than
+        // an allowance that only says the constant is allowed to be unused.
+        assert!(
+            OCR_CHILD_TIMEOUT < SCAN_TIMEOUT,
+            "the child outlives the permit: child {OCR_CHILD_TIMEOUT:?}, scan {SCAN_TIMEOUT:?}",
+        );
+
+        // And with room, not by a millisecond: the child has to be killed *and*
+        // reaped inside the difference.
+        assert!(
+            SCAN_TIMEOUT - OCR_CHILD_TIMEOUT >= std::time::Duration::from_secs(5),
+            "too little room between the child's deadline and the scan's",
+        );
     }
 
     #[test]

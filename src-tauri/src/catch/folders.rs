@@ -90,13 +90,23 @@ const VIDEO_STABLE_TICKS: u32 = 8;
 #[allow(clippy::cast_possible_truncation)]
 #[must_use]
 pub(super) const fn settle_budget(kind: CaptureKind) -> Duration {
-    let ticks = match kind {
+    Duration::from_millis(
+        DEBOUNCE.as_millis() as u64 + SETTLE_TICK.as_millis() as u64 * stable_ticks(kind) as u64,
+    )
+}
+
+/// How many quiet ticks a capture of this kind has to go before it is finished.
+///
+/// One home, because it was written out twice — here and in `settle`'s loop —
+/// and the two only agree by inspection. `settle` is what actually applies the
+/// rule and `settle_budget` is what `to_backfill` and `clipboard.rs` predict it
+/// with; the whole point of deriving the budget is that the prediction moves
+/// when the rule does, which a second copy of the mapping quietly undoes.
+const fn stable_ticks(kind: CaptureKind) -> u32 {
+    match kind {
         CaptureKind::Image => IMAGE_STABLE_TICKS,
         CaptureKind::Video => VIDEO_STABLE_TICKS,
-    };
-    Duration::from_millis(
-        DEBOUNCE.as_millis() as u64 + SETTLE_TICK.as_millis() as u64 * ticks as u64,
-    )
+    }
 }
 /// How long a vanished file is kept around before being forgotten.
 const GONE_GRACE: Duration = Duration::from_secs(5);
@@ -391,12 +401,7 @@ fn settle(path: &Path, state: &mut Pending) -> Settled {
         state.stable_ticks = 0;
     }
 
-    let needed = match state.kind {
-        CaptureKind::Image => IMAGE_STABLE_TICKS,
-        CaptureKind::Video => VIDEO_STABLE_TICKS,
-    };
-
-    if state.stable_ticks >= needed {
+    if state.stable_ticks >= stable_ticks(state.kind) {
         Settled::Ready
     } else {
         Settled::Waiting

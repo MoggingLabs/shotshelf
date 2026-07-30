@@ -244,7 +244,10 @@ mod platform {
     }
 
     /// How long one capture may take before the child is killed.
-    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+    ///
+    /// From `limits.rs`, which holds the app's ceilings, because this one is
+    /// only correct relative to `SCAN_TIMEOUT` — see its docstring.
+    use crate::limits::OCR_CHILD_TIMEOUT as TIMEOUT;
     /// A ceiling on recognised text, which is another program's output.
     const MAX_TEXT: usize = 200_000;
 
