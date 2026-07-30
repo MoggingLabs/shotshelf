@@ -1,7 +1,7 @@
 /**
- * The forms the directory gate must see, and the forms it must not.
+ * The forms the gates must see, and the forms they must not.
  *
- * These three parsers had no test of any kind for seven review rounds, and in
+ * These parsers had no test of any kind for seven review rounds, and in
  * every one of those rounds the rule they implement was walked past: UFCS, the
  * inner `#![allow]` form, `#[expect]`, several lints in one attribute, a
  * `reason = "…"`, a `cfg_attr` wrapper, spaces around `::`, a mid-line
@@ -24,6 +24,7 @@ import {
   codeOnly,
   disallowedIn,
   grantsIn,
+  serialisingStructsIn,
   silencedIn,
   weakeningFlagsIn,
 } from "./rust-source.mjs";
@@ -255,44 +256,72 @@ void test("an allowance whose lint name cannot be read fails closed", () => {
 
 void test("a commented-out rule is not a rule", () => {
   // The clippy-configuration gate reads `clippy.toml` and `Cargo.toml` as text.
-  // Commenting every rule out left all of their paths present, so the gate
-  // passed over a `clippy.toml` that was semantically empty.
+  // Commenting a rule out left its path present, so the gate passed over a
+  // `clippy.toml` that was semantically empty.
   //
-  // Asserted through the two functions that read the blanked text, rather than
-  // against the blanking directly: that is where it matters, and it is the only
-  // place a caller stands.
-  const toml = [
+  // Asserted through the functions that read the blanked text, on inputs where
+  // their answer genuinely depends on the blanking. The first attempt at this
+  // was routed through the same callers on inputs where it did not: the
+  // commented-out array was `# disallowed-methods = [...]`, which
+  // `disallowedIn` anchors past whether or not blanking ran, so `undefined` came
+  // back either way. Both replacements passed with the blanking deleted, which
+  // is the defect this file exists to catch, in this file.
+  //
+  // A comment *inside* an array is the shape that depends on it: unblanked, the
+  // entry behind the `#` becomes a rule.
+  const inside = [
     "disallowed-methods = [",
-    '  { path = "tauri::path::PathResolver::app_data_dir", reason = "roaming" },  # a note',
+    '  { path = "tauri::path::PathResolver::app_data_dir", reason = "roaming" },',
+    '  # { path = "tauri::path::BaseDirectory", reason = "retired" },',
     "]",
-    '# disallowed-types = [{ path = "tauri::path::BaseDirectory" }]',
     "",
   ].join("\n");
-  const arrays = disallowedIn(toml);
-
-  assert.deepEqual(arrays.get("disallowed-methods"), [
+  assert.deepEqual(disallowedIn(inside).get("disallowed-methods"), [
     "tauri::path::PathResolver::app_data_dir",
   ]);
-  assert.equal(arrays.get("disallowed-types"), undefined, "a commented-out array was read");
 
-  // A `#` inside a string is data. Both quote styles, because TOML has two and
-  // they take different escape rules.
+  // A trailing comment on a live entry, same reason.
+  const trailing = [
+    "disallowed-methods = [",
+    '  "tauri::path::PathResolver::app_data_dir",  # "tauri::path::BaseDirectory",',
+    "]",
+    "",
+  ].join("\n");
+  assert.deepEqual(disallowedIn(trailing).get("disallowed-methods"), [
+    "tauri::path::PathResolver::app_data_dir",
+  ]);
+
+  // A `#` inside a string is data, not a comment — so the rest of the array
+  // survives it.
   assert.deepEqual(
-    disallowedIn('disallowed-names = ["a # inside a basic string", \'a # in a literal one\']').get(
-      "disallowed-names",
-    ),
-    ["a # inside a basic string", "a # in a literal one"],
+    disallowedIn(
+      [
+        "disallowed-names = [",
+        '  "a # inside a basic string",',
+        "  'a # in a literal one',",
+        '  "kept",',
+        "]",
+        "",
+      ].join("\n"),
+    ).get("disallowed-names"),
+    ["a # inside a basic string", "a # in a literal one", "kept"],
   );
 
-  // And the newline survives the comment, which is the invariant with a
-  // consumer: `tomlEntries` splits on it, so a comment that swallowed the break
-  // would take the *next* key with it — here, the level of the lint below.
+  // And the newline that ends a comment survives it, which is the invariant
+  // `tomlEntries` depends on: it splits on newlines, so a comment that swallowed
+  // the break would take the *next* key with it — here, the `allow` the whole
+  // lint-configuration gate exists to find.
   assert.equal(
-    lintLevelsIn(["[lints.clippy]", "# a note", 'cast_sign_loss = "warn"', ""].join("\n")).get(
-      "clippy::cast_sign_loss",
-    ),
-    "warn",
-    "a comment swallowed the line after it",
+    lintLevelsIn(
+      [
+        "[lints.clippy]",
+        'cast_sign_loss = "warn"  # a note',
+        'disallowed_methods = "allow"',
+        "",
+      ].join("\n"),
+    ).get("clippy::disallowed_methods"),
+    "allow",
+    "a comment swallowed the line after it, hiding an allowance from the gate",
   );
 });
 
@@ -302,15 +331,25 @@ void test("a TOML literal string ends at its quote, backslash and all", () => {
   // left the scan inside a string for the rest of the file and copied every
   // comment through unblanked — reopening the comment bypass in the same round
   // it was closed, on a value as ordinary as a Windows path.
+  //
+  // The comment below is what makes that observable, and getting it wrong twice
+  // is why it is spelled out. A comment that *begins* an entry is skipped by
+  // `disallowedIn` whether or not it was blanked — the leading `#` fails the
+  // quoted-string shape either way — so an input like that asserts nothing. The
+  // comment here sits after a live entry and carries a comma, so unblanked it
+  // splits into a fragment that is a clean quoted string, and the retired rule
+  // comes back as a live one.
   const toml = [
     `disallowed-names = ['C:${String.fromCharCode(92)}']`,
-    '# disallowed-methods = ["tauri::path::PathResolver::app_data_dir"]',
+    "disallowed-methods = [",
+    '  "tauri::path::PathResolver::app_data_dir",  # retired, "tauri::path::BaseDirectory",',
+    "]",
     "",
   ].join("\n");
 
-  assert.equal(
+  assert.deepEqual(
     disallowedIn(toml).get("disallowed-methods"),
-    undefined,
+    ["tauri::path::PathResolver::app_data_dir"],
     "a comment after a literal string ending in a backslash survived",
   );
 });
@@ -364,17 +403,31 @@ void test("every way of switching a clippy lint off is read as the same setting"
   );
 });
 
-void test("a clippy level is read from the clippy table and nowhere else", () => {
-  // `[lints.rust]` holds levels for lints of its own, and a level set under any
-  // other table is not this one. Reading the manifest as one flat text would
-  // take the first `= "warn"` it found wherever it sat.
+void test("a level is read under the table it was set in, whichever tool owns it", () => {
+  // Every `[lints.*]` table, keyed the way an attribute would name the lint:
+  // `clippy::x` for clippy's, bare `x` for the toolchain's own.
+  //
+  // This read `lints.clippy` only, and its title said so approvingly. Four
+  // lines of `[lints.rust] dead_code = "allow"` then switched off the one thing
+  // enforcing "no dead code" in the crate — crate-wide, with clippy and the
+  // directory gate both green — while the attribute half had just been widened
+  // to count `#[allow(dead_code)]` as the strongest escape hatch there is.
+  //
+  // The widening shipped with no row here at all: narrowing the pattern back to
+  // `^lints\.(clippy)\.` left all 127 unit tests and the whole deadcode chain
+  // green. The probes existed in a scratch file and a commit message, which is
+  // the exact failure the header of this file was written about.
   const manifest = [
     "[lints.rust]",
     'unsafe_code = "forbid"',
+    'dead_code = "allow"',
     'cast_sign_loss = "allow"',
     "",
     "[lints.clippy]",
     'cast_sign_loss = "warn"',
+    "",
+    "[lints.rustdoc]",
+    'broken_intra_doc_links = "allow"',
     "",
     "[workspace.lints.clippy]",
     'cast_precision_loss = "allow"',
@@ -382,21 +435,40 @@ void test("a clippy level is read from the clippy table and nowhere else", () =>
   ].join("\n");
   const levels = lintLevelsIn(manifest);
 
-  assert.equal(levels.get("clippy::cast_sign_loss"), "warn", "a rustc lint's level was taken for clippy's");
-  assert.equal(levels.get("clippy::unsafe_code"), undefined, "a rustc lint was reported as a clippy one");
-  assert.equal(
-    levels.get("clippy::cast_precision_loss"),
-    undefined,
-    "a level under `[workspace.lints.clippy]` is a different table",
-  );
+  // The toolchain's own lints, under the names an attribute uses for them.
+  assert.equal(levels.get("dead_code"), "allow", "a rustc lint was not read at all");
+  assert.equal(levels.get("unsafe_code"), "forbid");
+  // A tool's lints keep their prefix, so the two `cast_sign_loss` entries are
+  // two different lints and neither takes the other's level.
+  assert.equal(levels.get("clippy::cast_sign_loss"), "warn");
+  assert.equal(levels.get("cast_sign_loss"), "allow");
+  // Any tool, not a list of two.
+  assert.equal(levels.get("rustdoc::broken_intra_doc_links"), "allow");
+
+  // A different table is a different key: `[workspace.lints.clippy]` is the
+  // workspace's, not this crate's.
+  assert.equal(levels.get("clippy::cast_precision_loss"), undefined);
 
   // A commented-out level is not a level.
   assert.equal(
-    lintLevelsIn(["[lints.clippy]", '# cast_sign_loss = "allow"', ""].join("\n")).get(
-      "clippy::cast_sign_loss",
-    ),
+    lintLevelsIn(["[lints.rust]", '# dead_code = "allow"', ""].join("\n")).get("dead_code"),
     undefined,
   );
+
+  // And every spelling that worked for clippy works for the toolchain too —
+  // this was widened by generalising the key, not by adding a second pattern.
+  for (const lines of [
+    ["[lints.rust]", 'dead_code = { level = "allow", priority = 1 }'],
+    ["[lints.rust.dead_code]", 'level = "allow"'],
+    [" [ lints.rust ]", ' dead_code = "allow"'],
+    ['lints.rust.dead_code = "allow"'],
+  ]) {
+    assert.equal(
+      lintLevelsIn([...lines, ""].join("\n")).get("dead_code"),
+      "allow",
+      `this switches the lint off and was not read as "allow": ${lines.join(" / ")}`,
+    );
+  }
 });
 
 void test("a disallowed path is read from the array it has to be in", () => {
@@ -505,6 +577,72 @@ void test("a cargo config that hardens or says nothing is left alone", () => {
       weakeningFlagsIn(config),
       [],
       `this weakens nothing and was reported: ${config}`,
+    );
+  }
+});
+
+void test("a type that serialises to the webview is found at any visibility", () => {
+  // These names are half the IPC contract, so the manifest has to be complete —
+  // and the gate that keeps it complete matched `pub struct` alone for a round,
+  // under a header claiming it "asks the crate which types serialise". Every
+  // module in the crate is private, so `pub(crate)` is the natural visibility
+  // and nothing pushes an author toward `pub`; the widening that fixed it then
+  // shipped with nothing asserting it, which is what this file is for.
+  const found = [
+    "#[derive(Serialize)]\npub struct Plain { a: u8 }",
+    "#[derive(serde::Serialize)]\npub(crate) struct Crate { a: u8 }",
+    "#[derive(Serialize)]\nstruct Private { a: u8 }",
+    "#[derive(Serialize)]\npub(super) struct Super { a: u8 }",
+    // Several derives, in any order.
+    "#[derive(Debug, Clone, Serialize, Deserialize)]\npub struct Plain { a: u8 }",
+    "#[derive(Deserialize, Serialize)]\npub struct Plain { a: u8 }",
+    // Attributes between the derive and the keyword.
+    '#[derive(Serialize)]\n#[serde(rename_all = "camelCase")]\npub struct Plain { a: u8 }',
+    '#[derive(Serialize)]\n#[serde(default)]\n#[serde(deny_unknown_fields)]\npub struct Plain { a: u8 }',
+    // A docstring long enough to blow any fixed character budget between the
+    // two — the shape the first version used.
+    `#[derive(Serialize)]\n${"/// prose that runs on and on and on and on and on\n".repeat(8)}pub struct Plain { a: u8 }`,
+  ];
+
+  for (const source of found) {
+    assert.equal(
+      serialisingStructsIn(source).length,
+      1,
+      `this reaches the webview and was not found: ${source.slice(0, 60)}`,
+    );
+  }
+
+  // Both names, when a file holds two.
+  assert.deepEqual(
+    serialisingStructsIn(
+      "#[derive(Serialize)]\npub struct One { a: u8 }\n\n#[derive(Serialize)]\npub(crate) struct Two { b: u8 }\n",
+    ),
+    ["One", "Two"],
+  );
+});
+
+void test("a type that does not serialise is left out of the manifest", () => {
+  const ignored = [
+    // Reading is not writing: `Deserialize` alone crosses nothing outward.
+    "#[derive(Deserialize)]\npub struct Read { a: u8 }",
+    "#[derive(Debug, Clone)]\npub struct Plain { a: u8 }",
+    "pub struct Bare { a: u8 }",
+    // An enum's *values* are joined by their own fixtures, not by field names.
+    "#[derive(Serialize)]\npub enum Kind { A, B }",
+    // A name that merely contains the word.
+    "#[derive(SerializeDisplay)]\npub struct Plain { a: u8 }",
+    "#[derive(DeserializeOwned)]\npub struct Plain { a: u8 }",
+    // Prose about the derive is not the derive. This is why the scan runs over
+    // `codeOnly` output rather than raw text.
+    "// #[derive(Serialize)]\n// pub struct Documented { a: u8 }",
+    '/// A `#[derive(Serialize)] pub struct Quoted` in a docstring.\npub struct Real { a: u8 }',
+  ];
+
+  for (const source of ignored) {
+    assert.deepEqual(
+      serialisingStructsIn(source),
+      [],
+      `this serialises nothing and was found: ${source.slice(0, 60)}`,
     );
   }
 });

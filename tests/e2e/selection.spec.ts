@@ -298,3 +298,29 @@ test("command-click adds a second, the same as ctrl-click", async ({ page }) => 
 
   await expect(page.locator(".tile--picked")).toHaveCount(2);
 });
+
+test("a capture leaving the shelf takes its quick look with it", async ({ page }) => {
+  // `#release`'s preview close, which nothing reached.
+  //
+  // Every spec that opens a quick look closes it deliberately — Space, Escape —
+  // so none of them has the capture pulled out from under it. The three routes
+  // that do that are the ×, the item cap and the retention sweep, and the sweep
+  // is not vetoed by `overlayOpen` the way `#ageColumn` is. Without this, the
+  // quick look stays up showing a full-size picture of a capture the shelf no
+  // longer holds, dismissable only with Escape.
+  await bootShelf(page, { settings: { maxItems: 1 } });
+  // The quick look asks Rust to reshape the window; the stub has to answer or
+  // the open never completes.
+  await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", [220, 124]));
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press(" ");
+  await expect(page.locator(".preview")).toHaveCount(1);
+
+  // A second capture evicts the first, which is the one on screen.
+  await land(page, FIXTURE.tall);
+
+  await expect(page.locator(".preview")).toHaveCount(0);
+});

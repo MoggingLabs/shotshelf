@@ -94,12 +94,19 @@ pub(crate) const FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_
 /// saying "reading them apart is what let one of them be forgotten".
 ///
 /// It has to stay *under* [`SCAN_TIMEOUT`], and that is the whole reason it is
-/// here rather than in `ocr.rs`. The child is killed by its own deadline and
-/// the permit is released by the scan's; if this outgrew that, the scan would
-/// give up while the child ran on, and the next capture would find the
-/// semaphore one permit short — permanently, one wedge at a time, until
-/// credential scanning is silently dead for the session. Beside the constant it
-/// must stay under, the inequality is visible; a file apart, it is nobody's.
+/// here rather than in `ocr.rs`. The child is killed by its own deadline; the
+/// scan gives up at the other. If this outgrew that, every wedged capture would
+/// leave a `tesseract` process and the blocking thread waiting on it running
+/// past the point where anything is still interested in the answer — and the
+/// shelf starts one of these per capture. Beside the constant it must stay
+/// under, the inequality is visible; a file apart, it is nobody's.
+///
+/// Not a permit leak, which is what this said first. `under_limit` drops the
+/// permit on every path including the timeout one, and
+/// `a_job_that_never_finishes_gives_its_permit_back` asserts exactly that,
+/// sixty lines below. The claim was written from the shape of an older bug this
+/// same file had already fixed — the permit moved *into* the worker — and
+/// nothing re-read the fix before restating the failure it removed.
 ///
 /// Read for real only on Linux — the other two platforms use an OS recogniser
 /// with no child process — but compiled everywhere so the test below can assert
@@ -249,11 +256,15 @@ mod tests {
         // The inequality the OCR deadline only makes sense relative to, and it
         // lived in another file with nothing stating it.
         //
-        // `under_limit` releases the permit when `SCAN_TIMEOUT` expires; the
-        // Linux child is killed when `OCR_CHILD_TIMEOUT` does. Reverse them and
-        // the scan gives up while the child runs on — so the next capture finds
-        // the semaphore one permit short, permanently, one wedge at a time,
-        // until credential scanning is silently dead for the session.
+        // The scan gives up at `SCAN_TIMEOUT`; the Linux child is killed at
+        // `OCR_CHILD_TIMEOUT`. Reverse them and every wedged capture leaves a
+        // `tesseract` process and the blocking thread waiting on it running
+        // past the point where anything wants the answer — one per capture, and
+        // the shelf starts one per tile.
+        //
+        // *Not* a permit leak: `under_limit` drops the permit on every path,
+        // and the test below this one asserts it. Saying otherwise here was a
+        // claim written from an older bug's shape, in the file that fixed it.
         //
         // Also the reason this constant is here rather than in `ocr.rs`: it is
         // `cfg(linux)`-only there, so on the other two platforms it would need a

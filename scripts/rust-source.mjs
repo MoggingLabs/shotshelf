@@ -496,6 +496,36 @@ export function disallowedIn(source) {
 }
 
 /**
+ * Every struct in a Rust file that derives `Serialize`, at any visibility.
+ *
+ * The webview receives these, so their field names are half the IPC contract —
+ * `check-wire.mjs` requires each to be in the manifest and the two languages
+ * assert their fields against it.
+ *
+ * Here rather than in `check-wire.mjs`, and for the reason this file exists:
+ * that script runs its gate at import time, so nothing can import it to test a
+ * function. It matched `pub struct` alone for a round, under a header claiming
+ * it "asks the crate which types serialise" — and the fix shipped with nothing
+ * asserting it either, which is the failure this file's own header is about.
+ *
+ * `pub`, `pub(crate)` and bare all count: every module in the crate is private,
+ * so `pub(crate)` is the natural visibility and nothing pushes an author toward
+ * `pub`. Attributes between the derive and the keyword are skipped explicitly
+ * rather than by allowing a fixed run of characters, which is a budget a long
+ * enough docstring silently exceeds.
+ *
+ * @param {string} source
+ * @returns {string[]}
+ */
+export function serialisingStructsIn(source) {
+  return [
+    ...codeOnly(source).matchAll(
+      /#\[derive\([^)]*\bSerialize\b[^)]*\)\](?:\s|#\[[^\]]*\])*(?:pub(?:\([^)]*\))?\s+)?struct\s+([A-Za-z_]\w*)/g,
+    ),
+  ].map((found) => found[1] ?? "");
+}
+
+/**
  * Every flag in a cargo config that switches a lint off or caps one.
  *
  * A clippy lint's level is not just `[lints.clippy]` and the attributes in the

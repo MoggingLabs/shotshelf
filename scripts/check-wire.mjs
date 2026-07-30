@@ -23,38 +23,24 @@
 
 import { globSync, readFileSync } from "node:fs";
 
-import { codeOnly } from "./rust-source.mjs";
+import { serialisingStructsIn } from "./rust-source.mjs";
 
 const MANIFEST = "tests/fixtures/wire-fields.json";
 
 const declared = Object.keys(JSON.parse(readFileSync(MANIFEST, "utf8")));
 
 /**
- * Every struct in the crate that derives `Serialize`, at any visibility.
+ * Every struct in the crate that serialises to the webview.
  *
- * Comments and strings blanked first, through the same parser the other two
- * scripts use — a struct quoted in a docstring is not a struct.
- *
- * `pub`, `pub(crate)` and bare all count. This matched `pub struct` only, under
- * a header claiming it "asks the crate which types serialise" — so the moment
- * someone wrote `pub(crate) struct` and returned it through a `pub` wrapper, or
- * nested a private one inside a payload, the manifest would have gone on
- * looking complete. Every type here happens to be `pub` today, which is exactly
- * when a gap like that is invisible.
- *
- * Attributes may sit between the derive and the keyword — `#[serde(rename_all
- * = "camelCase")]` does on half of these — so they are skipped explicitly
- * rather than by allowing a fixed run of any characters, which is a budget that
- * a long enough docstring silently exceeds.
+ * The discovery itself lives in `rust-source.mjs`, where a test can reach it:
+ * this file runs its gate at import time, so nothing can import it to test a
+ * function. Its rule matched `pub struct` alone for a round, and the widening
+ * that fixed that shipped with nothing asserting it either — the same shape
+ * twice over, which is what `rust-source.mjs` exists to end.
  */
-const serialised = globSync("src-tauri/src/**/*.rs").flatMap((file) => {
-  const code = codeOnly(readFileSync(file, "utf8"));
-  return [
-    ...code.matchAll(
-      /#\[derive\([^)]*\bSerialize\b[^)]*\)\](?:\s|#\[[^\]]*\])*(?:pub(?:\([^)]*\))?\s+)?struct\s+([A-Za-z_]\w*)/g,
-    ),
-  ].map((found) => found[1] ?? "");
-});
+const serialised = globSync("src-tauri/src/**/*.rs").flatMap((file) =>
+  serialisingStructsIn(readFileSync(file, "utf8")),
+);
 
 const problems = [];
 

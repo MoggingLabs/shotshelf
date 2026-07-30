@@ -64,7 +64,7 @@ pub fn run() {
         // brings the shelf that is already running to the front.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // A second launch is someone asking for the shelf.
-            window::open(app, true);
+            window::open_deliberately(app);
         }))
         .invoke_handler(tauri::generate_handler![
             catch::catch_watch_dirs,
@@ -177,7 +177,7 @@ pub fn run() {
             // away again. `false` is what lets the front end tell it apart from
             // a tray or hotkey open — both of which come through this same
             // function and emit the same event.
-            window::open(app.handle(), false);
+            window::open_at_launch(app.handle());
 
             Ok(())
         })

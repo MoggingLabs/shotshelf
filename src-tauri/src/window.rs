@@ -75,12 +75,33 @@ const WINDOW_EVENTS: &str = include_str!("../../tests/fixtures/window-events.jso
 /// Each one stood the launch dismissal down, so the four-second appearance had
 /// no way to put itself away and stayed on screen — an always-on-top window,
 /// until dismissed by hand — contradicting its own contract.
-fn mark_opened<R: Runtime>(shelf: &WebviewWindow<R>, deliberate: bool) {
+fn mark_opened<R: Runtime>(shelf: &WebviewWindow<R>, appearance: Appearance) {
     set_opened(true);
     attempt(
         "announce that the shelf opened",
-        shelf.emit(OPENED_EVENT, deliberate),
+        shelf.emit(OPENED_EVENT, appearance == Appearance::Deliberate),
     );
+}
+
+/// Which of the two ways the window came up.
+///
+/// A named pair rather than a `bool`, because the bool was the whole
+/// distinction and it travelled as a literal through three call sites that no
+/// test can execute. `open(app, false)` inside `open_deliberately` compiles,
+/// passes clippy and passes all 160 tests, and makes every tray click and
+/// hotkey press dismiss itself four seconds later. `Appearance::Launch` inside
+/// `open_deliberately` is the same mistake spelled so it reads wrong.
+///
+/// It does not make the mistake impossible — nothing here can, for the reason
+/// `show_shelf` sets out — but it is the difference between a typo and a
+/// sentence that contradicts the function it is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Appearance {
+    /// Tray, hotkey, dock, or a restore after the editor closes.
+    Deliberate,
+    /// The launch appearance, which nobody asked for and which takes itself
+    /// away again.
+    Launch,
 }
 
 /// Do a window operation, and say so in the log if it does not happen.
@@ -227,8 +248,33 @@ pub const BROWSE_SIZE: (f64, f64) = (225.0, 420.0);
 const MAX_COLUMN_HEIGHT: f64 = 4000.0;
 pub const COLUMN_WIDTH: f64 = BROWSE_SIZE.0;
 
-/// Open the popover deliberately: full grid, in its corner, on top, and focused.
-pub fn open<R: Runtime>(app: &AppHandle<R>, deliberate: bool) {
+/// Open the popover because the user asked: tray, hotkey, dock, or a restore
+/// after the editor closes.
+pub fn open_deliberately<R: Runtime>(app: &AppHandle<R>) {
+    open(app, Appearance::Deliberate);
+}
+
+/// Open the popover at launch, which nobody asked for.
+///
+/// The one appearance that takes itself away again — `popover.ts` reads the
+/// `false` and arms its own dismissal.
+pub fn open_at_launch<R: Runtime>(app: &AppHandle<R>) {
+    open(app, Appearance::Launch);
+}
+
+/// Open the popover: full grid, in its corner, on top, and focused.
+///
+/// Private, behind the two named wrappers above, because `deliberate` is a flag
+/// argument on which the whole launch/deliberate distinction turns and every
+/// caller passed a literal. Inverting one of those literals inside
+/// `show_shelf` — which no test in this crate can execute and which the browser
+/// harness *supplies* rather than observes — made every tray click, hotkey and
+/// editor-restore emit `shelf://opened` with `deliberate = false`. `popover.ts`
+/// reads that as the launch appearance, so the shelf the user just opened
+/// dismisses itself four seconds later. Clippy, all 160 tests and the whole
+/// gate stayed green. That is the failure `mark_opened` spends eight lines on,
+/// inverted, and a bool at a call site is not the place for it.
+fn open<R: Runtime>(app: &AppHandle<R>, appearance: Appearance) {
     let Some(shelf) = app.get_webview_window(SHELF) else {
         return;
     };
@@ -240,7 +286,7 @@ pub fn open<R: Runtime>(app: &AppHandle<R>, deliberate: bool) {
     place(&shelf, BROWSE_SIZE);
     attempt("show the shelf", shelf.show());
     attempt("focus the shelf", shelf.set_focus());
-    mark_opened(&shelf, deliberate);
+    mark_opened(&shelf, appearance);
 }
 
 /// Show the narrow column without taking focus, sized to just the cards it
@@ -353,7 +399,7 @@ pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) -> Result<(), String
     // Safe when already browsing: `adoptBrowse` is front-end state only and
     // never calls back into Rust, so this cannot re-enter.
     // A quick look is the user asking, so the launch appearance stands down.
-    mark_opened(&shelf, true);
+    mark_opened(&shelf, Appearance::Deliberate);
     Ok(())
 }
 
@@ -410,7 +456,7 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) {
     // is popped up should hand you the shelf, not take the column away.
     match shelf.is_visible() {
         Ok(true) if is_opened() => hide(app),
-        Ok(_) => open(app, true),
+        Ok(_) => open_deliberately(app),
         Err(err) => crate::diag::warn(&format!("could not read shelf visibility: {err}")),
     }
 }
@@ -545,18 +591,30 @@ pub(crate) fn wanted(focus: bool, height: Option<f64>) -> Wanted {
 /// `height` is only meaningful for the column: the front-end knows how many
 /// cards are showing, so it decides how tall the window needs to be.
 ///
-/// Where the cover ends, stated rather than implied. [`wanted`] decides, and a
-/// test pins all four combinations. What is left here is the dispatch, and
-/// nothing in the repo can execute it: this takes an `AppHandle`, which no Rust
-/// test can build, and no browser spec runs a real `#[tauri::command]` —
-/// `webview_path.rs` records that limit for the whole IPC tier. So swapping the
-/// two arms below would still pass every gate. It is three lines with no
-/// condition in them, which is as small as that tier gets, and shrinking it
-/// further would only move the same untestable dispatch somewhere else.
+/// Where the cover ends, stated rather than implied — and stated as a mutation
+/// that really does survive, because the first two attempts at this sentence
+/// named ones that do not.
+///
+/// [`wanted`] decides, and a test pins all four argument combinations. What is
+/// left here is the dispatch, and nothing in the repo can execute it: this takes
+/// an `AppHandle`, which no Rust test can build, and no browser spec runs a real
+/// `#[tauri::command]` — `webview_path.rs` records that limit for the tier.
+///
+/// Swapping the three arms below is **not** the example: with a payload on
+/// `Column`, the literal swap does not compile, and the nearest one that does
+/// leaves `height` unused and `peek` uncalled, which `-D warnings` refuses. Nor
+/// is `open(&app, true)`, which no longer exists.
+///
+/// What does survive is calling the wrong *named* function — `open_at_launch`
+/// where `open_deliberately` belongs, or the equivalent inside either wrapper.
+/// Every tray click and hotkey press would then dismiss itself four seconds
+/// later, with clippy and all 160 tests green. [`Appearance`] is what makes
+/// that read wrong rather than look ordinary; it does not make it impossible,
+/// and nothing at this boundary can.
 #[tauri::command]
 pub fn show_shelf<R: Runtime>(app: AppHandle<R>, focus: bool, height: Option<f64>) {
     match wanted(focus, height) {
-        Wanted::Deliberate => open(&app, true),
+        Wanted::Deliberate => open_deliberately(&app),
         Wanted::Column(height) => peek(&app, height),
         Wanted::Unsaid => crate::diag::warn("show_shelf asked for the column with no height"),
     }

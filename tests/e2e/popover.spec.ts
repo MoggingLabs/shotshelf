@@ -424,3 +424,48 @@ test("a capture landing inside the launch appearance keeps its full minute", asy
     .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length))
     .toBeGreaterThan(0);
 });
+
+test("an alert taking itself down does not take the browse view with it", async ({ page }) => {
+  // `dismissIfEmpty`'s mode guard, which nothing reached.
+  //
+  // `onAlertChange(false)` fires when the alert strip hides itself twelve
+  // seconds after any message — the update notice, "no capture folders are
+  // being watched", a failed pin. `dismissIfEmpty` then asks whether the column
+  // is empty, and during the launch appearance it *is*: the shape is browse and
+  // the column legitimately holds nothing. Without the mode term, the falling
+  // edge of a message about watch folders takes away the browse list the user
+  // is reading.
+  //
+  // Every existing spec that reaches this method gets there through
+  // `openBrowse`, which sets `#opened` — so the earlier guard returns first and
+  // the mode term is never the deciding one. This is the state a user is in for
+  // the first four seconds of every launch.
+  await page.clock.install();
+  await bootShelf(page);
+  await launchAppearance(page);
+
+  // The boot raises a real alert: the harness reports no watch folders.
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+
+  // Settings open, so `busy()` holds the launch dismissal off and the window is
+  // still there when the alert expires. Otherwise the four-second timer would
+  // put it away first and this would prove nothing.
+  await page.locator("#shelf-settings").click();
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+  await page.clock.runFor(5_000);
+  expect(
+    await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length),
+    "the launch dismissal fired while the settings panel was open",
+  ).toBe(0);
+
+  // Close settings and let the alert take itself down.
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+  await page.clock.runFor(15_000);
+
+  await expect(page.locator("#shelf-alert")).toBeHidden();
+  expect(
+    await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length),
+    "an expiring alert dismissed the browse view the user was reading",
+  ).toBe(0);
+});

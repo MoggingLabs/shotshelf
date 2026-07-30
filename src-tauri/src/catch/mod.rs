@@ -505,18 +505,18 @@ pub async fn catch_backfill<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Capture
     // yesterday's after today's have already landed") for a call that did not
     // exist.
     if let Some(store) = app.try_state::<crate::settings::SettingsStore>() {
-        if let Some(newest) = newest_of(&chosen) {
+        if let Some(newest) = chosen.watermark {
             store.note_capture(newest);
         }
     }
 
-    if !chosen.is_empty() {
+    if !chosen.captures.is_empty() {
         crate::diag::info(&format!(
             "{} captures from before this launch",
-            chosen.len()
+            chosen.captures.len()
         ));
     }
-    Ok(chosen)
+    Ok(chosen.captures)
 }
 
 /// Everything on disk that could be a capture, with when it was taken.
@@ -595,13 +595,37 @@ fn settled(path: &Path, kind: CaptureKind, modified: SystemTime) -> bool {
 /// filesystem or a clock: what it decides — how far back, how recent is too
 /// recent, how many, in which order, and what is already known — is the whole
 /// of what a user sees after a restart.
+/// What a backfill decided: the captures to hand over, and where the
+/// watermark should stand afterwards.
+///
+/// One value because they are one decision. The watermark was `newest_of`, a
+/// separate pure helper with its own test — which pinned the `max()` and
+/// nothing about whether anyone called it. Deleting the whole `note_capture`
+/// block in `catch_backfill` left clippy and every test green, and a capture
+/// delivered only by a backfill would come back on every later launch however
+/// many times the user removed it. That is the failure the watermark exists to
+/// prevent.
+///
+/// Splitting the helper out had moved the boundary and not the decision, which
+/// is the mistake `CaptureSink::note_folder_image` records making and fixing
+/// one file over. Here the decision is the returned value, so the tests that
+/// already assert what is chosen assert the watermark in the same breath.
+///
+/// What is left in the command is `store.note_capture(chosen.watermark)` — the
+/// storing, which needs an `AppHandle` and so lives in the tier nothing here
+/// can execute. That much is disclosed rather than claimed as covered.
+pub(crate) struct Backfill {
+    pub captures: Vec<Capture>,
+    pub watermark: Option<u64>,
+}
+
 fn to_backfill(
     mut found: Vec<(SystemTime, PathBuf, CaptureKind)>,
     now: SystemTime,
     since_ms: u64,
     watching_since: &[(PathBuf, SystemTime)],
     finished: impl Fn(&Path, CaptureKind, SystemTime) -> bool,
-) -> Vec<Capture> {
+) -> Backfill {
     let cutoff = now - BACKFILL_WINDOW;
 
     /// When the watcher covering this file started listening.
@@ -667,7 +691,7 @@ fn to_backfill(
     // that by prepending.
     found.reverse();
 
-    found
+    let captures: Vec<Capture> = found
         .into_iter()
         .map(|(modified, path, kind)| Capture {
             path: path.display().to_string(),
@@ -685,20 +709,19 @@ fn to_backfill(
             // "Shotshelf".
             context: crate::enrich::foreground::Context::default(),
         })
-        .collect()
+        .collect();
+
+    Backfill {
+        // The newest of what is actually being handed over — not of what was
+        // found, and not `now`. A backfill hands yesterday's over after today's
+        // have already landed, and the watermark only ever moves forward.
+        watermark: captures.iter().map(|capture| capture.ts).max(),
+        captures,
+    }
 }
 
 /// The newest timestamp among the captures being handed over, if any.
 ///
-/// Split out so the round's blocker fix is reachable by a test. Deleting the
-/// whole `note_capture` block left every gate green — no Rust test calls
-/// `catch_backfill` (it needs an `AppHandle`) and the front-end stubs answer
-/// with canned arrays — so the one line that makes `Remove` survive a restart
-/// was one deletion from silently going away again.
-fn newest_of(chosen: &[Capture]) -> Option<u64> {
-    chosen.iter().map(|capture| capture.ts).max()
-}
-
 fn as_ms(at: SystemTime) -> u64 {
     at.duration_since(UNIX_EPOCH).map_or(0, |since| {
         u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
@@ -868,6 +891,15 @@ mod tests {
         now: SystemTime,
         since_ms: u64,
     ) -> Vec<Capture> {
+        decided(found, now, since_ms).captures
+    }
+
+    /// The whole decision, for the tests that read the watermark too.
+    fn decided(
+        found: Vec<(SystemTime, PathBuf, CaptureKind)>,
+        now: SystemTime,
+        since_ms: u64,
+    ) -> Backfill {
         // Everything in these fixtures is a finished file; the one test that
         // cares about a half-written one supplies its own predicate.
         to_backfill(found, now, since_ms, &watcher_started(), |_, _, _| true)
@@ -1109,7 +1141,9 @@ mod tests {
             CaptureKind::Video,
         );
         assert!(
-            to_backfill(vec![running], now(), 0, &watching, settled).is_empty(),
+            to_backfill(vec![running], now(), 0, &watching, settled)
+                .captures
+                .is_empty(),
             "a partially written recording was handed to the shelf"
         );
 
@@ -1118,7 +1152,7 @@ mod tests {
         // the case the flat five-second clock lost.
         let done = seen(2, "taken-two-seconds-ago.png");
         assert_eq!(
-            names(&to_backfill(vec![done], now(), 0, &watching, settled)),
+            names(&to_backfill(vec![done], now(), 0, &watching, settled).captures),
             vec!["taken-two-seconds-ago.png"],
             "a capture no watcher could ever emit was dropped by backfill too"
         );
@@ -1162,7 +1196,7 @@ mod tests {
             (between, late.join("nobody-saw-it.png"), CaptureKind::Image),
         ];
 
-        let chosen = to_backfill(found, now(), 0, &started, |_, _, _| true);
+        let chosen = to_backfill(found, now(), 0, &started, |_, _, _| true).captures;
         assert_eq!(
             names(&chosen),
             vec!["/late\nobody-saw-it.png"]
@@ -1213,7 +1247,8 @@ mod tests {
             0,
             &started_just_now,
             |_, _, _| true,
-        );
+        )
+        .captures;
         assert_eq!(
             names(&chosen),
             vec!["taken-during-launch.png"],
@@ -1225,7 +1260,9 @@ mod tests {
         // registration, and still growing.
         let after = seen(0, "still-being-written.mp4");
         assert!(
-            to_backfill(vec![after], now(), 0, &started_just_now, |_, _, _| true).is_empty(),
+            to_backfill(vec![after], now(), 0, &started_just_now, |_, _, _| true)
+                .captures
+                .is_empty(),
             "a file written after the watcher came up is the watcher's to emit"
         );
     }
@@ -1241,7 +1278,7 @@ mod tests {
         // the shelf's newest-on-top order matches when they were taken, so
         // taking the final element would leave the watermark behind the newest
         // capture and re-offer it forever.
-        let chosen = backfill(
+        let chosen = decided(
             vec![
                 ordinary(600, "older.png"),
                 ordinary(60, "newest.png"),
@@ -1250,15 +1287,15 @@ mod tests {
             now(),
             0,
         );
-        let newest = newest_of(&chosen).expect("something was chosen");
+        let newest = chosen.watermark.expect("something was chosen");
 
-        // Against `to_backfill`'s output, not against `newest_of`'s own body.
+        // Against `to_backfill`'s own answer, not against a second computation
+        // of it.
         //
-        // The first version of this asserted
-        // `newest == chosen.iter().map(|c| c.ts).max().unwrap()`, which is the
-        // function compared to itself and cannot fail. What matters is the
-        // relationship to the *next* launch: feed the watermark back in and
-        // nothing already handed over may come again.
+        // The first version asserted `newest == chosen.iter().map(|c| c.ts)
+        // .max().unwrap()`, which is the rule compared to itself and cannot
+        // fail. What matters is the relationship to the *next* launch: feed the
+        // watermark back in and nothing already handed over may come again.
         let next_launch = backfill(
             vec![
                 ordinary(600, "older.png"),
@@ -1292,7 +1329,7 @@ mod tests {
         // And a launch with nothing to bring back must not move it at all —
         // moving it forward on an empty answer would skip captures taken
         // between now and the next launch.
-        assert_eq!(newest_of(&[]), None);
+        assert_eq!(decided(Vec::new(), now(), 0).watermark, None);
     }
 
     #[test]
