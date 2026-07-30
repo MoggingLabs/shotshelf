@@ -31,6 +31,20 @@ use crate::webview_path::existing_file;
 /// Called per tile rather than pushed from the catch pipeline, for the same
 /// reason recordings are: it is optional detail that arrives when it arrives,
 /// and a capture is on the shelf and draggable long before this returns.
+///
+/// Where the cover ends, stated rather than implied. The two decisions this
+/// makes — which version an answer is filed under, and whether one is already
+/// remembered — are [`remembered`] and [`remember`], and a test pins both.
+/// What no test can reach is *this function calling them*: it takes an
+/// `AppHandle`, which nothing in the crate can build, and no browser spec runs
+/// a real `#[tauri::command]` — `webview_path.rs` records that limit for the
+/// tier. Deleting either call still passes every gate, and the cost is a full
+/// decode and an OCR pass per tile per render.
+///
+/// Moving this module out of `share.rs` put it beside the `describe` it wraps;
+/// extracting the two decisions made them testable. Neither makes the call
+/// sites reachable, and shrinking what is left would only relocate the same
+/// gap.
 #[tauri::command]
 pub async fn describe_capture<R: Runtime>(
     app: AppHandle<R>,
@@ -60,11 +74,7 @@ pub async fn describe_capture<R: Runtime>(
     // item cap, so "every tile" is unbounded. Without this, a launch with
     // fifty pins started fifty full-resolution decodes and fifty OCR passes
     // simultaneously, and did it again on the next launch.
-    if let Some(cached) = scan_cache()
-        .lock()
-        .ok()
-        .and_then(|cache| cache.get(&version).map(|entry| entry.findings.clone()))
-    {
+    if let Some(cached) = remembered(&version) {
         return Ok(cached);
     }
 
@@ -103,6 +113,38 @@ pub async fn describe_capture<R: Runtime>(
     )
     .await?;
 
+    remember(version, &findings);
+
+    Ok(findings)
+}
+
+/// The findings already worked out for this version, if any.
+///
+/// A named step rather than a `lock().ok().and_then(…)` chain inside
+/// `describe_capture`, which takes an `AppHandle` and so cannot be called by
+/// any test in this crate. Dropping the read made every tile re-run a
+/// full-resolution decode and an OCR pass on every render — a launch with fifty
+/// pins starts fifty of them at once — with clippy and every test green.
+///
+/// Moving this module out of `share.rs` put it beside the `describe` it wraps;
+/// it did not make the decision reachable. That is what this does. Same shape as
+/// `window::wanted`, `catch::settled` and `CaptureSink::note_folder_image`.
+fn remembered(version: &crate::cache::Version) -> Option<Findings> {
+    scan_cache()
+        .lock()
+        .ok()?
+        .get(version)
+        .map(|entry| entry.findings.clone())
+}
+
+/// Keep these findings under this version, making room first.
+///
+/// The eviction is `cache::make_room`'s; what is here is *which* version the
+/// answer is filed under. Filing it under the wrong one serves a re-saved
+/// capture the previous file's findings — and "no findings" renders as
+/// read-and-clean, not as unknown, so that is a disclosure bug rather than a
+/// stale cache. It was unreachable for the same reason the read was.
+fn remember(version: crate::cache::Version, findings: &Findings) {
     if let Ok(mut cache) = scan_cache().lock() {
         // Bounded: a shelf that has seen thousands of captures in one session
         // should not hold every scan for the life of the process.
@@ -135,8 +177,6 @@ pub async fn describe_capture<R: Runtime>(
             },
         );
     }
-
-    Ok(findings)
 }
 
 /// How many scans to remember.
@@ -195,6 +235,56 @@ fn scan_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
 
 #[cfg(test)]
 mod tests {
+    use super::{remember, remembered};
+    use crate::cache::Version;
+    use std::path::Path;
+
+    #[test]
+    fn findings_are_answered_from_memory_under_the_version_they_were_read_for() {
+        // Both halves of the cache, which lived inside `describe_capture` — a
+        // `#[tauri::command]` taking an `AppHandle` that nothing in this crate
+        // can call. Dropping the read made every tile re-run a full decode and
+        // an OCR pass on every render; filing the answer under a fixed key
+        // served a re-saved capture the previous file's findings, which renders
+        // as read-and-clean rather than as unknown. Both left every gate green.
+        // Named for this test, not for the module: `catch/mod.rs` already has a
+        // `shotshelf-scan-<pid>`, and its scan admitted these two files.
+        let dir = std::env::temp_dir().join(format!("shotshelf-remembered-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        let one = dir.join("one.png");
+        let two = dir.join("two.png");
+        std::fs::write(&one, b"pixels").expect("a file");
+        std::fs::write(&two, b"other").expect("a file");
+
+        let version = Version::of(&one);
+        assert!(
+            remembered(&version).is_none(),
+            "a version nobody has scanned is not remembered",
+        );
+
+        let scanned = super::Findings {
+            secrets: Vec::new(),
+            scanned: true,
+        };
+        remember(version.clone(), &scanned);
+
+        // Answered under its own version…
+        assert!(
+            remembered(&version).is_some_and(|found| found.scanned),
+            "the answer was not filed under the version it was read for",
+        );
+        // …and under no other, which is the disclosure half.
+        assert!(
+            remembered(&Version::of(&two)).is_none(),
+            "a different capture was served another's findings",
+        );
+        // A path that does not exist still has a version, and still is not this
+        // one — the degenerate case all three caches share.
+        assert!(remembered(&Version::of(Path::new("/never-existed.png"))).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_scan_key_names_a_version_of_a_file_not_just_a_path() {
         // This module had no tests at all, and this key is the thing standing

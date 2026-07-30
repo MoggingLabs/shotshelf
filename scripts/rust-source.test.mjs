@@ -21,6 +21,7 @@ import { test } from "node:test";
 
 import {
   lintLevelsIn,
+  quotesNumber,
   codeOnly,
   disallowedIn,
   grantsIn,
@@ -653,4 +654,30 @@ void test("a type that does not serialise is left out of the manifest", () => {
       `this serialises nothing and was found: ${source.slice(0, 60)}`,
     );
   }
+});
+
+void test("a number is quoted as a number, not as digits inside a longer one", () => {
+  // `docs/USAGE.md` promises six values the code decides, and this is what
+  // holds the guide to them. The rule started as a bare `RegExp(value)`, which
+  // finds 20 inside 2048 — no effect on today's guide, and a hole the moment a
+  // longer number appears near a retired one, which is exactly when nobody is
+  // looking.
+  //
+  // Here rather than in `check-references.mjs`, which runs its gate at import
+  // time and so cannot be imported to test a rule.
+  assert.ok(quotesNumber("a launch brings back **up to 20** captures", 20));
+  assert.ok(quotesNumber("no larger than 1568px on its long edge", 1568));
+  assert.ok(quotesNumber("it passes 512 KB.", 512));
+  assert.ok(quotesNumber("up to 5) rather than overwriting it", 5));
+
+  // Not inside a longer number, in either direction.
+  assert.ok(!quotesNumber("a 2048-byte header", 20));
+  assert.ok(!quotesNumber("a 2048-byte header", 48));
+  assert.ok(!quotesNumber("sized to 1568px", 156));
+  // Nor across a decimal point, which is how a version string would read.
+  assert.ok(!quotesNumber("ffmpeg 6.1.1", 1));
+  assert.ok(!quotesNumber("scaled by 0.60", 60));
+
+  // And absent is absent.
+  assert.ok(!quotesNumber("the guide says nothing about it", 60));
 });

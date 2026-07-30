@@ -496,6 +496,36 @@ export function disallowedIn(source) {
 }
 
 /**
+ * Whether a document quotes this number, as a number rather than as digits
+ * inside a longer one.
+ *
+ * `docs/USAGE.md` promises six values the code decides — how many hand-off
+ * copies are kept, how far back a launch looks and how many it brings, how many
+ * corrupt settings files are set aside, what an export is sized to, and how
+ * large the log grows. `check-references.mjs` holds the guide to
+ * `tests/fixtures/documented-limits.json`, and `documented.rs` holds the
+ * constants to the same file.
+ *
+ * Here rather than inline in that script, for the reason this module exists:
+ * `check-references.mjs` runs its gate at import time, so nothing can import it
+ * to test a rule. The bare `RegExp(value)` this started as would find `20`
+ * inside `2048` — no live effect on today's guide, and a latent hole the moment
+ * a longer number appears near a retired one.
+ *
+ * Presence, not position: nothing here can tell which sentence a number belongs
+ * to, and pretending otherwise would need the prose written for the gate. What
+ * it catches is the real failure — a constant moved and the guide left behind —
+ * because the old number stops appearing.
+ *
+ * @param {string} prose
+ * @param {number} value
+ * @returns {boolean}
+ */
+export function quotesNumber(prose, value) {
+  return new RegExp(String.raw`(?<![\d.])${value}(?![\d.])`).test(prose);
+}
+
+/**
  * Every struct in a Rust file that derives `Serialize`, at any visibility.
  *
  * The webview receives these, so their field names are half the IPC contract —

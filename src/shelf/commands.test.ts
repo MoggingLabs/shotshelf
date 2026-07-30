@@ -173,3 +173,48 @@ test("a command invoked with single quotes or backticks is seen", () => {
   assert.equal(missing.ok, false, "a single-quoted invoke of a missing command must fail");
   assert.match(missing.output, /never_existed/);
 });
+
+test("a file outside the permitted set may not call Rust", () => {
+  // The boundary `bridge.ts`'s header describes, as a rule rather than a claim.
+  //
+  // It was described twice and differently — that header said `main.ts` invokes
+  // directly "because [it is] outside the shelf", `editor/index.ts` said the
+  // window "goes through `bridge.ts` like every other view module", and
+  // `main.ts` does both. The point of the rule is the bridge's own argument for
+  // existing: a renamed command "fails at runtime in whichever corner happens
+  // to call it", which needs the corners to be countable.
+  const result = check({
+    "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
+    "src/main.ts": `invoke("wired_command", {});`,
+    // A view module reaching Rust on its own.
+    "src/shelf/view/tile.ts": `invoke("wired_command", {});`,
+  });
+  assert.ok(!result.ok, result.output);
+  assert.match(result.output, /src\/shelf\/view\/tile\.ts/);
+});
+
+test("a permitted file calling Rust is not a stray", () => {
+  // The other direction: the four on the list are the four on the list, and a
+  // rule that fired on them would simply be turned off.
+  const result = check({
+    "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
+    "src/main.ts": `invoke("wired_command", {});`,
+    "src/shelf/bridge.ts": `invoke("wired_command", {});`,
+    "src/popover.ts": `invoke("wired_command", {});`,
+    "src/settings.ts": `invoke("wired_command", {});`,
+  });
+  assert.ok(result.ok, result.output);
+});
+
+test("a test file naming a command is not a call site", () => {
+  // A test file is excluded for the same reason it is excluded from the
+  // reachability scan above: a command mentioned only by a unit test is not
+  // reachable from the app, and a spec that stubs `invoke` is not a corner a
+  // renamed command can fail in.
+  const result = check({
+    "src-tauri/src/lib.rs": LIB.replace("thing::orphan_command,\n", ""),
+    "src/main.ts": `invoke("wired_command", {});`,
+    "src/shelf/view/tile.test.ts": `invoke("wired_command", {});`,
+  });
+  assert.ok(result.ok, result.output);
+});

@@ -40,6 +40,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, globSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import { quotesNumber } from "./rust-source.mjs";
+
 /**
  * Everything whose comments make claims about this repository.
  *
@@ -520,8 +522,9 @@ const GUIDE = "docs/USAGE.md";
 const guide = readFileSync(GUIDE, "utf8");
 
 for (const [what, value] of Object.entries(JSON.parse(readFileSync(LIMITS, "utf8")))) {
-  // Not inside a longer number: 20 must not match 2048, nor 5 match 1568.
-  if (!new RegExp(String.raw`(?<![\d.])${value}(?![\d.])`).test(guide)) {
+  // Through `rust-source.mjs`, where a test can reach the rule: this file runs
+  // its gate at import time, so nothing can import it to check one.
+  if (!quotesNumber(guide, value)) {
     problems.push(
       `  ${GUIDE}: no longer quotes the ${what} of ${value} that the code uses. ` +
         `Either the guide is stale, or ${LIMITS} is.`,
