@@ -267,23 +267,21 @@ void test("a commented-out rule is not a rule", () => {
   // back either way. Both replacements passed with the blanking deleted, which
   // is the defect this file exists to catch, in this file.
   //
-  // A comment *inside* an array is the shape that depends on it: unblanked, the
-  // entry behind the `#` becomes a rule.
-  const inside = [
-    "disallowed-methods = [",
-    '  { path = "tauri::path::PathResolver::app_data_dir", reason = "roaming" },',
-    '  # { path = "tauri::path::BaseDirectory", reason = "retired" },',
-    "]",
-    "",
-  ].join("\n");
-  assert.deepEqual(disallowedIn(inside).get("disallowed-methods"), [
-    "tauri::path::PathResolver::app_data_dir",
-  ]);
-
-  // A trailing comment on a live entry, same reason.
+  // The comment has to carry a comma, and that is the whole subtlety.
+  //
+  // A comment that *begins* an entry — `# { path = "…" },` on its own line —
+  // is skipped whether or not blanking ran: the leading `#` fails the
+  // quoted-string and inline-table shapes either way, so both answers are the
+  // same and the row asserts nothing. Exactly that input stood here, under a
+  // comment claiming the opposite, and deleting the whole `#` branch from
+  // `tomlWithoutComments` left this test passing — the second time this file's
+  // own rows have been the thing it was written to catch.
+  //
+  // With a comma, unblanked, the fragment after it *is* a well-formed entry, so
+  // the retired rule comes back as a live one and the two answers differ.
   const trailing = [
     "disallowed-methods = [",
-    '  "tauri::path::PathResolver::app_data_dir",  # "tauri::path::BaseDirectory",',
+    '  "tauri::path::PathResolver::app_data_dir",  # retired, "tauri::path::BaseDirectory",',
     "]",
     "",
   ].join("\n");
@@ -373,6 +371,16 @@ void test("every way of switching a clippy lint off is read as the same setting"
     // A header need not sit at column 0, and may have spaces in its brackets.
     [...head, " [lints.clippy]", ' disallowed_methods = "allow"'],
     [...head, "[ lints.clippy ]", 'disallowed_methods = "allow"'],
+    // Whitespace and quoting *inside* the header, which had rows for the dotted
+    // key and none for the header itself. `dotted()` normalises both, and
+    // replacing it with a bare `trim()` left every gate green while
+    // `disallowed_methods = "allow"` under either of these switched the
+    // roaming-profile rule off with the gate reporting success. Both are valid
+    // TOML and Cargo honours both.
+    [...head, "[lints . clippy]", 'disallowed_methods = "allow"'],
+    [...head, '[lints."clippy"]', 'disallowed_methods = "allow"'],
+    [...head, "[lints.'clippy']", 'disallowed_methods = "allow"'],
+    [...head, '[ lints . "clippy" ]', 'disallowed_methods = "allow"'],
     // The sub-table spelling: the header itself names the lint.
     [...head, "[lints.clippy.disallowed_methods]", 'level = "allow"'],
     [...head, " [lints.clippy.disallowed_methods]", ' level = "allow"'],

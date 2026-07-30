@@ -469,3 +469,39 @@ test("an alert taking itself down does not take the browse view with it", async 
     "an expiring alert dismissed the browse view the user was reading",
   ).toBe(0);
 });
+
+test("a hide releases the hover hold the pointer can no longer release", async ({ page }) => {
+  // `adoptHidden`'s `releaseColumn()`, which nothing checked.
+  //
+  // A hidden window stops delivering pointer events, so the `pointerleave` that
+  // would have released a hover hold never arrives. Left armed, the column
+  // never ages again and the popover stops dismissing itself for the rest of
+  // the session — the consequence its own comment states, with no gate under it.
+  //
+  // The pointer deliberately does not move: moving it is what the real hide
+  // cannot do, and is the whole reason the reconciliation exists.
+  await page.clock.install();
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+
+  // Hover arms the hold.
+  await page.locator(".shelf").hover();
+
+  await page.evaluate(([event]) => window.__shotshelf__.emit(event, null), [
+    HIDDEN_EVENT,
+  ] as const);
+
+  // A capture lands while the window is down, so the column is repopulated and
+  // has something to age out.
+  await land(page, FIXTURE.tall);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  // Well past a card's minute. With the hold still armed nothing ages, so the
+  // column never empties and the shelf never puts itself away.
+  await page.clock.runFor(70_000);
+
+  expect(
+    await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length),
+    "the column never aged out: a hover hold survived the hide",
+  ).toBeGreaterThan(0);
+});

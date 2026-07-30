@@ -324,3 +324,32 @@ test("a capture leaving the shelf takes its quick look with it", async ({ page }
 
   await expect(page.locator(".preview")).toHaveCount(0);
 });
+
+test("a capture leaving takes only its own quick look", async ({ page }) => {
+  // The identity half of that line, which the test above cannot see: it evicts
+  // the previewed capture, so `previewedId() === item.id` and
+  // `previewedId() !== undefined` agree and the check being asserted is "it
+  // closes", not "it closes the right one". Widening the condition left all 140
+  // e2e tests green while the retention sweep or the item cap dropping an
+  // unrelated capture shut the quick look the user was reading.
+  //
+  // Room for two, so the eviction that happens is of the capture *not* on
+  // screen.
+  await bootShelf(page, { settings: { maxItems: 2 } });
+  await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", [220, 124]));
+  await land(page, FIXTURE.wide);
+  await land(page, FIXTURE.tall);
+  await openBrowse(page);
+
+  // The newest is on top, so one ArrowDown picks the second capture — the one
+  // that will still be here after the eviction.
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press(" ");
+  await expect(page.locator(".preview")).toHaveCount(1);
+
+  // A third capture evicts the oldest, which is not the one being previewed.
+  await land(page, FIXTURE.square);
+
+  await expect(page.locator(".tile")).toHaveCount(2);
+  await expect(page.locator(".preview")).toHaveCount(1);
+});

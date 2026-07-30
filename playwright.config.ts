@@ -53,6 +53,21 @@ export default defineConfig({
   retries: process.env["CI"] ? 1 : 0,
   forbidOnly: Boolean(process.env["CI"]),
   fullyParallel: true,
+  // Half the cores, not all of them.
+  //
+  // Playwright's default is `cores / 2` already, but a developer box runs the
+  // Rust half of the gate, a Vite preview and an editor alongside this, and the
+  // editor specs decode real PNGs inside the page with `createImageBitmap`.
+  // Under full contention three different editor specs failed across two runs
+  // of the whole suite and every one passed in isolation and at a lower worker
+  // count — which is the retry this config refuses to allow, arriving as
+  // scheduling instead.
+  //
+  // A cap rather than a retry, because the two are not the same admission: a
+  // retry says the assertion is unreliable, and a cap says the machine was
+  // oversubscribed. Nothing here waits on the network, so the wall-clock cost
+  // is small and the determinism is the point.
+  workers: process.env["CI"] ? "50%" : 2,
   reporter: process.env["CI"] ? [["github"], ["list"]] : [["list"]],
 
   use: {

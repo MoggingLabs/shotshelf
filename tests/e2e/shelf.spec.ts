@@ -999,17 +999,70 @@ test("a lost-capture message raised during the launch appearance reshapes the sh
   await expect(page.locator("#shelf-items")).toHaveAttribute("data-view", "column");
 });
 
-// The `#showing &&` half of `showProblem`'s guard has no gate, and that is
-// written down rather than implied.
-//
-// `busy()` is `dragging || overlayOpen || settingsOpen()`. Two of the three no
-// longer survive a hide — `adoptHidden` discards the overlay and closes the
-// panel — so `#dragging`, which it does not clear, is the only state that can
-// make `busy()` true while the window is down. A spec that started a drag, hid
-// the window and raised a problem passed with the `#showing` term deleted, so
-// it gated nothing; rather than keep a test that cannot fail, the gap is
-// recorded here. What is missing is a way to hold `#dragging` true across the
-// hide from a spec, which the drag harness does not currently offer.
+test("a lost capture is reported even with a drag still in flight", async ({ page }) => {
+  // Two guards at once, both of which were unfalsifiable and one of which was
+  // written off as ungateable.
+  //
+  // `busy()` is `dragging || overlayOpen || settingsOpen()`. Two of the three
+  // do not survive a hide — `adoptHidden` discards the overlay and closes the
+  // panel — so `#dragging` is the only state that leaves `busy()` true with the
+  // window down. The note that stood here said the harness offered no way to
+  // hold it across a hide. It does: `hang("plugin:drag|start_drag")` leaves the
+  // drag in flight and nothing on the hide path clears `Shelf#dragging`.
+  //
+  // What that reaches: `showProblem` must raise a *clipboard* capture's failure
+  // — the one capture with no other copy anywhere — into a window that is down.
+  // Without `#showing &&`, `busy()` alone returns and the message is never
+  // shown. And `dismissIfEmpty`'s `busy()` term is on the other side of the
+  // same state: without it, the empty column that comes back puts itself away
+  // twelve seconds later with the drag still going.
+  await page.clock.install();
+  await bootShelf(page);
+  await page.evaluate(() => {
+    window.__shotshelf__.respond("prepare_drag", { path: "/x", icon: "" });
+    // The OS owns the drag until the drop, so the call stays in flight.
+    window.__shotshelf__.hang("plugin:drag|start_drag");
+  });
+  await land(page, FIXTURE.wide);
+
+  // Browse first: `setMode("browse")` empties the column queue, so the column
+  // that `showProblem` brings back holds no cards and `dismissIfEmpty` has
+  // something to decide.
+  await openBrowse(page);
+
+  const tile = page.locator(".tile");
+  await tile.hover();
+  await page.mouse.down();
+  await page.mouse.move(120, 220);
+
+  await page.evaluate(([event]) => window.__shotshelf__.emit(event, null), [
+    HIDDEN_EVENT,
+  ] as const);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.evaluate(
+    ([event, message]) => window.__shotshelf__.emit(event, message),
+    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+  );
+
+  // The window comes back, which is the `#showing` half.
+  await expect(page.locator("#shelf-alert")).toContainText(/no space left on device/);
+  expect(
+    await page.evaluate(() => window.__shotshelf__.callsTo("show_shelf").length),
+    "the message was raised into a window nobody put back on screen",
+  ).toBeGreaterThan(0);
+
+  // And it stays, which is the `busy()` half: the alert takes itself down after
+  // twelve seconds and the column behind it is empty.
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+  await page.clock.runFor(15_000);
+  expect(
+    await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length),
+    "the shelf put itself away with an OS drag still in flight",
+  ).toBe(0);
+
+  await page.mouse.up();
+});
 
 
 test("a clipboard watcher that did not start is said out loud", async ({ page }) => {
