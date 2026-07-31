@@ -7,9 +7,23 @@ name: CI
 # still hold together. This is not theoretical: the first Linux run caught an
 # unused parameter in `apply_material`, which has no backdrop branch there.
 
+# Every branch, not just `main`.
+#
+# This ran on `push` to `main` and on `pull_request`, and `feat/enrich-and-edit`
+# is 109 commits with no pull request — so not one of them was ever checked by
+# anything. The branch tip shipped a *red* gate: four backticked references in
+# `CLAUDE.md` and `docs/council/` named files that do not resolve, and
+# `npm run deadcode` had been failing since the commit that introduced them.
+# The gate existed, was correct, and nothing ran it.
+#
+# A long-lived branch is the normal way this product is built, so "open a pull
+# request earlier" is a process fix for a tooling problem. The `if:` below is
+# what keeps that from doubling every run: a branch in this repository is
+# checked on push, and `pull_request` is left to do the one job push cannot —
+# checking a fork, whose commits never land here as a push event.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
@@ -24,6 +38,13 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository
+    # The default is six hours. Every leg of this has finished well inside
+    # twenty minutes, and a hung runner should stop being charged for long
+    # before it stops being useful.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

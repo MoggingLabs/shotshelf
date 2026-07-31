@@ -8,9 +8,25 @@ name: Release
 # succeeds and produces UNSIGNED artifacts — useful for checking the bundle,
 # useless for handing to a teammate.
 
+# The weekly run is a smoke test, not a release.
+#
+# `SECURITY.md` records that no installer has ever been built on any machine:
+# this workflow fired on `v*` tags, of which there are none, and on manual
+# dispatch, which had never been run. `ci.yml` runs `cargo build` and never
+# `tauri build`, so the entire bundling path — `scripts/build-release.mjs`, the
+# sidecar, NSIS/MSI/DMG generation, updater artifacts — was unexecuted code.
+# The first time anyone ran it would have been the day it was needed.
+#
+# A schedule is the cheapest way to stop that being true. It costs two runners
+# a week and it fails on the Monday the bundler breaks rather than on the
+# afternoon someone is trying to ship. Deliberately not on every push to main:
+# a full release build on two OSes is far more runner time than the change
+# rate here justifies, and `ci.yml` already covers whether the code compiles.
 on:
   push:
     tags: ["v*"]
+  schedule:
+    - cron: "0 4 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -24,6 +40,11 @@ jobs:
   bundle:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    # A release build is the gate plus a full optimised Tauri bundle, so this is
+    # roomier than `ci.yml`'s. It is still a ceiling rather than an estimate:
+    # the default is six hours, and a bundler waiting on a notarization service
+    # that never answers would sit there for all of them.
+    timeout-minutes: 90
     # Promoted to a job-level env var because `secrets` is **not** among the
     # contexts available to a step's `if:` — GitHub's context table lists
     # github, needs, strategy, matrix, job, runner, env, vars, steps and inputs,

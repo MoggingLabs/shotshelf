@@ -41,11 +41,12 @@ export default defineConfig(
         projectService: {
           allowDefaultProject: [
             "eslint.config.js",
+            "scripts/check-advisories.mjs",
             "scripts/check-commands.mjs",
             "scripts/check-references.mjs",
             "scripts/check-dirs.mjs",
             "scripts/check-wire.mjs",
-        "scripts/rust-source.mjs",
+            "scripts/rust-source.mjs",
             "scripts/rust-source.test.mjs",
           ],
         },
