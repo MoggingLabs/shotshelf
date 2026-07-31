@@ -10,10 +10,7 @@ metadata:
 
 Launch all three in one message, `subagent_type: general-purpose`, `model: opus`,
 `isolation: "worktree"`. Substitute the current tip for `<TIP>` — as of writing
-`a65a4d9`, **not** `faedd67`. (`a65a4d9` is a docs-only handoff commit on top of
-`faedd67`; resetting to `faedd67` would discard it. The source under review is
-unchanged between the two.) See [[council-cycle-state]] and
-[[shotshelf-standing-constraints]].
+`6293d58`. See [[council-cycle-state]] and [[shotshelf-standing-constraints]].
 
 ## Shared preamble — put this at the top of every brief
 
@@ -54,10 +51,21 @@ unchanged between the two.) See [[council-cycle-state]] and
 > [[shotshelf-standing-constraints]] verbatim. A **false disclosure is a
 > blocker** — two have already been proved false and closed.
 
-## Four commits are unreviewed
+## Ten commits are unreviewed
 
-`3383676`, `f0d5491`, `e45e56c`, `faedd67`. The last tree an independent seat
-saw was `795ee6f`. Tell every seat this.
+`3383676`, `f0d5491`, `e45e56c`, `faedd67`, `a65a4d9`, `20dd01a`, and the four
+from the 2026-07-31 provisioning session: `2de96d8`, `8c80ded`, `3859db5`,
+`6293d58`. The last tree an independent seat saw was `795ee6f`. Tell every seat
+this.
+
+Those last four are worth a seat's particular attention, because they were
+written in one sitting and self-reviewed: a new rule in `check-references.mjs`
+(does the glob matcher *weaken* the gate anywhere?), tests for two previously
+untested modules, four workflow changes nothing has executed, and a large
+rewrite of `SECURITY.md`'s evidence claims. The last of those is the highest
+risk in the whole diff — it is prose about what has been verified, written by
+the party that did the verifying, in a repository whose most persistent defect
+is exactly that.
 
 ## Seat 1 — correctness and whether the gates bite
 
