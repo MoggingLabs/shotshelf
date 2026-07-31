@@ -5,12 +5,15 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 23456be3-e691-4590-a732-093ca9cbb716
-  modified: 2026-07-31T16:49:06.487Z
+  modified: 2026-07-31T17:15:15.388Z
 ---
 
 Launch all three in one message, `subagent_type: general-purpose`, `model: opus`,
-`isolation: "worktree"`. Substitute the current tip for `<TIP>` (as of writing,
-`faedd67`). See [[council-cycle-state]] and [[shotshelf-standing-constraints]].
+`isolation: "worktree"`. Substitute the current tip for `<TIP>` — as of writing
+`a65a4d9`, **not** `faedd67`. (`a65a4d9` is a docs-only handoff commit on top of
+`faedd67`; resetting to `faedd67` would discard it. The source under review is
+unchanged between the two.) See [[council-cycle-state]] and
+[[shotshelf-standing-constraints]].
 
 ## Shared preamble — put this at the top of every brief
 

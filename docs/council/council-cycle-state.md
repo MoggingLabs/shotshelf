@@ -5,16 +5,20 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 23456be3-e691-4590-a732-093ca9cbb716
-  modified: 2026-07-31T17:13:37.707Z
+  modified: 2026-07-31T17:15:09.903Z
 ---
 
 The `/goal` for Shotshelf requires a council of Opus 5 seats (senior engineer,
 architect, solutions architect) to reach **unanimous APPROVE with zero
 blockers**. As of 2026-07-30 that has **not** been reached.
 
-**Current tip, and what round 41 must review:** `faedd67` on
-`feat/enrich-and-edit`. (The last commit an *independent seat* saw was `795ee6f`;
-everything after it — `3383676`, `f0d5491`, `e45e56c`, `faedd67` — is unreviewed.)
+**Current tip:** `a65a4d9` on `feat/enrich-and-edit` — use this as `<TIP>`, not
+`faedd67`. `a65a4d9` is the docs-only machine-handoff commit (`docs/council/`,
+`CLAUDE.md`, `.gitignore`, `prompts/`); it changes no source, no gate and no
+dependency, so the code round 41 must review is still `faedd67`'s.
+
+(The last commit an *independent seat* saw was `795ee6f`; everything after it —
+`3383676`, `f0d5491`, `e45e56c`, `faedd67` — is unreviewed.)
 
 **Status:** every blocker from rounds 26–38 is fixed at the source and
 mutation-proven; the gate is green (132 unit, 171 Playwright, 162 Rust, plus
