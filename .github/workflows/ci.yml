@@ -21,6 +21,15 @@ name: CI
 # what keeps that from doubling every run: a branch in this repository is
 # checked on push, and `pull_request` is left to do the one job push cannot —
 # checking a fork, whose commits never land here as a push event.
+#
+# **One thing to check before relying on this.** For a same-repository pull
+# request the job is *skipped*, because the identical commit was already checked
+# on push. If this repository ever turns on required status checks naming
+# `Windows` / `macOS` / `Linux`, a skipped job may never report and the pull
+# request can sit unmergeable for ever. Nothing here can see the repository's
+# branch-protection settings, so this is written down rather than assumed. The
+# fix, if that happens, is one line: delete the `if:` and accept that a
+# same-repo pull request runs the matrix twice.
 on:
   push:
     branches: ["**"]
