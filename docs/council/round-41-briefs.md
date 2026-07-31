@@ -29,9 +29,16 @@ unchanged between the two.) See [[council-cycle-state]] and
 > Work only in your own worktree. Do not commit, do not push, do not modify the
 > main checkout. Keep scratch files in your worktree; delete before reporting.
 >
-> Environment (disk runs near full — this matters):
+> Environment — **the checkout path is per-machine, so re-derive it rather than
+> copying the line below**. On the second PC (2026-07-31 onwards) it is:
 > `export PATH="$HOME/.cargo/bin:$PATH"` and
-> `export CARGO_TARGET_DIR="C:/Users/pedro/Documents/GitHub/shotshelf/src-tauri/target"`
+> `export CARGO_TARGET_DIR="C:/Users/pveloso01/Documents/projects/shotshelf/src-tauri/target"`
+> The first machine's path was `C:/Users/pedro/Documents/GitHub/shotshelf/…`, and
+> a seat exporting it here points every build at a directory that does not exist.
+> The "disk runs near full" warning was also the first machine's; the second has
+> ~418 GB free. What it does **not** have is a Rust toolchain or MSVC — see
+> [[shotshelf-machine-two-environment]]; a seat cannot run a Rust gate until
+> those are installed.
 >
 > Gates: `npm run lint`, `npm run deadcode`, `npm run build`,
 > `npm run test:unit`, `npx playwright test tests/e2e`,
@@ -58,7 +65,7 @@ Lens: mutation testing, not reading. Break a production line so it still
 compiles and type-checks, run the gate, restore. Gate green = real hole.
 
 Attack in particular: `Appearance::deliberate` and the `window-events.json`
-mapping; `catch::Backfill`; `enrich/scan.rs`'s `remembered`/`remember` and the
+mapping; `catch::Backfill`; `src-tauri/src/enrich/scan.rs`'s `remembered`/`remember` and the
 disclosure that the command *calling* them is uncovered; `dirs::under` and
 `contained`; `documented.rs`; `quotesNumber`; the `INVOKERS` rule; the four new
 e2e specs added in rounds 38–39.
@@ -71,7 +78,7 @@ writes `#shelf-items[data-view]`.
 
 ## Seat 2 — architecture, duplication, dead code, testability
 
-Verify rounds 38–40's fixes are *right*, not merely present: `enrich/scan.rs`
+Verify rounds 38–40's fixes are *right*, not merely present: `src-tauri/src/enrich/scan.rs`
 moved out of `share.rs`; the `invoke` boundary as a gate rather than two
 differing headers; `dirs::under`'s containment rule.
 

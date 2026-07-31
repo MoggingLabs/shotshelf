@@ -21,6 +21,7 @@ import { test } from "node:test";
 
 import {
   lintLevelsIn,
+  matchesRepoFile,
   quotesNumber,
   codeOnly,
   disallowedIn,
@@ -680,4 +681,62 @@ void test("a number is quoted as a number, not as digits inside a longer one", (
 
   // And absent is absent.
   assert.ok(!quotesNumber("the guide says nothing about it", 60));
+});
+
+void test("a pattern in prose resolves when it names files the repo really has", () => {
+  // The gate reported every glob as naming nothing, because it resolved a path
+  // by string equality and a pattern can never equal a path. `CLAUDE.md` quotes
+  // the literal argument `package.json` gives `node --test`, and fourteen files
+  // match it — so the one file describing how to run the tests failed the gate
+  // that exists to catch false statements.
+  //
+  // The patterns below are assembled from pieces for the reason the rule's own
+  // docstring gives: this file is read by that gate, and a whole glob inside one
+  // backticked run is a reference it would try to resolve.
+  const tree = new Set([
+    "src/format.test.ts",
+    "src/main.ts",
+    "src/shelf/store.test.ts",
+    "scripts/rust-source.test.mjs",
+    "docs/council/README.md",
+    "src-tauri/src/enrich/scan.rs",
+  ]);
+  const root = [""];
+
+  const anyDepth = "src/**" + "/*.test.ts";
+  assert.ok(matchesRepoFile(anyDepth, root, tree));
+  assert.ok(matchesRepoFile("scripts/**" + "/*.test.mjs", root, tree));
+  assert.ok(matchesRepoFile("docs/council/*.md", root, tree));
+
+  // `**` spans zero directories as readily as many — the case a `[^/]+/` gets
+  // wrong, and the reason `src/main.ts` must match here.
+  assert.ok(matchesRepoFile("src/**" + "/*.ts", root, tree));
+
+  // A pattern matching nothing still fails, which is the whole point: the rule
+  // generalises the old one rather than relaxing it.
+  assert.ok(!matchesRepoFile("src/**" + "/*.rs", root, tree));
+  assert.ok(!matchesRepoFile("docs/invented/*.md", root, tree));
+
+  // A plain path is the one-file case of the same rule.
+  assert.ok(matchesRepoFile("src-tauri/src/enrich/scan.rs", root, tree));
+  assert.ok(!matchesRepoFile("enrich/scan.rs", root, tree));
+
+  // Relative to a directory the referring file can mean — how a bare
+  // "catch/mod.rs" inside src-tauri/src is written — but not from anywhere
+  // else. Unbackticked for the reason check-references.mjs gives beside its own
+  // copy of this example: it is an illustrative string, and this gate would
+  // rightly refuse to resolve it from here.
+  assert.ok(matchesRepoFile("enrich/scan.rs", ["", "src-tauri/src"], tree));
+  assert.ok(!matchesRepoFile("enrich/scan.rs", ["", "docs/council"], tree));
+
+  // A `.` in a pattern is a literal dot, not "any character": `mainXts` must
+  // not satisfy a reference to a file named with a dot.
+  assert.ok(!matchesRepoFile("src/mainXts", root, tree));
+
+  // `?` is one character, and stops at a separator.
+  assert.ok(matchesRepoFile("src/mai?.ts", root, tree));
+  assert.ok(!matchesRepoFile("src?main.ts", root, tree));
+
+  // A single `*` does not cross a directory boundary.
+  assert.ok(!matchesRepoFile("src/*.test.ts", ["", "src"], new Set(["src/shelf/store.test.ts"])));
 });

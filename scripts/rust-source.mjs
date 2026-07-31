@@ -1,12 +1,17 @@
-// The Rust-source parsing the directory gate is built on, in one place so it
-// can be tested.
+// The rules the gate scripts are built on, in one place so they can be tested.
 //
-// These three functions have been walked past in seven consecutive review
-// rounds, and every fix so far was asserted in a commit message and executed
-// nowhere: `scripts/rust-source.test.mjs` is the table of forms that must fire
-// and must not. They live here rather than in `check-dirs.mjs` because that
-// file runs the gate at import time — it globs, reports and calls
-// `process.exit` — so nothing could import it to test a function.
+// Every `check-*.mjs` runs its gate at import time — it globs, reports and
+// calls `process.exit` — so nothing can import one to test a rule. Anything
+// with a table of forms that must fire and must not lives here instead, and
+// `scripts/rust-source.test.mjs` is that table.
+//
+// Most of these parse Rust, which is what the name is for. Two do not:
+// [`quotesNumber`] and [`matchesRepoFile`] are prose rules that `check-
+// references.mjs` needs, and they are here for the same reason — testability,
+// not subject matter. The header used to say "these three functions" and to
+// describe the module as serving the directory gate alone; it now serves
+// `check-dirs.mjs`, `check-references.mjs` and `check-wire.mjs`, and a count
+// written in prose is a number nothing checks.
 
 /**
  * The source with every comment, string and character literal blanked out.
@@ -523,6 +528,82 @@ export function disallowedIn(source) {
  */
 export function quotesNumber(prose, value) {
   return new RegExp(String.raw`(?<![\d.])${value}(?![\d.])`).test(prose);
+}
+
+/**
+ * Whether a backticked path names something this repository actually has.
+ *
+ * `check-references.mjs` resolved a path by string equality against the file
+ * list, which is right for `src-tauri/src/dirs.rs` and wrong for every pattern:
+ * a glob names a *set* of files, and comparing it to a path can only ever fail.
+ * So `src/**` + `/*.test.ts` — the literal argument `package.json` passes to
+ * `node --test`, quoted in `CLAUDE.md` — was reported as naming nothing, while
+ * fourteen files match it. (Written in two pieces there because this gate reads
+ * its own module and the whole pattern in one backticked run is a reference.)
+ *
+ * That is the failure mode the gate's own header warns about: "a gate that
+ * fires on ordinary prose gets suppressed and then ignored". A pattern is the
+ * honest way to name a tree, and the rule generalises without weakening —
+ * a glob resolves when it matches at least one repo file, so one matching
+ * nothing still fails, exactly as a wrong path does.
+ *
+ * Matched against the caller's file list rather than the filesystem, which is
+ * what keeps it pure enough to test and stops a pattern resolving against
+ * `node_modules` or anything else git ignores.
+ *
+ * Only the three wildcards these comments use: a `*` within one segment, a
+ * `**` spanning any number of them, and `?` for a single character. Everything
+ * else is escaped, so a `.` in a filename cannot match a different character.
+ *
+ * @param {string} named A repo-relative path or glob, forward-slashed.
+ * @param {string[]} bases Directories it may be relative to; `""` is the root.
+ * @param {Set<string>} repoFiles Every file in the repository, forward-slashed.
+ * @returns {boolean}
+ */
+export function matchesRepoFile(named, bases, repoFiles) {
+  const candidates = bases.map((base) => (base === "" ? named : `${base}/${named}`));
+  if (!/[*?]/.test(named)) return candidates.some((candidate) => repoFiles.has(candidate));
+
+  return candidates.some((candidate) => {
+    const pattern = globToRegExp(candidate);
+    for (const file of repoFiles) if (pattern.test(file)) return true;
+    return false;
+  });
+}
+
+/**
+ * A glob as an anchored RegExp.
+ *
+ * `**` before a separator consumes whole directories *including none*, so
+ * `src/**` + `/*.ts` matches `src/main.ts` as well as `src/shelf/index.ts` —
+ * the zero-directory case is the one a naive `.*` gets right by accident and a
+ * `[^/]+/` gets wrong.
+ *
+ * @param {string} glob
+ * @returns {RegExp}
+ */
+function globToRegExp(glob) {
+  let out = "";
+  for (let i = 0; i < glob.length; i += 1) {
+    const char = glob[i];
+    if (char === "*" && glob[i + 1] === "*") {
+      // `**/` spans zero or more directories; a trailing `**` spans the rest.
+      if (glob[i + 2] === "/") {
+        out += "(?:[^/]+/)*";
+        i += 2;
+      } else {
+        out += ".*";
+        i += 1;
+      }
+    } else if (char === "*") {
+      out += "[^/]*";
+    } else if (char === "?") {
+      out += "[^/]";
+    } else {
+      out += char.replace(/[.+^${}()|[\]\\]/, String.raw`\$&`);
+    }
+  }
+  return new RegExp(`^${out}$`);
 }
 
 /**

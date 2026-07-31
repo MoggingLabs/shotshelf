@@ -40,7 +40,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, globSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { quotesNumber } from "./rust-source.mjs";
+import { matchesRepoFile, quotesNumber } from "./rust-source.mjs";
 
 /**
  * Everything whose comments make claims about this repository.
@@ -336,6 +336,17 @@ function rustModules() {
 }
 
 const files = repoFiles();
+
+/**
+ * The same files, flat and forward-slashed, for the path and pattern rule.
+ *
+ * `repoFiles()` is keyed by basename because most references are a bare
+ * `poster.rs`. Resolving `src-tauri/src/enrich/scan.rs`, or matching a glob
+ * against the tree, needs the whole list instead — and it must be *this* list
+ * rather than the filesystem, so nothing resolves against a path git ignores.
+ */
+const inRepo = new Set([...files.values()].flat().map((file) => file.replaceAll("\\", "/")));
+
 const modules = rustModules();
 const problems = [];
 
@@ -407,12 +418,17 @@ for (const file of SOURCES) {
       const from = [""].concat(
         relativeParents(file.replaceAll("\\", "/")),
       );
-      const exists = isPath
-        ? candidates.some((found) => {
-            const slashed = found.replaceAll("\\", "/");
-            return from.some((base) => (base === "" ? named : `${base}/${named}`) === slashed);
-          })
-        : candidates.length > 0;
+      // A pattern names a set, so it cannot be resolved by comparing strings.
+      //
+      // Both branches below go through `matchesRepoFile`, which treats a plain
+      // path as the one-file case of the same rule — the two used to be
+      // separate and the pattern case did not exist, so every glob in prose was
+      // reported as naming nothing. A bare name with no directory keeps the
+      // basename lookup: `poster.rs` is unambiguously ours wherever it appears,
+      // and that is the one form deliberately not tied to a directory.
+      const glob = /[*?]/.test(named);
+      const exists =
+        isPath || glob ? matchesRepoFile(named, from, inRepo) : candidates.length > 0;
       if (!exists) report(file, token, "no such file in the repository");
       continue;
     }
