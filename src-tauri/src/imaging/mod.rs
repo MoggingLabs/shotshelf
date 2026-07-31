@@ -135,3 +135,152 @@ pub fn to_png(image: &DynamicImage) -> Result<Vec<u8>, ImageError> {
         .map_err(|err| ImageError::Encode(err.to_string()))?;
     Ok(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use image::RgbaImage;
+
+    use super::*;
+
+    /// A directory of this test's own, since these write real files.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("shotshelf-imaging-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("the scratch directory is created");
+        dir
+    }
+
+    /// Write `image` to `path` as PNG, whatever the extension says.
+    fn written(path: &std::path::Path, image: &DynamicImage) {
+        std::fs::write(path, to_png(image).expect("the fixture encodes"))
+            .expect("the fixture writes");
+    }
+
+    /// A picture with a huge edge but almost no pixels — one row is 4 bytes
+    /// each, so 32769 of them is 128 KiB, not a bomb. The point is the *claimed*
+    /// dimension, which is what the cap reads.
+    fn wide(width: u32) -> DynamicImage {
+        DynamicImage::ImageRgba8(RgbaImage::new(width, 1))
+    }
+
+    #[test]
+    fn a_capture_past_the_edge_cap_is_refused_rather_than_decoded() {
+        // This module had no test of any kind, and the cap is not decoration:
+        // `compare.rs` cites it three times as the reason its own allocation
+        // arithmetic cannot overflow. Deleting the `reader.limits(limits)` line
+        // left every gate in the repository green.
+        //
+        // The two cases together are what make this bite. Only the refusal, and
+        // a mutant that refused *everything* would pass; only the acceptance,
+        // and a mutant that removed the cap would pass.
+        let dir = scratch("edge");
+
+        let over = dir.join("over.png");
+        written(&over, &wide(MAX_DECODE_EDGE + 1));
+        assert!(
+            load(&over).is_err(),
+            "a capture claiming more than {MAX_DECODE_EDGE} pixels on an edge was decoded",
+        );
+
+        let at = dir.join("at.png");
+        written(&at, &wide(MAX_DECODE_EDGE));
+        assert!(
+            load(&at).is_ok(),
+            "a capture exactly at the cap is legitimate and must still decode",
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_stated_allocation_ceiling_is_the_one_it_claims_to_match() {
+        // The constant's comment says it "matches the `image` crate's own
+        // default, stated here so overriding the other limits cannot silently
+        // raise it" — and an earlier version set it to 1 GiB, quietly doubling
+        // the protection it was overriding. Nothing checked that claim, so the
+        // same edit would land the same way again, and a dependency bump that
+        // lowered the default would go unnoticed in the other direction.
+        assert_eq!(
+            Some(MAX_DECODE_BYTES),
+            image::Limits::default().max_alloc,
+            "this no longer matches the default it says it matches",
+        );
+    }
+
+    #[test]
+    fn the_format_is_read_from_the_bytes_not_from_the_extension() {
+        // `load`'s docstring promises this — "a PNG named `.jpg` is common
+        // enough to be worth surviving" — and nothing exercised it. Dropping
+        // `with_guessed_format()` keeps every other test passing, because every
+        // other fixture is named honestly.
+        let dir = scratch("sniff");
+        let lying = dir.join("actually-a-png.jpg");
+        written(&lying, &wide(8));
+
+        let decoded = load(&lying).expect("a PNG is decoded whatever it is called");
+        assert_eq!(decoded.width(), 8);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_capture_that_is_not_an_image_is_reported_rather_than_panicking() {
+        let dir = scratch("garbage");
+        let path = dir.join("not-an-image.png");
+        std::fs::write(&path, b"this is not a picture").expect("the fixture writes");
+
+        assert!(matches!(
+            load(&path),
+            Err(ImageError::Read(_) | ImageError::Decode(_))
+        ));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_capture_that_is_not_there_is_a_read_error() {
+        let missing = std::env::temp_dir().join("shotshelf-imaging-absent-000.png");
+        assert!(matches!(load(&missing), Err(ImageError::Read(_))));
+    }
+
+    #[test]
+    fn every_failure_says_which_stage_it_came_from() {
+        // The variants are what the front end shows the user, and `From<_> for
+        // String` is the only thing between them and the card. A variant that
+        // rendered as the wrong stage would send someone looking in the wrong
+        // place.
+        assert_eq!(
+            String::from(ImageError::Read("gone".to_owned())),
+            "could not read the capture: gone",
+        );
+        assert_eq!(
+            String::from(ImageError::Decode("truncated".to_owned())),
+            "could not decode the capture: truncated",
+        );
+        assert_eq!(
+            String::from(ImageError::Encode("full".to_owned())),
+            "could not encode the result: full",
+        );
+    }
+
+    #[test]
+    fn encoding_round_trips_through_png_whatever_came_in() {
+        // The module encodes PNG throughout on purpose — JPEG rings around the
+        // text a screenshot exists to show — so the bytes must sniff back as
+        // PNG rather than merely as something decodable.
+        let source = DynamicImage::ImageRgba8(RgbaImage::new(3, 5));
+        let bytes = to_png(&source).expect("it encodes");
+
+        assert_eq!(
+            image::guess_format(&bytes).expect("the bytes are a known format"),
+            ImageFormat::Png,
+        );
+
+        let back = ImageReader::new(std::io::Cursor::new(&bytes))
+            .with_guessed_format()
+            .expect("the format is guessed")
+            .decode()
+            .expect("it decodes");
+        assert_eq!((back.width(), back.height()), (3, 5));
+    }
+}
