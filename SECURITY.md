@@ -103,8 +103,13 @@ the real webview and the real OS, with synthetic captures:
   OneDrive one by name, and watched the other three; a PNG written into `Pictures\Screenshots`
   and an MP4 written into `Videos\Captures` were both caught. The **clipboard watcher** caught an
   image placed on the clipboard and wrote it into `clipboard/` in local app data.
-- **The asset-protocol scope**, in the affirmative direction: thumbnails rendered from disk, which
-  is the runtime grant working. It still has never been observed *refusing* a path.
+- **The asset-protocol scope, in both directions.** Affirmatively at runtime: thumbnails rendered
+  from disk, which is the grant working. And negatively under test, which is the half that had
+  never been shown — `src-tauri/tests/ipc.rs` asks `describe_capture`, `prepare_drag` and
+  `copy_capture` for a real file that exists and is outside the scope, and each refuses. Both
+  halves matter: the test writes a genuine PNG rather than naming a path that was never created,
+  because a refusal for "no such file" would have looked identical and proved nothing. Deleting
+  the scope check from any one of those three commands turns it red, verified by doing it.
 - **Native drag-out.** A press-and-move on a tile started a real OS drag with the drag preview
   under the cursor outside the window. The drag was cancelled rather than dropped, so the drop
   half — what the receiving application gets — remains unexercised.
@@ -125,11 +130,15 @@ the real webview and the real OS, with synthetic captures:
   installed layout — it caught a screenshot and a recording and drew a poster frame using the
   ffmpeg that shipped beside it. Nothing was installed to verify this, and nothing is signed.
 - **The IPC tier now has an executable gate**, which it never had before.
-  `src-tauri/tests/ipc.rs` builds a real `App` with the real `invoke_handler` and sends real IPC
-  requests through it. Two commands are covered so far, and one of the assertions is that the
-  serializer really does rename `max_items` to `maxItems` — a thing every other gate could only
-  compare between two declarations. This paragraph used to say no gate in this repository could
-  exercise the CSP or the IPC transport; half of that is now false.
+  `src-tauri/tests/ipc.rs` builds a real `App` with the app's own `invoke_handler` — not a second
+  copy of the list, which is why `commands.rs` exists — and sends real IPC requests through it.
+  Eight tests: the scope refusal above, the settings round-trip including the `max_items` →
+  `maxItems` rename that every other gate could only compare between two *declarations*, the item
+  cap clamped by the command rather than only by its helper, relative pinned paths dropped at the
+  boundary, the catch engine answering with the exact sentinel `main.ts` retries on, and the
+  loader assertion that fails loudly if the ComCtl32 manifest wiring regresses. This paragraph
+  used to say no gate in this repository could exercise the CSP or the IPC transport; half of
+  that is now false.
 - **Canvas CORS on the asset protocol.** An annotation was drawn and saved, producing
   `<name> (edited).png` in `edits/` and a new capture on the shelf carrying the annotation. A
   tainted canvas would have thrown in `toBlob`; a missing `Access-Control-Allow-Origin` would have
@@ -156,8 +165,10 @@ the real webview and the real OS, with synthetic captures:
   notarization, and the updater signature. No macOS bundle has been built at all, because that
   needs a macOS runner. A weekly schedule now runs `release.yml` so the bundling path stops being
   code that only executes when someone needs it.
-- **The asset-protocol scope refusing a path.** Verified permitting, not denying — and denying is
-  the half that confines what Rust will read.
+- **The asset-protocol scope refusing a path *at runtime*.** A test now proves the three reading
+  commands refuse an out-of-scope file, which is the rule. What no one has watched is the scope
+  denying something in the running app, where the grant is built from the resolved watch list
+  rather than absent entirely.
 - The **drop** half of drag-out, and what a receiving application actually gets.
 - **Reading the foreground window**, which is a Win32 `unsafe` block.
 - The **tray icon and menu**, and **single-instance** behaviour. Windows 11 puts a new tray icon

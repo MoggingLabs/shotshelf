@@ -7,7 +7,12 @@
 // app — so an unreachable one is untested attack surface that ships enabled.
 //
 // This closes that hole from the other end: it reads the command list out of
-// `lib.rs` and checks each name is invoked somewhere in `src/`.
+// `commands.rs` and checks each name is invoked somewhere in `src/`.
+//
+// That list used to be inline in `lib.rs`'s builder, and this read it there.
+// It moved so `src-tauri/tests/ipc.rs` could drive the *same* list rather than
+// a second copy — and this gate failed on the next run, which is the correct
+// behaviour for a file whose source of truth has been moved out from under it.
 //
 // Deliberately not a grep for `#[tauri::command]`: what matters is what is
 // *registered*, since an annotated function nobody registers is unreachable
@@ -17,7 +22,7 @@ import { globSync, readFileSync } from "node:fs";
 
 import { codeOnly } from "./rust-source.mjs";
 
-const LIB = "src-tauri/src/lib.rs";
+const LIB = "src-tauri/src/commands.rs";
 
 /**
  * Commands that are knowingly registered without a caller.
@@ -39,7 +44,7 @@ function registeredCommands() {
   // This split the block on `,` over the raw text, so a single `//` line inside
   // `generate_handler![…]` produced garbage entries *and swallowed the command
   // on the line below it* — that command then silently stopped being checked in
-  // either direction. `lib.rs` already writes `//` comments immediately under
+  // either direction. `commands.rs` already writes `//` comments immediately under
   // the block, so it was one edit away.
   const source = codeOnly(readFileSync(LIB, "utf8"));
   const block = /generate_handler!\[([\s\S]*?)\]/.exec(source);

@@ -42,10 +42,10 @@ fn app() -> (
     tauri::WebviewWindow<tauri::test::MockRuntime>,
 ) {
     let app = mock_builder()
-        .invoke_handler(tauri::generate_handler![
-            shotshelf_lib::settings::get_settings,
-            shotshelf_lib::settings::set_settings,
-        ])
+        // The app's own list, not a copy. A second `generate_handler!` here
+        // would let this file pass while `lib.rs` registered something else —
+        // the test asserting against its own idea of the app.
+        .invoke_handler(shotshelf_lib::commands::handler())
         .build(tauri::generate_context!())
         .expect("the mock app builds");
 
@@ -192,4 +192,145 @@ fn a_test_binary_that_links_the_tauri_runtime_loads_at_all() {
     // than an assertion, so it is worth naming what it means.
     let reachable: fn() = shotshelf_lib::run;
     assert!(!std::ptr::eq(reachable as *const (), std::ptr::null()));
+}
+
+/// A file that really exists and is really outside the scope.
+///
+/// **Both halves matter.** `existing_file` refuses a path for two different
+/// reasons — it is not in the scope, or it is not there at all — and a test
+/// pointed at a name that was never created would pass on the second reason
+/// while claiming the first. That is the same vacuity that made the item-cap
+/// test meaningless on its first writing, so it is worth spelling out: this
+/// writes a real PNG, and the only thing wrong with it is where it lives.
+///
+/// Nothing grants a scope in this harness, which is what makes any path outside
+/// it. The real app grants one at runtime from the resolved watch list.
+fn a_real_file_outside_the_scope() -> String {
+    let dir = std::env::temp_dir().join(format!("shotshelf-unscoped-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("the scratch directory is created");
+    let path = dir.join("outside.png");
+    // A one-pixel PNG, so nothing downstream can refuse it for being unreadable
+    // either.
+    std::fs::write(
+        &path,
+        [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ],
+    )
+    .expect("the fixture writes");
+
+    assert!(path.exists(), "the fixture must exist to be a fair test");
+    path.to_string_lossy().into_owned()
+}
+
+#[test]
+fn the_scope_refuses_a_path_it_was_never_given() {
+    // **This is the half of the confinement story that had never been
+    // observed.** `SECURITY.md` says so outright: the scope "is checked against
+    // Tauri's implementation; it has never actually refused anything at
+    // runtime". Its logic was verified by reading, and by unit tests of the
+    // *shape* rules in `webview_path.rs` — never by a command being told no.
+    //
+    // All three commands that read a capture are asked for the same
+    // out-of-scope path. Each must refuse. If `existing_file` were deleted from
+    // any one of them, that command would answer instead, and this goes red.
+    let (_app, window) = app();
+    let path = a_real_file_outside_the_scope();
+
+    for (command, body) in [
+        (
+            "describe_capture",
+            serde_json::json!({ "path": path.clone() }),
+        ),
+        (
+            "prepare_drag",
+            serde_json::json!({ "path": path.clone(), "kind": "image" }),
+        ),
+        (
+            "copy_capture",
+            serde_json::json!({ "path": path.clone(), "kind": "image" }),
+        ),
+    ] {
+        assert!(
+            invoke(&window, command, body).is_err(),
+            "{command} read a path the scope never admitted",
+        );
+    }
+}
+
+#[test]
+fn the_catch_engine_says_it_is_starting_in_the_words_the_front_end_matches() {
+    // `main.ts` retries only on an error containing "still starting", and gives
+    // up on anything else — so this sentence is a cross-language contract, and
+    // the fixture is the join. Nothing had ever seen it cross the boundary: the
+    // Rust side asserts the constant, the browser side asserts the stub, and
+    // the two met nowhere.
+    //
+    // The engine is never started in this harness, which is exactly the state
+    // the front end is retrying through at launch.
+    let (_app, window) = app();
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/engine-starting.json"))
+            .expect("the shared sentinel fixture parses");
+    let starting = fixture["starting"]
+        .as_str()
+        .expect("the fixture names the sentinel");
+
+    for command in ["catch_watch_dirs", "catch_backfill"] {
+        let error = invoke(&window, command, serde_json::json!({}))
+            .expect_err("the engine has not started, so this cannot succeed");
+        assert!(
+            error.contains(starting),
+            "{command} did not answer with the sentinel the front end retries on: {error}",
+        );
+    }
+}
+
+#[test]
+fn a_relative_pinned_path_does_not_survive_the_boundary() {
+    // `allowed_pins` drops anything not absolute, because `pinned.json` is read
+    // back at the next launch and an unchecked entry outlives the session that
+    // wrote it. That rule is unit-tested; what was not is whether `set_pinned`
+    // — the command the webview actually calls — applies it.
+    let (_app, window) = app();
+
+    invoke(
+        &window,
+        "set_pinned",
+        serde_json::json!({ "pinned": [
+            { "path": "relative/sneaky.png", "kind": "image", "ts": 1 },
+            { "path": "also-relative.png", "kind": "image", "ts": 2 },
+        ]}),
+    )
+    .expect("set_pinned answers");
+
+    let settings = invoke(&window, "get_settings", serde_json::json!({}))
+        .expect("settings are readable afterwards");
+    let pinned = settings
+        .get("pinned")
+        .and_then(serde_json::Value::as_array)
+        .expect("pinned is on the wire");
+    assert!(
+        pinned.is_empty(),
+        "a relative pinned path crossed the boundary and was stored: {pinned:?}",
+    );
+}
+
+#[test]
+fn asking_whether_text_can_be_recognised_answers_rather_than_failing() {
+    // Advisory, and the front end treats a failure as "do not mention it".
+    // What must not happen is the command being unreachable — the shelf would
+    // then never say that captures are going unchecked, which is the one
+    // outcome `secrets.spec.ts` calls worse than no check at all.
+    let (_app, window) = app();
+    let answer = invoke(&window, "text_recognition_available", serde_json::json!({}))
+        .expect("the command is reachable");
+    assert!(
+        answer.is_boolean(),
+        "expected a bool on the wire, got {answer}",
+    );
 }

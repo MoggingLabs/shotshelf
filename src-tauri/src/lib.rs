@@ -12,6 +12,9 @@
 
 mod cache;
 mod catch;
+// `pub` so `tests/ipc.rs` drives the *same* command list the app registers,
+// rather than a second copy of it that could drift apart unnoticed.
+pub mod commands;
 mod diag;
 mod dirs;
 mod documented;
@@ -71,25 +74,9 @@ pub fn run() {
             // A second launch is someone asking for the shelf.
             window::open_deliberately(app);
         }))
-        .invoke_handler(tauri::generate_handler![
-            catch::catch_watch_dirs,
-            catch::catch_backfill,
-            share::prepare_drag,
-            share::copy_capture,
-            enrich::scan::describe_capture,
-            edit::compare_captures,
-            edit::save_edit,
-            enrich::ocr::text_recognition_available,
-            poster::video_details,
-            poster::forget_video,
-            settings::get_settings,
-            settings::set_settings,
-            settings::set_pinned,
-            tray::set_capture_count,
-            window::show_shelf,
-            window::preview_shelf,
-            window::hide_shelf,
-        ])
+        // The list lives in `commands.rs` so the IPC gate can drive the same
+        // one — see that module's header.
+        .invoke_handler(commands::handler())
         // ── Adopted plugins — don't hand-roll what these already solve ──
         .plugin(tauri_plugin_clipboard::init()) // clipboard images, incl. Win+Shift+S
         .plugin(tauri_plugin_drag::init()) // native drag-out to other apps
