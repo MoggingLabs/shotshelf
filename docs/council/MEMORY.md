@@ -1,0 +1,3 @@
+- [Council cycle state](council-cycle-state.md) — the review cycle is unfinished; what a resumed session must do first.
+- [Shotshelf standing constraints](shotshelf-standing-constraints.md) — invariants seats must not propose breaking, and the limits already accepted.
+- [Round 41 briefs](round-41-briefs.md) — ready-to-send council seat prompts; paste on resume rather than re-deriving them.
