@@ -5,15 +5,20 @@ in about five minutes.
 
 > **This matrix is incomplete on purpose.** Two of its three columns are empty. Filling a cell
 > means someone ran the app on that OS and watched the thing happen — not that the code compiles
-> for it, and not that a test covering the same rule passes. Every gate in this repository is
-> green on all three platforms, and that is a different claim, made in
-> [README](../README.md#-run-it).
+> for it, and not that a test covering the same rule passes.
+>
+> **CI is not green on all three.** The last run that actually executed — 2026-07-30 — had
+> Windows and macOS passing every step and **Linux failing** on pixel goldens: `column-one.png`
+> and `column-three.png` differ by 979 pixels against stale snapshots. Every run since is
+> stopped by GitHub Actions billing before a job starts, so nothing has been checked on any
+> platform since. Regenerating those goldens needs the **Appearance goldens** workflow, which is
+> Linux-only and blocked by the same billing stop.
 
 ## Status
 
 | | Windows 11 | macOS | Linux |
 | :-- | :-- | :-- | :-- |
-| Compiles, lints, tests | Pass (CI) | Pass (CI) | Pass (CI) |
+| Compiles, lints, tests | Pass (CI, 2026-07-30) | Pass (CI, 2026-07-30) | **Red** — stale pixel goldens |
 | Ever launched | **Yes** — 2026-07-31, dev build | No | No |
 | Ever packaged | **Yes** — `.msi` + NSIS `.exe`, unsigned | No | n/a — no installer is produced |
 | Packaged build ever run | **Yes** — from the MSI's contents | No | n/a |

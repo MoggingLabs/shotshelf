@@ -9,12 +9,22 @@ name: CI
 
 # Every branch, not just `main`.
 #
-# This ran on `push` to `main` and on `pull_request`, and `feat/enrich-and-edit`
-# is 109 commits with no pull request — so not one of them was ever checked by
-# anything. The branch tip shipped a *red* gate: four backticked references in
-# `CLAUDE.md` and `docs/council/` named files that do not resolve, and
-# `npm run deadcode` had been failing since the commit that introduced them.
-# The gate existed, was correct, and nothing ran it.
+# **The first version of this comment was wrong and is worth keeping wrong-side-up.**
+# It said `feat/enrich-and-edit` was "109 commits with no pull request — so not
+# one of them was ever checked by anything". Pull request #14 has been open on
+# that branch since 2026-07-28, and CI ran on it: the 2026-07-30 run had Windows
+# and macOS green and Linux red. The claim was asserted from reading this file's
+# triggers instead of from looking, which is the exact defect this repository
+# most often catches in its own prose.
+#
+# What is true: the branch tip did ship a red `npm run deadcode`, and CI did not
+# catch it — because every run since 2026-07-31 has died in seconds on "the job
+# was not started because recent account payments have failed or your spending
+# limit needs to be increased". A billing stop, not a trigger gap.
+#
+# Running on every branch is still worth having, for the narrower reason that a
+# branch should not need a pull request to be checked, and pushes between syncs
+# should be checked too. It is not the reason the gate went red.
 #
 # A long-lived branch is the normal way this product is built, so "open a pull
 # request earlier" is a process fix for a tooling problem. The `if:` below is

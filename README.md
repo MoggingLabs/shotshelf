@@ -139,10 +139,10 @@ Most of the per-OS code sits behind `cfg` gates that only the matching host comp
 builds all three. Every push to **any branch**, and every pull request from a fork, runs the
 following on **windows-latest, macos-latest and ubuntu-latest**.
 
-That used to be pushes to `main` plus pull requests, which sounds equivalent and is not: this
-branch reached 109 commits with no pull request, so nothing ran on any of them, and its tip
-shipped a **red** `npm run deadcode` for however long it took to notice. A branch is where the
-work happens here, so that is where the gate has to run:
+It used to be pushes to `main` plus pull requests. Widening it means a branch does not need an
+open pull request to be checked, and that pushes between pull-request syncs are checked too. An
+earlier version of this paragraph justified the change by claiming this branch had run without
+CI entirely — it had not; pull request #14 has been open since 2026-07-28 and CI ran on it:
 
 | Gate | What it catches |
 | :-- | :-- |

@@ -30,9 +30,24 @@ fixes.
 **failing**: four backticked references in `CLAUDE.md` and `docs/council/` did
 not resolve. Three of them were the gate's fault — it could not resolve a glob,
 so every pattern anyone wrote in backticks was reported as naming nothing — and
-one was a genuinely stale reference. Nothing caught it because `ci.yml` fired
-only on pushes to `main` and on pull requests, and this branch is 109 commits
-with neither. **A seat must run the gate rather than believing this paragraph.**
+one was a genuinely stale reference. **A seat must run the gate rather than
+believing this paragraph.**
+
+**Why CI did not catch it, corrected.** The provisioning session first wrote
+that CI "fired only on pushes to `main` and on pull requests, and this branch is
+109 commits with neither", and put that claim in a workflow comment, the README
+and a commit message before checking it. Pull request #14 has been open since
+2026-07-28 and CI ran on it throughout. The real reason is a **GitHub Actions
+billing stop**: every run since 2026-07-31 ends in seconds with "the job was not
+started because recent account payments have failed or your spending limit needs
+to be increased". Nothing in this repository can fix that.
+
+**CI is also red on Linux, and was before any of this.** The 2026-07-30 run —
+the last one that actually executed — had Windows and macOS green and Linux
+failing on pixel goldens: `column-one.png` and `column-three.png` differ by 979
+pixels. The goldens are stale against a UI change and can only be regenerated on
+Linux, by the **Appearance goldens** workflow, which the same billing stop
+prevents from running.
 
 Counts as of `6293d58`: 140 Node unit, 171 Playwright, 170 Rust, plus lint,
 knip, four scripts, tsc, clippy, fmt, build. The Node and Rust numbers moved
