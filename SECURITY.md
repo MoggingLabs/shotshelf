@@ -112,8 +112,12 @@ the real webview and the real OS, with synthetic captures:
   `AKIAIOSFODNN7EXAMPLE` (Amazon's own documentation placeholder) was read by `Windows.Media.Ocr`
   and the card showed the warning marker. This is the FFI path and the feature that depends on it.
 - **The Content Security Policy and the IPC transport it governs.** Not by a dedicated test, but
-  by the app working at all: every command the UI issues crossed the real IPC boundary under the
-  real CSP, and `save_edit` carried PNG bytes across it.
+  by the app working at all. Nine of the seventeen registered commands were exercised — settings,
+  the two catch commands, `describe_capture`, `video_details`, `copy_capture`, `prepare_drag`,
+  `save_edit` and a window command — so the boundary carried real traffic under the real CSP, and
+  `save_edit` carried PNG bytes across it. Not *every* command: `compare_captures`, the pinning
+  and forget paths and the rest were not touched, and an earlier draft of this line said "every",
+  which is the failure this document is most prone to.
 - **Canvas CORS on the asset protocol.** An annotation was drawn and saved, producing
   `<name> (edited).png` in `edits/` and a new capture on the shelf carrying the annotation. A
   tainted canvas would have thrown in `toBlob`; a missing `Access-Control-Allow-Origin` would have
