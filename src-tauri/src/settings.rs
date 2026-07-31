@@ -246,7 +246,7 @@ fn read_if_present(path: &std::path::Path) -> std::io::Result<Option<String>> {
 /// that can destroy a user's pins — it decides which of two files wins, and
 /// what happens when either is unreadable — and it had no test, because
 /// everything it did was behind an `AppHandle`.
-fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
+pub fn load_from(path: Option<PathBuf>, pins: Option<PathBuf>) -> SettingsStore {
     // Whether the file is there but unusable — distinct from "absent", which is
     // an ordinary first run. Only the first deserves a `.corrupt` copy.
     let mut settings_unreadable = false;

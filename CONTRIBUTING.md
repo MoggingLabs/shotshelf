@@ -11,8 +11,9 @@ Thanks for taking the time to contribute!
    Don't hand-roll what a maintained library already does.
 3. **Keep all three platforms working.** Windows, macOS and Linux are built and gated in CI,
    and catch + drag-out are the two features that must never regress on any of them. Note what
-   that does *not* mean: the packaged app has never been launched on any platform — see
-   [SECURITY.md](./SECURITY.md#what-has-not-been-verified).
+   that does *not* mean: only Windows has ever run this, packaged or otherwise, and nothing is
+   signed — see [SECURITY.md](./SECURITY.md#what-has-not-been-verified) and
+   [PARITY](./docs/PARITY.md).
 4. **Local-only, always.** No telemetry, no cloud, and exactly one network call: the launch-time
    update *check*, which installs nothing. The feed URL is built from the running version, the OS
    and the CPU architecture; the request also carries the updater's own `User-Agent` and, as any
@@ -47,8 +48,8 @@ git commit -m "add clipboard-image capture on Windows"
 ```
 
 `npm run gate` is the same set CI runs: lint, dead code, type-check and bundle, the unit and
-browser suites, then `cargo fmt --check`, `clippy -D warnings`, `cargo test --lib` and
-`cargo build`. It needs a Rust toolchain and the Playwright browser above; without them it stops
+browser suites, then `cargo fmt --check`, `clippy -D warnings`, `cargo test --lib --test ipc`
+and `cargo build`. It needs a Rust toolchain and the Playwright browser above; without them it stops
 rather than skipping quietly.
 
 On Windows it also needs **`git` on the PATH** — `check-references.mjs` asks git which files the
@@ -66,12 +67,17 @@ Two things are **not** in `npm run gate`, each for a reason worth knowing:
   five minutes. Every step in it is something no gate here can reach — drag-out into another
   application most of all. Run it before anything that touches catching, rendering or the window.
 
-One difference, deliberate: CI runs `cargo test --all-targets`, which also covers anything under
-`src-tauri/tests/`. There is nothing there yet, and `webview_path.rs` explains why an integration test could not be
-landed (its prescription was retracted after being disproved) — and the local gate stays on `--lib` because Windows Smart App Control
-refuses the bin target's freshly linked test harness on the machine this was written on. If you
-add an integration test, CI will run it and your local gate will not; that is the one gap, and it
-fails loudly in CI rather than silently anywhere.
+One difference, deliberate: CI runs `cargo test --all-targets`, which also covers the bin
+target's own test harness. The local gate names its targets instead — `--lib --test ipc` —
+because Windows Smart App Control refuses a freshly linked bin test harness on one of the
+development machines.
+
+`src-tauri/tests/ipc.rs` is that integration test, and it is the only executable gate the IPC
+tier has: it builds a real `App` with the real `invoke_handler` and sends real IPC requests
+through it. Landing it needed the ComCtl32 v6 manifest `build.rs` embeds into test targets —
+`webview_path.rs` carries the account, including two earlier explanations that were recorded as
+fact and were both wrong. **If you add another integration test, add it to `gate:rust` too.** CI
+will run it either way; your local gate will not.
 
 ### Pull requests
 

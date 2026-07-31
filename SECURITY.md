@@ -82,9 +82,9 @@ real capture.
 Stated plainly, because a security document that overstates its evidence is worse than one that
 admits a gap.
 
-Every claim above is established by reading and testing the code: 170 Rust unit tests, 133 Node
-tests, a front-end suite of 171 specs that drives the real UI in a real browser, and static
-analysis.
+Every claim above is established by reading and testing the code: 170 Rust unit tests plus four
+that cross the real IPC boundary, 140 Node tests, a front-end suite of 171 specs that drives the
+real UI in a real browser, and static analysis.
 
 **On 2026-07-31 the application was run, for the first time, on Windows 11.** Every version of
 this section before that date opened with "the packaged application has never been launched" and
@@ -118,6 +118,18 @@ the real webview and the real OS, with synthetic captures:
   `save_edit` carried PNG bytes across it. Not *every* command: `compare_captures`, the pinning
   and forget paths and the rest were not touched, and an earlier draft of this line said "every",
   which is the failure this document is most prone to.
+- **The installers, and the packaged binary.** `npm run release -- --unsigned` produced an `.msi`
+  and an NSIS `.exe` — the first ever built on any machine. Extracting the MSI shows
+  `shotshelf.exe`, `ffmpeg.exe` and `ffmpeg.LICENSE`, so the sidecar really is bundled and its
+  GPL licence travels with it. Running the binary out of that extracted layout — which is the
+  installed layout — it caught a screenshot and a recording and drew a poster frame using the
+  ffmpeg that shipped beside it. Nothing was installed to verify this, and nothing is signed.
+- **The IPC tier now has an executable gate**, which it never had before.
+  `src-tauri/tests/ipc.rs` builds a real `App` with the real `invoke_handler` and sends real IPC
+  requests through it. Two commands are covered so far, and one of the assertions is that the
+  serializer really does rename `max_items` to `maxItems` — a thing every other gate could only
+  compare between two declarations. This paragraph used to say no gate in this repository could
+  exercise the CSP or the IPC transport; half of that is now false.
 - **Canvas CORS on the asset protocol.** An annotation was drawn and saved, producing
   `<name> (edited).png` in `edits/` and a new capture on the shelf carrying the annotation. A
   tainted canvas would have thrown in `toBlob`; a missing `Access-Control-Allow-Origin` would have
@@ -136,12 +148,14 @@ the real webview and the real OS, with synthetic captures:
 
 ### Still not verified
 
-- **No installer has ever been built, on any machine.** The release workflow triggered on `v*`
-  tags, of which there are none, and on manual dispatch, which had never been run; CI runs
-  `cargo build`, never `tauri build`. A weekly schedule has since been added to `release.yml` so
-  the bundling path stops being unexecuted code, but at the time of writing it has not yet fired.
-  Everything above is the **development** build: the packaged app, its signing and its
-  notarization remain untested.
+- **Signing and notarization.** The installers have now been built — `npm run release --
+  --unsigned` produced an `.msi` and an NSIS `.exe` on Windows, both carrying the ffmpeg sidecar
+  and its licence — and the packaged binary was run out of the MSI's own contents: it caught a
+  screenshot and a recording and drew a poster frame with the bundled ffmpeg. What is still
+  untested is every path that needs a certificate: Authenticode signing, Developer ID signing,
+  notarization, and the updater signature. No macOS bundle has been built at all, because that
+  needs a macOS runner. A weekly schedule now runs `release.yml` so the bundling path stops being
+  code that only executes when someone needs it.
 - **The asset-protocol scope refusing a path.** Verified permitting, not denying — and denying is
   the half that confines what Rust will read.
 - The **drop** half of drag-out, and what a receiving application actually gets.
@@ -187,18 +201,25 @@ dependency works. The measured consequences are narrower and specific:
   wider, so that an integration test under `src-tauri/tests/` would be run rather than silently
   skipped. That is the only place the local gate and CI differ, and it is stated in README and
   CONTRIBUTING as well as here.
-- `tauri`'s `test` feature, which would let Rust tests construct an `App` and reach the command
-  tier, could not be landed: three wirings all compiled and all died at load with
-  `STATUS_ENTRYPOINT_NOT_FOUND`. **The cause is unidentified.** An earlier version of this bullet
-  blamed the crate building as a `cdylib` and prescribed an integration test under
-  `src-tauri/tests/` as the fix. Both were wrong and both were disproved by experiment: a `--lib`
-  test binary is a standalone executable that never links the `cdylib`, and an integration test
-  that merely names `shotshelf_lib::run` fails identically while one containing `2 + 2` passes.
-  What distinguishes them is whether the linked object graph reaches the Tauri runtime — nothing
-  about that is crate-shaped, so it is most likely local to this machine, the same policy estate
-  that refuses the packaged app. `webview_path.rs` carries the full account. This bullet is what a
-  reader of a security document sees first, and it repeated the retracted version for a round
-  after the retraction.
+- `tauri`'s `test` feature is **landed**, and `src-tauri/tests/ipc.rs` is the gate it enables.
+  This bullet said the cause of its failure was "unidentified" and "most likely local to this
+  machine, the same policy estate that refuses the packaged app". That was the *second* wrong
+  explanation here — the first blamed the `cdylib` — and it was disproved the same way as the
+  first: the failure reproduces exactly on a second machine whose Smart App Control is in
+  evaluation mode and which runs the packaged app without complaint.
+
+  The real cause is mundane and was always visible to `dumpbin /imports`. The Tauri runtime
+  imports `TaskDialogIndirect`, `RemoveWindowSubclass` and `DefSubclassProc`, which exist only in
+  ComCtl32 **v6**; `C:\Windows\System32\comctl32.dll` is v5.82 and exports none of them, and v6
+  is reachable only through a side-by-side manifest. `tauri-build` embeds one in the app binary
+  and nothing embedded one in a test binary, so any test that pulled the runtime into its link
+  died before `main`. `build.rs` now embeds it into test targets. `webview_path.rs` carries the
+  full account, including why the flag cannot go on the binary as well.
+
+  Two conclusions were recorded here as fact and both were wrong, in the document that opens by
+  saying overstated evidence is worse than an admitted gap. The lesson is not about ComCtl32:
+  it is that "the cause is unidentified, therefore it is probably the environment" is a guess
+  wearing the clothes of a finding.
 
 None of these can leak a capture off the machine — the network surface is one URL, and the CSP
 that seals the webview is written to allow nothing else *that it directs*. That qualifier is

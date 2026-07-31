@@ -23,8 +23,11 @@ take and keeps it one drag away — so you never dig through folders for the cli
 > loop was driven with synthetic captures: a screenshot and a recording caught off disk, an image
 > caught off the clipboard, thumbnails and a poster frame rendered, text recognised on-device, a
 > credential flagged on the card, an annotation drawn and saved, a capture copied to the clipboard
-> and a native drag started. **No installer has been built on any machine, and macOS and Linux
-> have still never run it** — what remains unverified is named in
+> and a native drag started. The installers were then built for the first time on any machine —
+> an `.msi` and an NSIS `.exe` — and the **packaged** binary was launched from the MSI's own
+> contents, caught a screenshot and a recording, and drew a poster frame with the ffmpeg that
+> shipped inside it. **macOS and Linux have still never run it, and nothing is signed** — what
+> remains unverified is named in
 > [SECURITY.md](./SECURITY.md#what-has-not-been-verified). Cross-platform desktop app
 > on **Tauri v2**. The catch engine, the corner
 > popover, native drag-out, recordings, settings and packaging are all in — and on top of them:
@@ -151,8 +154,9 @@ work happens here, so that is where the gate has to run:
 | `npm run test:visual` | geometry and computed style everywhere; pixel goldens on Linux |
 | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --lib`, `cargo build` | the Rust half (CI runs `--all-targets`; see below) |
 
-`npm run gate` runs that lot locally, with one stated difference: it runs `cargo test --lib`
-where CI runs `cargo test --all-targets`.
+`npm run gate` runs that lot locally. It runs `cargo test --lib --test ipc` where CI runs
+`cargo test --all-targets`; both execute every test this crate has, and CI takes the wider form
+so that a *new* integration test is run rather than silently skipped.
 
 Two more checks exist and are deliberately **not** in either the matrix above or `npm run gate`:
 

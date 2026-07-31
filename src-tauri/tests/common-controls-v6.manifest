@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  ComCtl32 version 6, for `cargo test` binaries only.
+
+  Anything in this crate that links the Tauri runtime imports `TaskDialogIndirect`,
+  `RemoveWindowSubclass` and `DefSubclassProc`. Those live in ComCtl32 **v6**, and
+  the copy in System32 is v5.82, which exports none of them. v6 is reachable only
+  through a side-by-side manifest, which `tauri-build` embeds in the app binary and
+  which no `cargo test` binary receives — so every test that reached the runtime
+  died at load with STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139).
+
+  `build.rs` embeds this into test targets with `rustc-link-arg-tests`.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls"
+                        version="6.0.0.0" processorArchitecture="*"
+                        publicKeyToken="6595b64144ccf1df" language="*" />
+    </dependentAssembly>
+  </dependency>
+</assembly>

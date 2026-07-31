@@ -15,7 +15,8 @@ in about five minutes.
 | :-- | :-- | :-- | :-- |
 | Compiles, lints, tests | Pass (CI) | Pass (CI) | Pass (CI) |
 | Ever launched | **Yes** — 2026-07-31, dev build | No | No |
-| Ever packaged | No | No | n/a — no installer is produced |
+| Ever packaged | **Yes** — `.msi` + NSIS `.exe`, unsigned | No | n/a — no installer is produced |
+| Packaged build ever run | **Yes** — from the MSI's contents | No | n/a |
 
 ## Capabilities
 
@@ -47,7 +48,9 @@ in about five minutes.
 | Update check | Pass | — | — | Failure path only: the internal feed does not resolve, so it logged one warning and carried on |
 | Quick look, compare, multi-select, pin, remove, retention | — | — | — | Covered by the browser suite against the stubbed runtime; never driven against the real binary |
 | Single instance | — | — | — | |
-| Installer | — | — | n/a | No installer has been built on any machine |
+| Installer built | Pass | — | n/a | `.msi` and NSIS `.exe`, unsigned; ffmpeg + its licence verified inside the MSI |
+| Packaged build runs | Pass | — | n/a | Launched from the MSI's contents; caught a screenshot and a recording, poster frame from the bundled ffmpeg |
+| Signing / notarization | — | — | n/a | Needs a certificate; no signed artifact has ever been produced |
 
 ### Deliberate per-OS differences
 

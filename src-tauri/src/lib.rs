@@ -22,7 +22,11 @@ mod hotkey;
 mod imaging;
 mod limits;
 mod poster;
-mod settings;
+// `pub` for one reason: `tests/ipc.rs` is the only executable gate the IPC
+// tier has, and an integration test is the only kind cargo will attach the
+// ComCtl32 v6 manifest to — see `build.rs`. Nothing outside this crate consumes
+// `shotshelf_lib`; `main.rs` is its only caller.
+pub mod settings;
 mod share;
 mod tray;
 mod update;

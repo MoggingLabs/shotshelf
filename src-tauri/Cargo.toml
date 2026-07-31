@@ -121,6 +121,24 @@ windows = { version = "0.61", features = [
     "Globalization",        # it follows the user's own language list
 ] }
 
+[dev-dependencies]
+# The `test` feature, and only for tests.
+#
+# `tauri::test::mock_builder()` is what lets a test build a real `App` and call
+# a real `#[tauri::command]`. Nothing here could before: no Rust test can
+# construct an `AppHandle` unaided, and `tests/harness/tauri-mock.ts` replaces
+# `window.__TAURI_INTERNALS__` wholesale, so no browser spec executes a command
+# either. The whole IPC tier had no executable gate of any kind.
+#
+# Landing this needed the ComCtl32 v6 manifest `build.rs` now embeds into test
+# targets — without it any test binary reaching the Tauri runtime dies at load
+# with STATUS_ENTRYPOINT_NOT_FOUND. That was recorded for several rounds as an
+# unexplained, probably machine-specific failure. It was neither.
+#
+# In `[dev-dependencies]` so a release build never carries the harness.
+tauri = { version = "2", features = ["test"] }
+
+
 
 # Casts are checked, so the allowances that name them mean something.
 #

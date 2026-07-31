@@ -204,41 +204,47 @@ mod tests {
     // `window.__TAURI_INTERNALS__` wholesale, so no spec ever executes a
     // `#[tauri::command]`. And no Rust test here can construct an `AppHandle`.
     //
-    // **What was tried, and what is actually known.** Tauri ships
-    // `tauri::test::mock_builder` for this. Three wirings were attempted — a
-    // `[dev-dependencies]` entry, the `test` feature on the existing
-    // dependency, and the WebView2 loader copied beside the test binary — and
-    // all three compiled and died at load with `STATUS_ENTRYPOINT_NOT_FOUND`
-    // (0xc0000139) on the development machine.
+    // **This has been solved. `src-tauri/tests/ipc.rs` is the gate.**
     //
-    // An earlier version of this comment blamed the crate building as a
-    // `cdylib`, and prescribed an integration test under `src-tauri/tests/` as
-    // "the route that should work". **Both claims were wrong**, and a reviewer
-    // disproved them in sixteen seconds: `cargo test --lib` builds a standalone
-    // *executable* and never links the `cdylib` at all, and an integration test
-    // that merely names `shotshelf_lib::run` dies with the identical error
-    // while one containing `2 + 2` passes. The variable is not the target kind
-    // — it is whether the linked object graph reaches the Tauri runtime.
-    // `--lib` passes today only because no test references `run()`, so the
-    // linker drops the runtime and its imports with it.
+    // The history is worth keeping, because two hypotheses were recorded here
+    // as fact and both were wrong. Tauri ships `tauri::test::mock_builder` for
+    // exactly this, and three wirings were tried — a `[dev-dependencies]`
+    // entry, the `test` feature on the existing dependency, and the WebView2
+    // loader copied beside the test binary. All compiled and died at load with
+    // `STATUS_ENTRYPOINT_NOT_FOUND` (0xc0000139).
     //
-    // So the honest statement is: **any Rust test that links the Tauri runtime
-    // fails to load on this machine, and the cause is unidentified.** Nothing
-    // about the failure is crate-shaped, which makes it most likely local — the
-    // same Smart App Control and WebView2 estate that refuses the packaged app.
-    // The way to find out is to land the mock-runtime test and let CI answer on
-    // three OSes. **CI** runs `--all-targets` precisely so such a test would be
-    // run rather than silently skipped; the local `npm run gate` runs `--lib`,
-    // because Smart App Control refuses the bin target's freshly linked test
-    // harness here. Add a test under `src-tauri/tests/` and CI will run it and
-    // your local gate will not — a difference stated in README, CONTRIBUTING
-    // and SECURITY.md, and, until this was corrected, stated backwards right here, in the one paragraph
-    // that reasons about why it matters. It is not landed
-    // here because a change that alters what the shipped binary links is not
-    // something to push unverified from a machine that cannot launch it.
+    // The first explanation blamed the crate building as a `cdylib` and
+    // prescribed an integration test as "the route that should work". A
+    // reviewer disproved both in sixteen seconds. The replacement said the
+    // cause was "unidentified" and "most likely local — the same Smart App
+    // Control and WebView2 estate that refuses the packaged app". That was
+    // wrong too: it reproduces exactly on a second machine whose Smart App
+    // Control is in evaluation mode and which runs the packaged app happily.
     //
-    // Until then the shape checks above are the half that is pure and tested.
-    // The scope half rests on reading Tauri's `FsScope::is_allowed`, which
+    // The cause is none of those. `dumpbin /imports` on the failing test binary
+    // names it outright: the Tauri runtime imports `TaskDialogIndirect`,
+    // `RemoveWindowSubclass` and `DefSubclassProc`, which exist only in ComCtl32
+    // **v6**. `C:\Windows\System32\comctl32.dll` is v5.82 and exports none of
+    // them; v6 is reachable only through a side-by-side manifest. `tauri-build`
+    // embeds one in the *app* binary, and nothing embedded one in a test
+    // binary — so every test that pulled the runtime into its link died before
+    // `main`, and `--lib` passed only because nothing referenced `run()` and the
+    // linker dropped the runtime with its imports.
+    //
+    // `build.rs` now embeds that manifest into test targets. It has to be
+    // `rustc-link-arg-tests` rather than `rustc-link-arg`: the broader form
+    // reaches the binary too, where `tauri-build`'s own manifest resource is
+    // already present, and two of them is `CVT1100: duplicate resource`. That
+    // instruction covers integration tests and **not** the lib's own harness,
+    // which is why the gate lives under `tests/` and why `settings` is `pub`.
+    //
+    // What that buys: a real `App`, the real `invoke_handler`, and a real IPC
+    // request through `get_ipc_response`. The local gate runs `--lib --test ipc`
+    // and CI runs `--all-targets`, so both execute it.
+    //
+    // The shape checks above remain the half that is pure and tested. The scope
+    // half still rests on reading Tauri's `FsScope::is_allowed`, which
     // canonicalizes before matching, and on the grant and the watcher being
-    // non-recursive over the same resolved list.
+    // non-recursive over the same resolved list — no test here has yet watched
+    // the scope *refuse* a path.
 }

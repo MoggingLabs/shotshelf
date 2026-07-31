@@ -483,15 +483,17 @@ for (const file of SOURCES) {
 /**
  * Globs that legitimately contribute nothing, each one a decision.
  *
- * `src-tauri/build.rs` is three lines with no comment in it, so there is no
- * prose here to check and never has been. It stays in `SOURCE_GLOBS` rather
- * than being deleted from it: the moment someone writes an explanation there,
- * it should be checked like every other one.
+ * Empty, and that is the interesting part. `src-tauri/build.rs` was the only
+ * entry — three lines, no comment, nothing to check — under a note saying "the
+ * moment someone writes an explanation there, it should be checked like every
+ * other one". That moment came: the file now carries the account of the
+ * ComCtl32 v6 manifest it embeds into test targets, and this gate failed on the
+ * very next run demanding to be told so.
  *
  * Asserted in both directions below, so this cannot rot. A glob listed here
  * that starts contributing references fails just as loudly as one that stops.
  */
-const SILENT_GLOBS = new Set(["src-tauri/build.rs"]);
+const SILENT_GLOBS = new Set();
 
 // A glob contributing nothing is a tree nobody is checking — unless it is
 // listed above, in which case it must contribute nothing.
