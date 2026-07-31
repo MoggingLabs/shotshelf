@@ -82,63 +82,94 @@ real capture.
 Stated plainly, because a security document that overstates its evidence is worse than one that
 admits a gap.
 
-Every claim above is established by reading and testing the code: over a hundred Rust unit tests, a
-front-end suite that drives the real UI in a real browser, and static analysis. **The packaged
-application has never been launched.** The development build is unsigned, and Windows Smart App
-Control refuses to execute it on the machine Shotshelf was written on; disabling that setting is
-irreversible without reinstalling the OS, so it was not done.
+Every claim above is established by reading and testing the code: 170 Rust unit tests, 133 Node
+tests, a front-end suite of 171 specs that drives the real UI in a real browser, and static
+analysis.
 
-What that leaves unverified, specifically:
+**On 2026-07-31 the application was run, for the first time, on Windows 11.** Every version of
+this section before that date opened with "the packaged application has never been launched" and
+closed with "no platform has run this", and both were true when written: the first development
+machine had Windows Smart App Control **enforced**, which refuses an unsigned freshly linked
+binary, and disabling it is irreversible without reinstalling the OS. Work moved to a second PC
+whose Smart App Control is in **evaluation** mode, which observes rather than blocks. That is the
+whole reason this list has shrunk — nothing about the code changed.
 
-- The asset-protocol scope, which is what confines every file Rust will read, copy, scan or hand
-  to a drag. Its logic is checked against Tauri's implementation; it has never actually refused
-  anything at runtime.
-- **The catch engine** — the folder watchers and the clipboard watcher. This is the app's one
-  job, and on Windows the clipboard path is how Win+Shift+S captures arrive.
-- **Native drag-out**, which is the feature the whole thing exists for.
-- **On-device text recognition**, which is FFI into `Windows.Media.Ocr` and macOS Vision, and
-  which the credential warning depends on.
+### Exercised at runtime — Windows 11, development build
+
+Each of these was previously on the list below. They were driven against the real Rust binary,
+the real webview and the real OS, with synthetic captures:
+
+- **The catch engine.** Folder watchers resolved four candidate locations, skipped the absent
+  OneDrive one by name, and watched the other three; a PNG written into `Pictures\Screenshots`
+  and an MP4 written into `Videos\Captures` were both caught. The **clipboard watcher** caught an
+  image placed on the clipboard and wrote it into `clipboard/` in local app data.
+- **The asset-protocol scope**, in the affirmative direction: thumbnails rendered from disk, which
+  is the runtime grant working. It still has never been observed *refusing* a path.
+- **Native drag-out.** A press-and-move on a tile started a real OS drag with the drag preview
+  under the cursor outside the window. The drag was cancelled rather than dropped, so the drop
+  half — what the receiving application gets — remains unexercised.
+- **On-device text recognition and the credential warning.** A capture containing
+  `AKIAIOSFODNN7EXAMPLE` (Amazon's own documentation placeholder) was read by `Windows.Media.Ocr`
+  and the card showed the warning marker. This is the FFI path and the feature that depends on it.
+- **The Content Security Policy and the IPC transport it governs.** Not by a dedicated test, but
+  by the app working at all: every command the UI issues crossed the real IPC boundary under the
+  real CSP, and `save_edit` carried PNG bytes across it.
+- **Canvas CORS on the asset protocol.** An annotation was drawn and saved, producing
+  `<name> (edited).png` in `edits/` and a new capture on the shelf carrying the annotation. A
+  tainted canvas would have thrown in `toBlob`; a missing `Access-Control-Allow-Origin` would have
+  failed the load outright. Neither happened.
+- **The clipboard *write* path.** The copy control put a 1920×1080 image on the clipboard, and the
+  watcher did **not** re-shelve it — the echo suppression working in the one place it matters.
+- **Window placement and sizing**, and window chrome. The popover placed itself against the
+  monitor's *work area* (1920×1032 of a 1920×1080 screen), took both documented shapes — a peeked
+  column and the 225×420 browse view — and kept its bottom edge fixed as it grew, which is the
+  corner anchoring. DWM corner rounding and the dark backdrop rendered.
+- **The global hotkey.** `CommandOrControl+Shift+S` registered and toggled the shelf open and shut.
+- **The bundled ffmpeg sidecar**, though not *as packaged*: the sidecar ran, extracted a poster
+  frame, and the tile showed the frame with `0:06` and `14 kB`.
+- **The update check against a real feed.** `releases.mogginglabs.internal` does not resolve, so
+  what was verified is the failure path: it logged one warning and the app carried on.
+
+### Still not verified
+
+- **No installer has ever been built, on any machine.** The release workflow triggered on `v*`
+  tags, of which there are none, and on manual dispatch, which had never been run; CI runs
+  `cargo build`, never `tauri build`. A weekly schedule has since been added to `release.yml` so
+  the bundling path stops being unexecuted code, but at the time of writing it has not yet fired.
+  Everything above is the **development** build: the packaged app, its signing and its
+  notarization remain untested.
+- **The asset-protocol scope refusing a path.** Verified permitting, not denying — and denying is
+  the half that confines what Rust will read.
+- The **drop** half of drag-out, and what a receiving application actually gets.
 - **Reading the foreground window**, which is a Win32 `unsafe` block.
-- Window chrome — DWM corner rounding, acrylic and vibrancy backdrops.
-- The tray icon and menu, the global hotkey, and single-instance behaviour.
-- The bundled ffmpeg sidecar as packaged.
-- The update check against a real feed.
-- **The Content Security Policy, and the IPC transport it governs.** No gate in this repository
-  can exercise either: the browser suite runs against a hand-written stub of the Tauri runtime,
-  which has no CSP and no real IPC. This is not a theoretical gap — a CSP missing `connect-src`
-  would have made every annotated save fail, and it was caught by reading Tauri's source rather
-  than by anything that runs. The `postMessage` fallback path, which encodes the source path in a
-  request header, has never carried a byte at runtime.
+- The **tray icon and menu**, and **single-instance** behaviour. Windows 11 puts a new tray icon
+  in the overflow flyout, which `docs/USAGE.md` documents and which this run confirmed; the icon
+  was never clicked, so the menu is unexercised.
+- **Compare, quick look, multi-select, pinning, removal and the retention sweep.** All are covered
+  by the browser suite against the stubbed runtime; none was driven against the real Rust binary.
+- The `postMessage` IPC fallback path, which encodes the source path in a request header. The
+  primary path carried bytes; this one is a different branch and has still never run.
+- **macOS and Linux, entirely.** `defaults read`, the Accessory activation policy and the private
+  transparency API are unverified, and Linux remains compile-checked only. One OS running is not
+  three, and the per-OS code is behind `cfg` gates that only the matching host even compiles.
 
-Four more, named because the list above reads as though only Windows chrome is untested:
+And plainly, because the section above is easy to read as more than it is: **one platform has run
+this, once, unpackaged.** That is the difference between "no evidence" and "some evidence", not
+between "some" and "enough".
 
-- **No installer has ever been built, on any machine.** The release workflow triggers on `v*` tags,
-  of which there are none, and on manual dispatch, which has never been run; CI runs `cargo build`, never `tauri build`. So the whole bundling path —
-  `scripts/build-release.mjs`, sidecar packaging, NSIS/MSI/DMG generation, updater artifacts — has
-  never executed anywhere. "The bundled ffmpeg sidecar *as packaged*" above implies a package
-  exists; none does.
-- **Window placement and sizing.** `window::place` reads the work area and scale factor off the
-  primary monitor, and every resize is measured against it. Chrome is on the list above; the
-  geometry deciding whether the shelf lands on screen at all was not.
-- **The clipboard *write* path.** The watcher is listed; `copy_capture` writing image bytes or a
-  file URI — the documented fallback for apps that refuse a drop — is equally unexercised.
-- **Canvas CORS on the asset protocol.** The editor sets `crossOrigin = "anonymous"` so `toBlob`
-  does not throw on a tainted canvas, which depends on Tauri's asset protocol sending an
-  `Access-Control-Allow-Origin` header. If that ever fails the image does not merely taint the
-  canvas, it fails to load — and the user is told the capture's file is gone when it is not.
+One local-environment limit worth recording, because it shapes what can be checked and it differs
+per machine. **Smart App Control refuses freshly linked executables** (`os error 4551`) — the same
+policy that refuses the packaged app. It is not, as an earlier version of this paragraph claimed,
+"any edit to `Cargo.toml`": a manifest edit that adds a dependency builds and tests fine. What
+triggers it is a *newly linked binary* the policy has not seen before, and what gets relinked
+varies — a build script after a manifest change, the bin target's test harness, `rustdoc`. Once a
+given binary has been accepted it keeps working until something relinks it.
 
-And plainly, because the list is otherwise easy to read as Windows-specific: **no platform has run
-this**. macOS's `defaults read` subprocess, the Accessory activation policy and the private-API
-transparency are unverified, and the entire Linux target is compile-checked only.
-
-One local-environment limit worth recording, because it shapes what can be checked here at all.
-**Smart App Control refuses freshly linked executables on the development machine** (`os error
-4551`) — the same policy that refuses the packaged app. It is not, as an earlier version of this
-paragraph claimed, "any edit to `Cargo.toml`": a manifest edit that adds a dependency builds and
-tests fine. What triggers it is a *newly linked binary* that the policy has not seen before, and
-what gets relinked varies — a build script after a manifest change, the bin target's test
-harness, `rustdoc`. Once a given binary has been accepted it keeps working until something
-relinks it.
+That is the **first** development machine, where the policy is enforced. The second has it in
+evaluation mode, where it observes and does not block, which is why the app could be run there at
+all. Evaluation is not a setting anyone chose and Windows may move it in either direction, so this
+paragraph describes a property of a machine, not of the project — and the consequences below were
+measured on the enforcing one.
 
 That claim was wrong and it was load-bearing: it was given as the reason `tauri-plugin-log` could
 not be adopted and the reason no autostart plugin could be added. Both were re-tested. Adding a
@@ -169,22 +200,42 @@ None of these can leak a capture off the machine — the network surface is one 
 that seals the webview is written to allow nothing else *that it directs*. That qualifier is
 load-bearing: the policy sets `default-src`, and `form-action` and `base-uri` do not fall back
 to it, so a page that could inject markup could still aim a form somewhere. Nothing in the app
-renders untrusted HTML, which is why this is a hardening gap rather than a hole. But that policy is itself on the list
-above: it is verified by inspection, not by having ever been enforced. "It starts and works" is
-not among the things this repository can currently demonstrate.
+renders untrusted HTML, which is why this is a hardening gap rather than a hole. The policy has now
+been enforced by a real webview rather than only inspected — the app ran under it — but "enforced
+and nothing broke" is weaker evidence than "observed refusing something", and no gate in this
+repository exercises it. "It starts and works" is a thing this repository can now demonstrate on
+one OS, unpackaged; it is not yet a thing it can demonstrate on three, or from an installer.
 
 ## Known advisories in dependencies
 
-One open advisory, carried knowingly:
+**Zero vulnerabilities. Eighteen advisories**, all carried knowingly: one unsoundness and
+seventeen unmaintained crates.
 
-- **`glib` 0.18.5 — RUSTSEC unsoundness in the `Iterator` and `DoubleEndedIterator` impls for
-  `VariantStrIter`** (moderate). Linux only: `glib` reaches this tree through GTK and WebKitGTK,
-  which Tauri depends on for the Linux webview. It is not resolvable from here — `cargo update -p
-  glib` reports 0.18.5 as the newest compatible release, and the fix is in 0.20, which arrives
-  only when Tauri's GTK stack moves. Shotshelf does not use `VariantStrIter`, directly or
-  transitively through any call it makes; the exposure is that the code is linked in, not that it
-  is reached. It will clear when Tauri updates, and it is listed here rather than dismissed
-  because "a dependency we cannot patch" is exactly the kind of thing that goes unrecorded and
-  then unnoticed.
+This section said "one open advisory" and named only the first of those, which was the
+interesting one but not the whole answer — `cargo audit` reported eighteen the first time anyone
+ran it here. The list now lives in `tests/fixtures/known-advisories.json` and
+`scripts/check-advisories.mjs` holds `cargo audit` to it in both directions, so a new advisory
+fails and a *cleared* one fails too. That second half matters: the glib entry below is documented
+as "it will clear when Tauri updates", and until now nothing was watching for the day it did.
+`.github/workflows/audit.yml` runs it weekly and whenever a lockfile moves.
 
-`npm audit` reports no vulnerabilities in the front-end tree.
+- **`glib` 0.18.5 — RUSTSEC-2024-0429, unsoundness in the `Iterator` and `DoubleEndedIterator`
+  impls for `VariantStrIter`** (moderate). Linux only: `glib` reaches this tree through GTK and
+  WebKitGTK, which Tauri depends on for the Linux webview. It is not resolvable from here —
+  `cargo update -p glib` reports 0.18.5 as the newest compatible release, and the fix is in 0.20,
+  which arrives only when Tauri's GTK stack moves. Shotshelf does not use `VariantStrIter`,
+  directly or transitively through any call it makes; the exposure is that the code is linked in,
+  not that it is reached.
+- **Seventeen unmaintained crates.** Ten are the gtk-rs GTK3 bindings (`gtk`, `gdk`, `atk` and
+  their `-sys` companions), which are unmaintained upstream and arrive the same way `glib` does:
+  Tauri's Linux webview, on the one platform of the three that has never been run. Two are
+  build-time proc-macro helpers (`paste`, `proc-macro-error`) that are not in the shipped binary
+  at all. Five are `unic-*` Unicode tables pulled in transitively. "Unmaintained" is a statement
+  about a crate's future, not a defect in it — none has a known vulnerability, and none is
+  removable from here.
+
+Every one of these reaches the tree through Tauri and clears when Tauri's dependencies move, which
+is what the weekly Dependabot run on the `cargo` ecosystem exists to notice.
+
+`npm audit` reports no vulnerabilities in the front-end tree, production or development, so the
+npm half of that workflow has no accepted list at all and fails on anything above `low`.

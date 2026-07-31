@@ -17,11 +17,15 @@ take and keeps it one drag away — so you never dig through folders for the cli
 
 ---
 
-> **Status: built and gated, not yet run end-to-end.** Every gate below is green on Windows,
-> macOS and Linux, and the front-end suite drives the real UI in a browser — but the packaged
-> app has not been launched on a desktop, because the unsigned development build is refused by
-> Windows Smart App Control on the machine it was written on. What that leaves unverified is
-> named in [SECURITY.md](./SECURITY.md#what-has-not-been-verified). Cross-platform desktop app
+> **Status: built, gated, and run end-to-end on Windows — once, unpackaged.** Every gate below is
+> green on Windows, macOS and Linux, and the front-end suite drives the real UI in a browser. On
+> 2026-07-31 the development build was launched for the first time, on Windows 11, and the whole
+> loop was driven with synthetic captures: a screenshot and a recording caught off disk, an image
+> caught off the clipboard, thumbnails and a poster frame rendered, text recognised on-device, a
+> credential flagged on the card, an annotation drawn and saved, a capture copied to the clipboard
+> and a native drag started. **No installer has been built on any machine, and macOS and Linux
+> have still never run it** — what remains unverified is named in
+> [SECURITY.md](./SECURITY.md#what-has-not-been-verified). Cross-platform desktop app
 > on **Tauri v2**. The catch engine, the corner
 > popover, native drag-out, recordings, settings and packaging are all in — and on top of them:
 > on-device text recognition, a credential warning, a five-tool annotation editor with real
@@ -129,8 +133,13 @@ app-icon.png    icon source; regenerate the set with `npm run tauri icon app-ico
 ```
 
 Most of the per-OS code sits behind `cfg` gates that only the matching host compiles, so CI
-builds all three. Every push to `main` and every pull request runs, on **windows-latest,
-macos-latest and ubuntu-latest**:
+builds all three. Every push to **any branch**, and every pull request from a fork, runs the
+following on **windows-latest, macos-latest and ubuntu-latest**.
+
+That used to be pushes to `main` plus pull requests, which sounds equivalent and is not: this
+branch reached 109 commits with no pull request, so nothing ran on any of them, and its tip
+shipped a **red** `npm run deadcode` for however long it took to notice. A branch is where the
+work happens here, so that is where the gate has to run:
 
 | Gate | What it catches |
 | :-- | :-- |
@@ -142,8 +151,26 @@ macos-latest and ubuntu-latest**:
 | `npm run test:visual` | geometry and computed style everywhere; pixel goldens on Linux |
 | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --lib`, `cargo build` | the Rust half (CI runs `--all-targets`; see below) |
 
-`npm run gate` runs the lot locally, with one stated difference: it runs `cargo test --lib`
-where CI runs `cargo test --all-targets`. Every test this crate has is a `#[cfg(test)] mod` in
+`npm run gate` runs that lot locally, with one stated difference: it runs `cargo test --lib`
+where CI runs `cargo test --all-targets`.
+
+Two more checks exist and are deliberately **not** in either the matrix above or `npm run gate`:
+
+- **`npm run advisories`** holds the RUSTSEC set to `tests/fixtures/known-advisories.json`,
+  failing both on a new advisory and on one that has *cleared* — the second half matters, because
+  `SECURITY.md` says the `glib` entry "will clear when Tauri updates" and nothing was watching for
+  the day it did. It is out of the gate because its answer changes with no commit at all: RUSTSEC
+  publishes on its own schedule, so inside the gate an advisory filed overnight turns every
+  unrelated change red, which is how a check gets ignored and then deleted. It also wants
+  `cargo install cargo-audit --locked` and the network, and the gate is meant to run on a laptop
+  with neither. `.github/workflows/audit.yml` runs it weekly and whenever a lockfile moves.
+- **The smoke checklist in [PARITY](./docs/PARITY.md)**, which is a person running the app for
+  five minutes. Every step in it is something no gate here can reach — drag-out into another
+  application most of all.
+
+`.github/workflows/release.yml` also builds the installers on a weekly schedule now, rather than
+only on a `v*` tag. Nothing had ever run `tauri build` anywhere, so the entire bundling path was
+unexecuted code that would first be exercised on the day someone needed it. Every test this crate has is a `#[cfg(test)] mod` in
 the library, so the coverage is identical today — CI uses the wider form so that an integration
 test under `src-tauri/tests/` would actually be run rather than silently skipped, the day one
 exists. (An earlier version of this paragraph called such a test "the gate `webview_path.rs`
@@ -410,7 +437,8 @@ already-installed apps.
 - [ ] **v0.3** screen recordings (ffmpeg thumbs), settings/persistence, cross-platform parity, packaging
   - [x] recordings — bundled ffmpeg poster frames, duration + size on the tile
   - [x] settings + persistence — retention, item cap, pinning, export sizing, global hotkey
-  - [ ] cross-platform parity pass
+  - [ ] cross-platform parity pass — matrix and smoke checklist in [PARITY](./docs/PARITY.md);
+    the Windows column is filled from a real run, macOS and Linux have never been launched
   - [x] packaging — signed installers, bundled ffmpeg, internal updater, [USAGE](./docs/USAGE.md)
 
 ## 🔐 Privacy — captures never leave your machine
