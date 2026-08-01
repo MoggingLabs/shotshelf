@@ -131,7 +131,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 # `Async::join()` where `src/enrich/ocr.rs` calls `.get()`. Re-take the bump when
 # the Tauri stack moves, and adapt those call sites in the same commit.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",   # rounded window corners
     "Media_Ocr",            # the OS text recogniser
