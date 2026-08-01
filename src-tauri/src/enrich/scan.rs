@@ -227,7 +227,9 @@ fn scan_cache(
     CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
-fn scan_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
+/// Shared with `share::copy_capture_text`: both are OCR jobs, and two OCR
+/// engines is the ceiling whichever door the request came through.
+pub(crate) fn scan_limit() -> &'static std::sync::Arc<tokio::sync::Semaphore> {
     static LIMIT: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
         std::sync::OnceLock::new();
     crate::limits::shared(&LIMIT, crate::limits::SCANNING)

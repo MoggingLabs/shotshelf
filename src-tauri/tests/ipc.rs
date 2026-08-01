@@ -279,12 +279,63 @@ fn the_scope_refuses_a_path_it_was_never_given() {
             "reveal_capture",
             serde_json::json!({ "path": path.clone() }),
         ),
+        (
+            "copy_capture_text",
+            serde_json::json!({ "path": path.clone() }),
+        ),
     ] {
         assert!(
             invoke(&window, command, body).is_err(),
             "{command} read a path the scope never admitted",
         );
     }
+}
+
+#[test]
+fn the_new_settings_fields_cross_the_boundary_normalised_and_tolerated() {
+    // Two properties only this path can show. A misspelled corner is put back
+    // to the default *by the command*, not merely by the helper its unit tests
+    // call. And `startAtLogin` flowing through an app with no autostart plugin
+    // — which is exactly what this mock is — answers instead of panicking,
+    // because the tolerance in `autostart::apply` is what keeps a settings
+    // save testable at all.
+    let (_app, window) = app();
+
+    let stored = invoke(
+        &window,
+        "set_settings",
+        serde_json::json!({ "settings": {
+            "maxItems": 50,
+            "retentionHours": serde_json::Value::Null,
+            "hotkey": shotshelf_lib::settings::DEFAULT_HOTKEY,
+            "checkForUpdates": true,
+            "downscaleExports": false,
+            "dockCorner": "under-the-desk",
+            "dockMonitor": "the-neighbour's",
+            "startAtLogin": true,
+            "pinned": [],
+        }}),
+    )
+    .expect("set_settings answers with the plugin absent");
+
+    assert_eq!(
+        stored.get("dockCorner").and_then(serde_json::Value::as_str),
+        Some("bottom-right"),
+        "an unknown corner crossed the boundary unnormalised: {stored}",
+    );
+    assert_eq!(
+        stored
+            .get("dockMonitor")
+            .and_then(serde_json::Value::as_str),
+        Some("primary"),
+    );
+    assert_eq!(
+        stored
+            .get("startAtLogin")
+            .and_then(serde_json::Value::as_bool),
+        Some(true),
+        "the stored choice must survive even where no launcher exists to apply it",
+    );
 }
 
 #[test]

@@ -171,6 +171,9 @@ export function installTauriMock(EVENTS: WindowEvents): void {
     "forget_video": null,
     "copy_capture": null,
     "reveal_capture": null,
+    // Read, and there was text — the ordinary case; a spec that wants the
+    // no-text answer stubs `false`.
+    "copy_capture_text": true,
     // Read, and nothing found — the ordinary case.
     "describe_capture": { secrets: [], scanned: true },
     ...(window.__shotshelfStubs__ ?? {}),

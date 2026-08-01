@@ -82,6 +82,16 @@ export async function revealCapture(path: string): Promise<void> {
   await invoke("reveal_capture", { path });
 }
 
+/**
+ * Recognise the text in a capture and put it on the clipboard, all in Rust.
+ *
+ * `false` means "read it, and there was no text" — a different sentence from a
+ * failure, which rejects. The text itself never crosses this boundary.
+ */
+export function copyCaptureText(path: string): Promise<boolean> {
+  return invoke<boolean>("copy_capture_text", { path });
+}
+
 /** Stage a capture for a native drag. Rejects — a failed drag must be visible. */
 export function prepareDrag(path: string, kind: CaptureKind): Promise<DragSource> {
   return invoke<DragSource>("prepare_drag", { path, kind });

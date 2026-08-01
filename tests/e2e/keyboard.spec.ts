@@ -120,6 +120,56 @@ test("enter copies the picked capture", async ({ page }) => {
     .toBe(1);
 });
 
+test("t copies the recognised text of the picked capture, and says so", async ({ page }) => {
+  await threeOpen(page);
+  await page.keyboard.press("ArrowDown");
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.keyboard.press("t");
+
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("copy_capture_text").length))
+    .toBe(1);
+  // The keyboard has no button to flash, so the strip is the receipt.
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+  await expect(page.locator("#shelf-alert")).toContainText("copied");
+});
+
+test("a capture with no text in it is answered, not apologised for", async ({ page }) => {
+  await threeOpen(page);
+  await page.evaluate(() => window.__shotshelf__.respond("copy_capture_text", false));
+  await page.keyboard.press("ArrowDown");
+
+  await page.keyboard.press("t");
+
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+  await expect(page.locator("#shelf-alert")).toContainText("No text");
+});
+
+test("p pins the picked capture from the keyboard", async ({ page }) => {
+  await threeOpen(page);
+  await page.keyboard.press("ArrowDown");
+
+  await page.keyboard.press("p");
+  await expect(page.locator(".tile--pinned")).toHaveCount(1);
+
+  // A toggle, both ways — half a toggle is a one-way door.
+  await page.keyboard.press("p");
+  await expect(page.locator(".tile--pinned")).toHaveCount(0);
+});
+
+test("o shows the picked capture in its folder from the keyboard", async ({ page }) => {
+  await threeOpen(page);
+  await page.keyboard.press("ArrowDown");
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.keyboard.press("o");
+
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("reveal_capture").length))
+    .toBe(1);
+});
+
 test("delete takes it off the shelf without touching the file", async ({ page }) => {
   await threeOpen(page);
   await page.keyboard.press("ArrowDown");
@@ -277,7 +327,7 @@ test("backspace takes it off the shelf, the same as delete", async ({ page }) =>
 });
 
 test("each settings control writes the field it is labelled for", async ({ page }) => {
-  // Three of the four controls had no gate at all.
+  // Three of the original four controls had no gate at all.
   //
   // Only `#setting-max` was ever driven by a spec, so the readers behind
   // "Keep for", "Send smaller copies" and the hotkey field could be rewritten
@@ -287,7 +337,7 @@ test("each settings control writes the field it is labelled for", async ({ page 
   // `bootShelf`, so they gate the sweep *reading* its limits and not the
   // control the user actually touches.
   //
-  // One test for all four, driven through the real panel, asserting on what
+  // One test for every control, driven through the real panel, asserting on what
   // reaches `set_settings` — which is the boundary a wrong reader crosses.
   await threeOpen(page);
   // Echo the patch back, the way Rust does. Without this the mock answers with
@@ -326,4 +376,21 @@ test("each settings control writes the field it is labelled for", async ({ page 
   await page.locator("#setting-hotkey").fill("  CommandOrControl+Shift+K  ");
   await page.locator("#setting-hotkey").dispatchEvent("change");
   expect((await saved())["hotkey"]).toBe("CommandOrControl+Shift+K");
+
+  // Every corner option, not one: the option values are the join with Rust's
+  // DOCK_CORNERS, and the option most likely to drift is the one no test
+  // selects. Same for the two monitors.
+  for (const corner of ["bottom-left", "top-right", "top-left", "bottom-right"]) {
+    await page.locator("#setting-corner").selectOption(corner);
+    expect((await saved())["dockCorner"]).toBe(corner);
+  }
+  for (const monitor of ["cursor", "primary"]) {
+    await page.locator("#setting-monitor").selectOption(monitor);
+    expect((await saved())["dockMonitor"]).toBe(monitor);
+  }
+
+  await page.locator("#setting-autostart").check();
+  expect((await saved())["startAtLogin"]).toBe(true);
+  await page.locator("#setting-autostart").uncheck();
+  expect((await saved())["startAtLogin"]).toBe(false);
 });

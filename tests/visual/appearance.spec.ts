@@ -74,7 +74,7 @@ test.describe("appearance", () => {
   });
 
   test("the settings panel", async ({ page }) => {
-    // Four controls, and their layout is the only place the app asks the user
+    // Seven controls, and their layout is the only place the app asks the user
     // for anything.
     await bootShelf(page);
     await openBrowse(page);

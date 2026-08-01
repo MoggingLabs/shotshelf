@@ -24,6 +24,7 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         crate::catch::catch_backfill,
         crate::share::prepare_drag,
         crate::share::copy_capture,
+        crate::share::copy_capture_text,
         crate::share::reveal_capture,
         crate::enrich::scan::describe_capture,
         crate::edit::compare_captures,

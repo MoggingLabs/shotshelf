@@ -39,6 +39,7 @@ import {
   browseShelf,
   compareCaptures,
   copyCapture,
+  copyCaptureText,
   forgetVideo,
   revealCapture,
   setCaptureCount,
@@ -662,6 +663,53 @@ export class Shelf {
     void this.copy(item.id).catch(() => {
       // Already reported through `onProblem`; the keyboard has no button to
       // flash, so there is nothing further to do here.
+    });
+  }
+
+  /**
+   * Put the recognised text of the picked capture on the clipboard.
+   *
+   * Every outcome is said out loud: the keyboard has no button to flash, so
+   * the strip is the only receipt a `t` press gets. "No text" is worded as an
+   * answer, not an apology — the capture was read and that is what it held.
+   */
+  copyPickedText(): void {
+    const [item] = this.#pickedItems();
+    if (!item) return;
+    if (item.kind !== "image") {
+      this.#options.onProblem("A recording's text cannot be read.");
+      return;
+    }
+
+    void copyCaptureText(item.path)
+      .then((found) => {
+        this.#options.onProblem(
+          found ? "Text copied to the clipboard." : "No text was found in that capture.",
+        );
+      })
+      .catch((error: unknown) => {
+        console.error("[shotshelf] could not copy recognised text", error);
+        this.#options.onProblem("That capture's text could not be read.");
+      });
+  }
+
+  /** Toggle the pin on every picked capture — `p`'s whole job. */
+  togglePinPicked(): void {
+    for (const item of this.#pickedItems()) this.#togglePin(item.id);
+  }
+
+  /**
+   * Show the picked capture's file in the file manager — `o`'s whole job.
+   *
+   * The most recent picked capture only: several picked would mean several
+   * file-manager windows, which is a punishment, not a feature. `#pickedItems`
+   * is oldest-first, so the last entry is the newest.
+   */
+  revealPicked(): void {
+    const item = this.#pickedItems().at(-1);
+    if (!item) return;
+    void this.reveal(item.id).catch(() => {
+      // Reported through `onProblem` by `reveal` itself.
     });
   }
 

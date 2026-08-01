@@ -155,6 +155,23 @@ document.addEventListener("keydown", (event) => {
       shelf.editPicked();
       return;
 
+    case "t":
+      // The text in the picked capture, onto the clipboard — the OCR the
+      // credential scan already runs, finally answering to the keyboard.
+      event.preventDefault();
+      shelf.copyPickedText();
+      return;
+
+    case "p":
+      event.preventDefault();
+      shelf.togglePinPicked();
+      return;
+
+    case "o":
+      event.preventDefault();
+      shelf.revealPicked();
+      return;
+
     case "ArrowDown":
     case "ArrowUp":
       event.preventDefault();

@@ -13,9 +13,16 @@ use crate::window;
 
 pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let toggle = MenuItem::with_id(app, "toggle", "Show / Hide shelf", true, None::<&str>)?;
+    let folder = MenuItem::with_id(
+        app,
+        "open-folder",
+        "Open captures folder",
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, "quit", "Quit Shotshelf", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&toggle, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&toggle, &folder, &separator, &quit])?;
 
     // Windows/Linux show the full-colour app icon; macOS gets a monochrome
     // glyph so it can be drawn as a template image (see below).
@@ -39,6 +46,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "toggle" => window::toggle(app),
+            "open-folder" => open_captures_folder(app),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -46,9 +54,10 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         // there even though the icon shows. Everything below is Windows/macOS
         // in practice; Linux drives the shelf from the menu above.
         .on_tray_icon_event(|tray, event| {
-            // Nothing here needs the icon's rectangle: the shelf rests in the
-            // bottom-right corner of the screen rather than hanging off the
-            // icon, so the click is all this handler wants.
+            // Nothing here needs the icon's rectangle: the shelf parks in the
+            // corner the `dockCorner` setting names (bottom-right by default)
+            // rather than hanging off the icon, so the click is all this
+            // handler wants.
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
@@ -67,6 +76,42 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     tray.build(app)?;
 
     Ok(())
+}
+
+/// Open the first watched capture folder in the OS file manager.
+///
+/// The shelf shows the last fifty; the folder holds everything, and "where do
+/// my screenshots actually live" should not require reading a log. The *first*
+/// resolved watch directory is the platform's primary screenshots location on
+/// every OS — the resolvers put it first on purpose.
+///
+/// Through `catch_watch_dirs` rather than a private accessor: it is already
+/// `pub`, already answers from an `AppHandle`, and already has the one honest
+/// failure — clicked before the engine has resolved anything, it says
+/// "still starting", which lands in the log rather than the void. A plain
+/// function, not a command: nothing in the webview calls this, and
+/// `check-commands.mjs` would rightly refuse a registered command no one
+/// invokes.
+fn open_captures_folder<R: Runtime>(app: &AppHandle<R>) {
+    let dirs = match crate::catch::catch_watch_dirs(app.clone()) {
+        Ok(watching) => watching.dirs,
+        Err(err) => {
+            crate::diag::warn(&format!("could not open the captures folder: {err}"));
+            return;
+        }
+    };
+    let Some(first) = dirs.into_iter().next() else {
+        crate::diag::warn("no capture folder is being watched; nothing to open");
+        return;
+    };
+
+    // Off the event loop: `opener` spawns and, on some platforms, waits on a
+    // process — same reasoning as `share::reveal_capture`.
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(err) = opener::open(&first) {
+            crate::diag::warn(&format!("could not open {first}: {err}"));
+        }
+    });
 }
 
 /// The shelf is hidden most of the time, so the tray icon is where the count

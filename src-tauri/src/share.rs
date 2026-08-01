@@ -139,6 +139,61 @@ pub async fn reveal_capture<R: Runtime>(app: AppHandle<R>, path: String) -> Resu
     .map_err(|err| format!("the reveal worker died: {err}"))?
 }
 
+/// Put the text *in* a capture on the clipboard, recognised on this machine.
+///
+/// The OCR already runs on every image for the credential scan and its output
+/// is deliberately discarded — `enrich` never lets recognised text cross the
+/// wire or sit in a cache, and this command keeps that invariant: the text goes
+/// straight from the recogniser to the clipboard in Rust and is returned to the
+/// webview as a *bool*, never as the text itself. Re-recognising per press is
+/// the price of that, paid under the same two-engine semaphore as the scan.
+///
+/// `Ok(false)` is "read it, found no text", which the shelf words differently
+/// from a failure — a whitespace-only page is trimmed down to that same answer
+/// rather than putting an empty string on the clipboard and calling it a copy.
+#[tauri::command]
+pub async fn copy_capture_text<R: Runtime>(
+    app: AppHandle<R>,
+    sink: State<'_, Arc<CaptureSink>>,
+    path: String,
+) -> Result<bool, String> {
+    let source = existing_file(&app, &path)?;
+
+    let named = source
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let for_worker = source.clone();
+    let text = crate::limits::under_limit(
+        crate::enrich::scan::scan_limit().clone(),
+        crate::limits::SCAN_TIMEOUT,
+        &named,
+        move || crate::enrich::ocr::recognise(&for_worker),
+    )
+    .await?
+    .ok_or_else(|| "text recognition is not available for that capture".to_owned())?;
+
+    if text.trim().is_empty() {
+        return Ok(false);
+    }
+
+    // Armed even though a *text* write can never become a shelved capture —
+    // the monitor wakes on every clipboard change and consumes the standing
+    // marker unconditionally, so an unarmed text write would steal the marker
+    // a concurrent image copy had just armed, and that image would be shelved
+    // twice. Arming our own means our wake eats ours.
+    let clipboard = app.state::<Clipboard>();
+    sink.expect_own_clipboard_write(OWN_WRITE_WINDOW);
+    clipboard.write_text(text).map_err(|err| {
+        sink.cancel_own_clipboard_write();
+        crate::diag::warn(&format!("could not copy recognised text: {err}"));
+        "the text could not be put on the clipboard".to_owned()
+    })?;
+
+    Ok(true)
+}
+
 /// Clipboard fallback, for the apps that will take a paste but not a drop.
 ///
 /// Same shape as `prepare_drag`: the decode/resize/encode runs on a blocking
