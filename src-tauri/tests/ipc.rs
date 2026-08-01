@@ -59,7 +59,14 @@ fn app() -> (
     // ceiling passed because the cap was still 50 and the command had never
     // run. Never the user's real settings file — that is what the process id
     // in the name is for.
-    let scratch = std::env::temp_dir().join(format!("shotshelf-ipc-{}", std::process::id()));
+    //
+    // And a counter as well as the pid, because tests share the process. The
+    // day a second test wrote settings, two stores pointed at one file and
+    // their atomic renames raced — red once on macOS CI and once locally,
+    // green on every rerun, which is the signature worth writing down.
+    static APPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = APPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let scratch = std::env::temp_dir().join(format!("shotshelf-ipc-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&scratch).expect("the scratch directory is created");
     app.manage(shotshelf_lib::settings::load_from(
         Some(scratch.join("settings.json")),
