@@ -68,12 +68,41 @@ pub struct Settings {
     /// Ask the release feed whether a newer build exists, at launch.
     ///
     /// On by default, and the only network call the app makes. Off means the
-    /// app opens no socket at all. Hand-edited only — the panel offers four
+    /// app opens no socket at all. Hand-edited only — the panel offers seven
     /// controls and this is not among them, which `docs/USAGE.md` says and these
     /// two docstrings used to contradict.
     pub check_for_updates: bool,
+    /// Which screen corner the popover docks to. One of [`DOCK_CORNERS`];
+    /// anything else is put back to the default by `sanitise`.
+    ///
+    /// A string rather than an enum, deliberately: this file is meant to be
+    /// hand-edited, and a serde enum turns one misspelled value into a parse
+    /// failure for the *whole* file — which the loader treats as corruption and
+    /// quarantines. A misspelled corner should cost the corner, not the
+    /// settings. (The field is not named `edge`: a retired pre-popover setting
+    /// used that name, and `keys_from_an_older_version_are_ignored_rather_than_fatal`
+    /// feeds it as an unknown key that must stay unknown.)
+    pub dock_corner: String,
+    /// Which monitor the corner is on: `"primary"`, or `"cursor"` for the one
+    /// the pointer is on when the shelf appears. Same string-not-enum reasoning
+    /// as [`Settings::dock_corner`], and not named `monitor` for the same
+    /// retired-key reason.
+    pub dock_monitor: String,
+    /// Register Shotshelf to start when you log in.
+    ///
+    /// Off by default — an app that adds itself to startup unasked is a bad
+    /// neighbour, which is why this exists as an explicit choice at all. It
+    /// lives in the roaming half on purpose: opting in is a statement about
+    /// your account, not about one machine, so `lib.rs` reconciles the OS
+    /// login-item to this value at launch wherever you log in.
+    pub start_at_login: bool,
     pub pinned: Vec<PinnedItem>,
 }
+
+/// The corners the popover can dock to. First entry is the default.
+pub const DOCK_CORNERS: [&str; 4] = ["bottom-right", "bottom-left", "top-right", "top-left"];
+/// Which monitor carries the corner. First entry is the default.
+pub const DOCK_MONITORS: [&str; 2] = ["primary", "cursor"];
 
 impl Default for Settings {
     fn default() -> Self {
@@ -83,6 +112,9 @@ impl Default for Settings {
             hotkey: DEFAULT_HOTKEY.to_owned(),
             downscale_exports: false,
             check_for_updates: true,
+            dock_corner: DOCK_CORNERS[0].to_owned(),
+            dock_monitor: DOCK_MONITORS[0].to_owned(),
+            start_at_login: false,
             pinned: Vec::new(),
         }
     }
@@ -705,6 +737,14 @@ fn sanitise(mut settings: Settings) -> Settings {
         .filter(|hours| hours.is_finite() && *hours > 0.0);
     if settings.hotkey.trim().is_empty() {
         settings.hotkey = DEFAULT_HOTKEY.to_owned();
+    }
+    // A misspelled corner costs the corner, not the file — the reason these
+    // are strings rather than serde enums is written on the fields themselves.
+    if !DOCK_CORNERS.contains(&settings.dock_corner.as_str()) {
+        settings.dock_corner = DOCK_CORNERS[0].to_owned();
+    }
+    if !DOCK_MONITORS.contains(&settings.dock_monitor.as_str()) {
+        settings.dock_monitor = DOCK_MONITORS[0].to_owned();
     }
     settings
 }
@@ -1526,6 +1566,8 @@ mod tests {
             max_items: 100_000,
             retention_hours: Some(-4.0),
             hotkey: "   ".to_owned(),
+            dock_corner: "under-the-desk".to_owned(),
+            dock_monitor: "the-neighbour's".to_owned(),
             ..Settings::default()
         };
 
@@ -1539,6 +1581,25 @@ mod tests {
             safe.hotkey, DEFAULT_HOTKEY,
             "an empty shortcut is no shortcut"
         );
+        // The whole reason these are strings: a misspelling costs the corner,
+        // not the file. And every *valid* spelling must survive, or the panel's
+        // furthest option would quietly snap back to the default.
+        assert_eq!(safe.dock_corner, "bottom-right");
+        assert_eq!(safe.dock_monitor, "primary");
+        for corner in DOCK_CORNERS {
+            let kept = sanitise(Settings {
+                dock_corner: corner.to_owned(),
+                ..Settings::default()
+            });
+            assert_eq!(kept.dock_corner, corner, "a valid corner was rewritten");
+        }
+        for monitor in DOCK_MONITORS {
+            let kept = sanitise(Settings {
+                dock_monitor: monitor.to_owned(),
+                ..Settings::default()
+            });
+            assert_eq!(kept.dock_monitor, monitor, "a valid monitor was rewritten");
+        }
     }
 
     #[test]
@@ -1576,7 +1637,22 @@ pub fn set_settings<R: Runtime>(
         crate::hotkey::rebind(&app, &previous.hotkey, &candidate.hotkey)?;
     }
 
-    store.replace(candidate)
+    // Same rule as the hotkey: the OS must have taken the login item before the
+    // file says it is on. A refusal surfaces in the panel note rather than
+    // silently storing a wish.
+    if candidate.start_at_login != previous.start_at_login {
+        crate::autostart::apply(&app, candidate.start_at_login)?;
+    }
+
+    let stored = store.replace(candidate)?;
+
+    // A corner change should be visible now, not on the next open. After the
+    // store, so a re-place that fails cannot roll back a save that succeeded.
+    if stored.dock_corner != previous.dock_corner || stored.dock_monitor != previous.dock_monitor {
+        crate::window::reposition(&app);
+    }
+
+    Ok(stored)
 }
 
 #[tauri::command]

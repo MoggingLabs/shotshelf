@@ -69,6 +69,9 @@ const settings: Settings = {
   hotkey: "",
   downscaleExports: false,
   checkForUpdates: false,
+  dockCorner: "bottom-right",
+  dockMonitor: "primary",
+  startAtLogin: false,
   pinned: [],
 };
 const videoDetails: VideoDetails = { poster: null, durationMs: null, bytes: 0 };

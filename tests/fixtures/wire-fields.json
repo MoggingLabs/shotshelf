@@ -12,6 +12,9 @@
     "hotkey",
     "downscaleExports",
     "checkForUpdates",
+    "dockCorner",
+    "dockMonitor",
+    "startAtLogin",
     "pinned"
   ],
   "VideoDetails": ["poster", "durationMs", "bytes"],

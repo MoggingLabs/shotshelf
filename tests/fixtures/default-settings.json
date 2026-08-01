@@ -4,5 +4,8 @@
   "hotkey": "CommandOrControl+Shift+S",
   "downscaleExports": false,
   "checkForUpdates": true,
+  "dockCorner": "bottom-right",
+  "dockMonitor": "primary",
+  "startAtLogin": false,
   "pinned": []
 }

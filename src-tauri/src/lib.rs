@@ -10,6 +10,7 @@
 //! never leave the machine — this used to claim no network plugin was
 //! registered at all, forty-nine lines above the line registering one.
 
+mod autostart;
 mod cache;
 mod catch;
 // `pub` so `tests/ipc.rs` drives the *same* command list the app registers,
@@ -82,7 +83,13 @@ pub fn run() {
         .plugin(tauri_plugin_drag::init()) // native drag-out to other apps
         .plugin(tauri_plugin_shell::init()) // runs the bundled ffmpeg sidecar
         .plugin(tauri_plugin_global_shortcut::Builder::new().build()) // show/hide hotkey
-        .plugin(tauri_plugin_updater::Builder::new().build()) // internal release feed
+        .plugin(tauri_plugin_updater::Builder::new().build()) // the release feed — one request, install nothing
+        // The login item. LaunchAgent rather than AppleScript on macOS — the
+        // modern registration, and the one that needs no automation consent.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             // macOS: `skipTaskbar` is Windows/Linux only. The Accessory
             // activation policy is what keeps Shotshelf out of the Dock and
@@ -100,6 +107,11 @@ pub fn run() {
             let stored = settings::load(app.handle());
             let current = stored.get();
             app.manage(stored);
+
+            // The login item follows the account: `startAtLogin` roams, the OS
+            // registration does not, and this is where a roamed choice takes
+            // effect on a machine seeing it for the first time.
+            autostart::reconcile(app.handle(), current.start_at_login);
 
             // No scope grant from the stored pin list, deliberately.
             //

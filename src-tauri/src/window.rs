@@ -153,28 +153,51 @@ fn attempt<T>(what: &str, outcome: tauri::Result<T>) {
 /// How far the popover sits from the corner it rests in.
 const SCREEN_MARGIN: f64 = 12.0;
 
-/// Park the popover in the bottom-right corner of the screen.
+/// The corner the popover docks to, parsed from the settings string.
 ///
-/// Measured against the monitor's **work area**, not its full size: the taskbar
-/// lives in the difference between the two, and a window placed against the
-/// real bottom edge disappears behind it. This is also why the placement is
-/// done here rather than with `tauri-plugin-positioner` — its `BottomRight`
-/// works off `monitor.size()`, so it would tuck the shelf under the taskbar.
-///
-/// `size` is the logical size the caller has just asked for, rather than
-/// anything read back off the window. A resize has not necessarily reached the
-/// OS by the time this runs, so querying `outer_size()` here would place the
-/// window using its previous shape.
-fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
-    // The primary monitor is where the taskbar and the tray icon live, so it is
-    // the screen "the bottom-right corner" means, whatever monitor the window
-    // happened to be on last.
-    let Some(monitor) = monitor_for(shelf) else {
-        return;
-    };
+/// The parse lives here rather than in `settings.rs` because the corner is a
+/// *placement* concept: settings owns the storage and the sanitising (an
+/// unknown spelling has already been put back to the default by the time this
+/// runs), and this module owns what a corner means in pixels. Anything
+/// unrecognised — which `sanitise` makes unreachable, but a hand-built
+/// `Settings` in a test is not sanitised — falls back to bottom-right.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Corner {
+    BottomRight,
+    BottomLeft,
+    TopRight,
+    TopLeft,
+}
 
-    let scale = monitor.scale_factor();
-    let area = monitor.work_area();
+impl Corner {
+    fn from_setting(value: &str) -> Self {
+        match value {
+            "bottom-left" => Self::BottomLeft,
+            "top-right" => Self::TopRight,
+            "top-left" => Self::TopLeft,
+            _ => Self::BottomRight,
+        }
+    }
+}
+
+/// The physical origin that parks a window of `size` in `corner` of `area`.
+///
+/// Pure, so the arithmetic that decides whether the shelf lands on screen at
+/// all is finally testable — `place` had no test of any kind while carrying
+/// exactly the saturating-cast subtleties the comments below describe.
+///
+/// Far corners are `far edge − (extent + margin)`; near corners are
+/// `position + margin`. The growth direction falls out for free: a bottom
+/// corner's `y` depends on the height, so a taller column moves *up* to keep
+/// its bottom edge; a top corner's `y` does not, so it grows *down*. No caller
+/// needs to know which — the front end only ever sends a height.
+fn corner_origin(
+    area_position: (i32, i32),
+    area_size: (u32, u32),
+    scale: f64,
+    size: (f64, f64),
+    corner: Corner,
+) -> (i32, i32) {
     // Saturating, not wrapping, and the difference is where the window lands.
     //
     // These are the casts `Cargo.toml`'s lint block names as its motivating
@@ -203,10 +226,57 @@ fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
     // fed into a plain `-`, which panics on overflow in a debug build — and
     // `gate:rust` builds debug. A saturating pair consumed by an unchecked
     // subtraction does not deliver what the paragraph above promises.
-    let x =
-        edge(area.position.x, area.size.width).saturating_sub(to_physical(size.0 + SCREEN_MARGIN));
-    let y =
-        edge(area.position.y, area.size.height).saturating_sub(to_physical(size.1 + SCREEN_MARGIN));
+    let far_x =
+        edge(area_position.0, area_size.0).saturating_sub(to_physical(size.0 + SCREEN_MARGIN));
+    let far_y =
+        edge(area_position.1, area_size.1).saturating_sub(to_physical(size.1 + SCREEN_MARGIN));
+    let near_x = area_position.0.saturating_add(to_physical(SCREEN_MARGIN));
+    let near_y = area_position.1.saturating_add(to_physical(SCREEN_MARGIN));
+
+    match corner {
+        Corner::BottomRight => (far_x, far_y),
+        Corner::BottomLeft => (near_x, far_y),
+        Corner::TopRight => (far_x, near_y),
+        Corner::TopLeft => (near_x, near_y),
+    }
+}
+
+/// Park the popover in its corner of the screen — bottom-right unless the
+/// `dockCorner` setting says otherwise.
+///
+/// Measured against the monitor's **work area**, not its full size: the taskbar
+/// lives in the difference between the two, and a window placed against the
+/// real bottom edge disappears behind it. This is also why the placement is
+/// done here rather than with `tauri-plugin-positioner` — its corner positions
+/// work off `monitor.size()`, so they would tuck the shelf under the taskbar.
+///
+/// `size` is the logical size the caller has just asked for, rather than
+/// anything read back off the window. A resize has not necessarily reached the
+/// OS by the time this runs, so querying `outer_size()` here would place the
+/// window using its previous shape.
+fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
+    let Some(monitor) = monitor_for(shelf) else {
+        return;
+    };
+
+    // Absent state means a test's bare mock app, not a missing setting — the
+    // real app manages the store before any window shows.
+    let corner = shelf
+        .app_handle()
+        .try_state::<crate::settings::SettingsStore>()
+        .map_or(Corner::BottomRight, |store| {
+            Corner::from_setting(&store.get().dock_corner)
+        });
+
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    let (x, y) = corner_origin(
+        (area.position.x, area.position.y),
+        (area.size.width, area.size.height),
+        scale,
+        size,
+        corner,
+    );
 
     // On Linux this cannot fail and may not happen. `tao`'s GTK
     // `set_outer_position` returns `()` and only posts a request, which
@@ -220,6 +290,36 @@ fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
     }
 }
 
+/// Re-park a visible shelf at its current size.
+///
+/// The one caller is `set_settings`, after a corner or monitor change: the
+/// window should move now, not on its next open. Reading the size back off the
+/// window is safe *here* — nothing has asked for a resize, so `outer_size` is
+/// not racing one — which is exactly the situation `place`'s docstring warns
+/// its own callers away from.
+pub fn reposition<R: Runtime>(app: &AppHandle<R>) {
+    let Some(shelf) = app.get_webview_window(SHELF) else {
+        return;
+    };
+    if !shelf.is_visible().unwrap_or(false) {
+        return;
+    }
+    let scale = match shelf.scale_factor() {
+        Ok(scale) if scale > 0.0 => scale,
+        _ => 1.0,
+    };
+    let Ok(size) = shelf.outer_size() else {
+        return;
+    };
+    place(
+        &shelf,
+        (
+            f64::from(size.width) / scale,
+            f64::from(size.height) / scale,
+        ),
+    );
+}
+
 /// The monitor to place against: the primary one, or whatever the window is on.
 ///
 /// `Result::or_else` only fires on `Err`, and "there is no primary monitor" is
@@ -231,6 +331,20 @@ fn place<R: Runtime>(shelf: &WebviewWindow<R>, size: (f64, f64)) {
 /// `mark_opened`, so on Wayland the quick look did nothing at all, silently;
 /// `place` returned before positioning, so the shelf never reached its corner.
 fn monitor_for<R: Runtime>(shelf: &WebviewWindow<R>) -> Option<tauri::Monitor> {
+    // "The monitor my cursor is on", when asked for. Every failure on this
+    // path — no cursor position (Wayland has no global one), no monitor
+    // containing it, no settings state — falls through to the primary chain
+    // below, because a shelf on the wrong screen beats no shelf at all.
+    let wants_cursor = shelf
+        .app_handle()
+        .try_state::<crate::settings::SettingsStore>()
+        .is_some_and(|store| store.get().dock_monitor == "cursor");
+    if wants_cursor {
+        if let Some(monitor) = monitor_under_cursor(shelf) {
+            return Some(monitor);
+        }
+    }
+
     match shelf.primary_monitor() {
         Ok(Some(monitor)) => return Some(monitor),
         Ok(None) => {}
@@ -254,6 +368,27 @@ fn monitor_for<R: Runtime>(shelf: &WebviewWindow<R>) -> Option<tauri::Monitor> {
             None
         }
     }
+}
+
+/// The monitor the pointer is currently on, if that can be known.
+///
+/// Containment is tested against the monitor's full bounds rather than its
+/// work area: a cursor hovering the taskbar is still on that monitor. Quiet on
+/// failure — the caller has a stated fallback, and "could not read the cursor"
+/// on every open would be noise about a setting working as documented.
+fn monitor_under_cursor<R: Runtime>(shelf: &WebviewWindow<R>) -> Option<tauri::Monitor> {
+    let cursor = shelf.cursor_position().ok()?;
+    let monitors = shelf.available_monitors().ok()?;
+    monitors.into_iter().find(|monitor| {
+        let position = monitor.position();
+        let size = monitor.size();
+        let right = f64::from(position.x) + f64::from(size.width);
+        let bottom = f64::from(position.y) + f64::from(size.height);
+        cursor.x >= f64::from(position.x)
+            && cursor.x < right
+            && cursor.y >= f64::from(position.y)
+            && cursor.y < bottom
+    })
 }
 
 /// The two shapes the popover takes.
@@ -751,5 +886,117 @@ mod tests {
         assert_eq!(window["label"].as_str(), Some(SHELF));
         assert_eq!(window["width"].as_f64(), Some(BROWSE_SIZE.0));
         assert_eq!(window["height"].as_f64(), Some(BROWSE_SIZE.1));
+    }
+
+    /// A 1920×1032 work area at scale 1 — the shape the app was actually
+    /// measured against on the machine that first ran it.
+    const AREA: ((i32, i32), (u32, u32)) = ((0, 0), (1920, 1032));
+
+    #[test]
+    fn each_corner_parks_the_window_where_the_corner_says() {
+        // The geometry that decides whether the shelf lands on screen at all
+        // had no test while it was one hard-coded corner; four corners is four
+        // ways for a sign error to put it off screen. 225×420 browse window,
+        // 12px margin: far edges are area minus (extent + 12), near edges are
+        // 12 in from the origin.
+        let size = (225.0, 420.0);
+
+        let cases = [
+            (Corner::BottomRight, (1920 - 237, 1032 - 432)),
+            (Corner::BottomLeft, (12, 1032 - 432)),
+            (Corner::TopRight, (1920 - 237, 12)),
+            (Corner::TopLeft, (12, 12)),
+        ];
+        for (corner, expected) in cases {
+            assert_eq!(
+                corner_origin(AREA.0, AREA.1, 1.0, size, corner),
+                expected,
+                "{corner:?} parked the window somewhere else",
+            );
+        }
+    }
+
+    #[test]
+    fn growth_direction_follows_the_corner() {
+        // The column growing a card at a time is the one behaviour that
+        // depends on which coordinate tracks the height: a bottom corner must
+        // move *up* as the column grows (fixed bottom edge), a top corner must
+        // not move at all (fixed top edge, growing down). This is the property
+        // the peek comment promises, generalised.
+        let short = corner_origin(AREA.0, AREA.1, 1.0, (225.0, 138.0), Corner::BottomRight);
+        let tall = corner_origin(AREA.0, AREA.1, 1.0, (225.0, 378.0), Corner::BottomRight);
+        assert!(
+            tall.1 < short.1,
+            "a taller bottom-docked column must move up"
+        );
+        assert_eq!(short.1 + 138, tall.1 + 378, "the bottom edge must not move");
+
+        let short = corner_origin(AREA.0, AREA.1, 1.0, (225.0, 138.0), Corner::TopLeft);
+        let tall = corner_origin(AREA.0, AREA.1, 1.0, (225.0, 378.0), Corner::TopLeft);
+        assert_eq!(
+            short, tall,
+            "a top-docked column grows down from a fixed origin"
+        );
+    }
+
+    #[test]
+    fn scale_factor_reaches_both_margin_and_extent() {
+        // At 200% DPI the 12px logical margin is 24 physical pixels, and the
+        // 225-wide window is 450. A corner that scaled one and not the other
+        // would drift by exactly the unscaled half — visible on every high-DPI
+        // laptop, caught by no other test.
+        let (x, y) = corner_origin(AREA.0, AREA.1, 2.0, (225.0, 420.0), Corner::BottomRight);
+        assert_eq!((x, y), (1920 - 2 * 237, 1032 - 2 * 432));
+
+        let (x, y) = corner_origin(AREA.0, AREA.1, 2.0, (225.0, 420.0), Corner::TopLeft);
+        assert_eq!((x, y), (24, 24));
+    }
+
+    #[test]
+    fn an_unhinged_monitor_layout_saturates_rather_than_wrapping() {
+        // The saturating arithmetic predates the corners and its promise must
+        // survive them: a NaN size places at the near edge rather than
+        // panicking, and an extent past i32::MAX clamps rather than wrapping
+        // into a negative coordinate.
+        let (x, _) = corner_origin(
+            (0, 0),
+            (u32::MAX, 1032),
+            1.0,
+            (f64::NAN, 420.0),
+            Corner::BottomRight,
+        );
+        assert_eq!(x, i32::MAX);
+
+        let (x, y) = corner_origin(
+            (i32::MAX, i32::MAX),
+            (u32::MAX, u32::MAX),
+            1.0,
+            (225.0, 420.0),
+            Corner::TopLeft,
+        );
+        assert_eq!((x, y), (i32::MAX, i32::MAX));
+    }
+
+    #[test]
+    fn every_stored_corner_spelling_parses_to_its_own_corner() {
+        // The join between `settings::DOCK_CORNERS` — what `sanitise` lets
+        // through and what the panel's options say — and this module's parse.
+        // Four spellings, four distinct corners; a fifth spelling is the
+        // documented fallback. Distinctness matters as much as coverage: a
+        // copy-paste error mapping two spellings to one corner passes a
+        // per-value check.
+        let parsed: Vec<Corner> = crate::settings::DOCK_CORNERS
+            .iter()
+            .map(|value| Corner::from_setting(value))
+            .collect();
+        assert_eq!(parsed.len(), 4);
+        for (index, corner) in parsed.iter().enumerate() {
+            assert_eq!(
+                parsed.iter().position(|other| other == corner),
+                Some(index),
+                "two corner spellings parse to {corner:?}",
+            );
+        }
+        assert_eq!(Corner::from_setting("under-the-desk"), Corner::BottomRight);
     }
 }

@@ -2,14 +2,14 @@
  * The settings surface.
  *
  * Deliberately small, and this is the whole list: how long captures stay, how
- * many the shelf holds, whether copies are downscaled on the way out, and the
- * shortcut that summons it.
+ * many the shelf holds, whether copies are downscaled on the way out, the
+ * shortcut that summons it, which corner of which monitor it parks in, and
+ * whether it starts at login.
  *
- * "Where the shelf sits" used to head that sentence. No field has held it
- * since the shelf became a popover that parks itself in a corner —
- * `settings.rs` retracted the identical phrase on the Rust side, and the
- * correction did not reach the module that actually *is* the settings
- * surface. Everything lives in a local JSON file — no
+ * "Where the shelf sits" used to head that sentence, was retracted when no
+ * field held it any more, and is now true again — `dockCorner`/`dockMonitor`
+ * are exactly that, brought back as a deliberate setting rather than the
+ * leftover the original was. Everything lives in a local JSON file — no
  * accounts, no sync, nothing leaves the device.
  */
 
@@ -50,6 +50,20 @@ export interface Settings {
    * app for being local-only.
    */
   checkForUpdates: boolean;
+  /**
+   * Which corner the popover docks to. The four spellings are pinned to
+   * Rust's `DOCK_CORNERS` by the panel's own options and the e2e that drives
+   * them; an unknown value comes back normalised to the default.
+   */
+  dockCorner: "bottom-right" | "bottom-left" | "top-right" | "top-left";
+  /** Which monitor carries the corner: the primary, or the one the cursor is on. */
+  dockMonitor: "primary" | "cursor";
+  /**
+   * Register Shotshelf to start at login. Off by default — the app never adds
+   * itself to startup unasked. The choice roams with the account; each
+   * machine's login item is reconciled to it at launch.
+   */
+  startAtLogin: boolean;
   pinned: PinnedItem[];
 }
 
@@ -63,6 +77,9 @@ export const DEFAULTS: Settings = {
   hotkey: "CommandOrControl+Shift+S",
   downscaleExports: false,
   checkForUpdates: true,
+  dockCorner: "bottom-right",
+  dockMonitor: "primary",
+  startAtLogin: false,
   pinned: [],
 };
 
@@ -141,6 +158,15 @@ export async function initSettings(
   bind<HTMLInputElement>("#setting-hotkey", (input) => ({ hotkey: input.value.trim() }));
   bind<HTMLInputElement>("#setting-downscale", (input) => ({
     downscaleExports: input.checked,
+  }));
+  bind<HTMLSelectElement>("#setting-corner", (input) => ({
+    dockCorner: input.value as Settings["dockCorner"],
+  }));
+  bind<HTMLSelectElement>("#setting-monitor", (input) => ({
+    dockMonitor: input.value as Settings["dockMonitor"],
+  }));
+  bind<HTMLInputElement>("#setting-autostart", (input) => ({
+    startAtLogin: input.checked,
   }));
 
   current = await readStored();
@@ -259,4 +285,10 @@ function fill(): void {
   el<HTMLInputElement>("#setting-max").value = String(current.maxItems);
   el<HTMLInputElement>("#setting-hotkey").value = current.hotkey;
   el<HTMLInputElement>("#setting-downscale").checked = current.downscaleExports;
+  // These two can trust their options: Rust's `sanitise` normalises an unknown
+  // spelling to the default before it ever comes back here, so unlike the
+  // retention preset there is no hand-edited value to preserve.
+  el<HTMLSelectElement>("#setting-corner").value = current.dockCorner;
+  el<HTMLSelectElement>("#setting-monitor").value = current.dockMonitor;
+  el<HTMLInputElement>("#setting-autostart").checked = current.startAtLogin;
 }

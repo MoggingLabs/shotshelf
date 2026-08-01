@@ -84,6 +84,11 @@ tokio = { version = "1", default-features = false, features = ["sync", "time"] }
 # The `reveal` feature's Linux half rides the `dbus` crate this tree already
 # carried; `cargo add` locked only `opener`, `bstr` and `normpath`.
 opener = { version = "0.8.5", features = ["reveal"] }
+# The login item, as a Settings toggle (off by default). Driven from Rust
+# only through our own set_settings — the webview gains no permission and
+# there is no npm half. See autostart.rs for the account-roams/machine-registers
+# reconciliation.
+tauri-plugin-autostart = "2.5.1"
 
 # The frontmost application's name, which needs no permission at all — unlike
 # its window title, which on macOS needs Screen Recording. See enrich/foreground.

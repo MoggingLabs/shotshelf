@@ -68,6 +68,33 @@
           <span>Hotkey</span>
           <input id="setting-hotkey" type="text" spellcheck="false" autocomplete="off" />
         </label>
+        <!-- The option values are the exact strings Rust's DOCK_CORNERS /
+             DOCK_MONITORS accept — anything else is normalised back to the
+             default by `sanitise`, and the e2e drives every option through the
+             real save to keep the two lists honest. -->
+        <label class="settings__row">
+          <span>Corner</span>
+          <select id="setting-corner">
+            <option value="bottom-right">Bottom right</option>
+            <option value="bottom-left">Bottom left</option>
+            <option value="top-right">Top right</option>
+            <option value="top-left">Top left</option>
+          </select>
+        </label>
+        <label class="settings__row">
+          <span>Monitor</span>
+          <select id="setting-monitor">
+            <option value="primary">Primary</option>
+            <option value="cursor">Where my cursor is</option>
+          </select>
+        </label>
+        <label class="settings__row">
+          <span
+            title="Registers Shotshelf as a login item so it is already watching when you take the day's first capture. The choice follows your account; turning it off unregisters this machine."
+            >Start at login</span
+          >
+          <input id="setting-autostart" type="checkbox" />
+        </label>
         <p class="settings__note" id="settings-note"></p>
         <p class="settings__hint">Pinned captures ignore “Keep for” and come back after a restart.</p>
       </section>
