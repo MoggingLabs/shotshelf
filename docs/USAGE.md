@@ -49,8 +49,11 @@ already written.
 ### Linux
 
 There is no Linux download. Shotshelf compiles, lints and links on Linux — CI builds it on
-every change — but nobody has yet run it on a Linux desktop, so it ships without an installer
-rather than shipping unverified. To try it, build from source: install `build-essential`,
+every change, and since 2026-08-01 the release workflow also builds the Linux bundles
+(`.deb`, `.rpm`, `.AppImage`) on every run so the packaging path stays exercised — but nobody
+has yet run it on a Linux desktop, so those bundles are deliberately not attached to releases.
+The day someone runs the smoke checklist in `PARITY.md` on a real Linux desktop, publishing
+them is a one-line change the release workflow documents. To try it, build from source: install `build-essential`,
 `libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `libxdo-dev`,
 `libssl-dev` and `patchelf`, then `npm ci && npm run tauri build`. This list used to omit
 `libssl-dev` and `build-essential`, so the one documented route a Linux user has did not work

@@ -1,8 +1,22 @@
 name: Release
 
-# Builds the installers on both target OSes. This is the only way to produce a
+# Builds the installers on all three OSes. This is the only way to produce a
 # macOS .dmg without a Mac to hand, and on Windows it sidesteps Smart App
 # Control, which blocks freshly built unsigned binaries on locked-down machines.
+#
+# Linux is in the matrix as a **smoke build, not a shipped one** — its
+# artifact is prefixed `linux-smoke` and the publish job's `shotshelf-*`
+# pattern never picks it up. The reasoning, so the next person weighs it
+# rather than rediscovering it: no human has ever run Shotshelf on a Linux
+# desktop, and the platform's known degradations stack on the way *in* — the
+# tray protocol delivers no click events, and the global shortcut can report
+# success under pure Wayland without the OS taking the key. Installed blind,
+# a Wayland user could hide the shelf once and never summon it again. An
+# installer download asserts "this works"; a smoke build only asserts "this
+# still bundles", which keeps the packaging path from being unexecuted code —
+# the same reason this workflow runs weekly at all. The flip condition is one
+# person running docs/PARITY.md's smoke checklist on a real Linux desktop;
+# after that, moving the artifact prefix is the whole change.
 #
 # Signing material comes from repository secrets. With none set the build still
 # succeeds and produces UNSIGNED artifacts — useful for checking the bundle,
@@ -17,11 +31,13 @@ name: Release
 # sidecar, NSIS/MSI/DMG generation, updater artifacts — was unexecuted code.
 # The first time anyone ran it would have been the day it was needed.
 #
-# A schedule is the cheapest way to stop that being true. It costs two runners
-# a week and it fails on the Monday the bundler breaks rather than on the
+# A schedule is the cheapest way to stop that being true. It costs three
+# runners a week and it fails on the Monday the bundler breaks rather than on the
 # afternoon someone is trying to ship. Deliberately not on every push to main:
 # a full release build on two OSes is far more runner time than the change
 # rate here justifies, and `ci.yml` already covers whether the code compiles.
+# The paragraph above predates the fix and is kept as the reason the schedule
+# exists; installers have been built since 2026-08-01 and v0.1.0 shipped.
 on:
   push:
     tags: ["v*"]
@@ -69,6 +85,9 @@ jobs:
         include:
           - os: windows-latest
             name: Windows
+            # `shotshelf-*` is what the publish job downloads; only artifacts
+            # carrying this prefix can reach a Release.
+            prefix: shotshelf
             artifacts: |
               src-tauri/target/release/bundle/msi/*.msi
               src-tauri/target/release/bundle/msi/*.msi.sig
@@ -76,13 +95,42 @@ jobs:
               src-tauri/target/release/bundle/nsis/*.exe.sig
           - os: macos-latest
             name: macOS
+            prefix: shotshelf
             artifacts: |
               src-tauri/target/release/bundle/dmg/*.dmg
               src-tauri/target/release/bundle/macos/*.app.tar.gz
               src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
+          - os: ubuntu-latest
+            name: Linux
+            # Deliberately NOT `shotshelf` — see the header. Renaming this to
+            # `shotshelf` is the one-line act of shipping Linux, and it is owed
+            # a smoke run on a real desktop first.
+            prefix: linux-smoke
+            artifacts: |
+              src-tauri/target/release/bundle/deb/*.deb
+              src-tauri/target/release/bundle/rpm/*.rpm
+              src-tauri/target/release/bundle/appimage/*.AppImage
+              src-tauri/target/release/bundle/appimage/*.AppImage.sig
 
     steps:
       - uses: actions/checkout@v7
+
+      # The same list ci.yml installs, plus nothing: the bundler's extra tools
+      # (linuxdeploy for the AppImage) are fetched by Tauri itself, and the
+      # FUSE those tools would otherwise need is sidestepped by
+      # APPIMAGE_EXTRACT_AND_RUN on the bundle step below.
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf \
+            build-essential
 
       # The tag is the fourth place the version is written, and the only one
       # outside the repo.
@@ -167,6 +215,10 @@ jobs:
       - name: Bundle installers
         run: npm run release
         env:
+          # The AppImage tooling is itself shipped as AppImages, and the
+          # GitHub runners have no FUSE; this makes the tools self-extract
+          # instead. Ignored everywhere but Linux.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
           # Absent secrets simply mean "don't sign"; the build script says so.
           WINDOWS_CERT_THUMBPRINT: ${{ secrets.WINDOWS_CERT_THUMBPRINT }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -226,7 +278,7 @@ jobs:
       # either way, with no ref and no version anywhere in the name.
       - uses: actions/upload-artifact@v7
         with:
-          name: shotshelf-${{ matrix.os }}-${{ github.ref_name }}
+          name: ${{ matrix.prefix }}-${{ matrix.os }}-${{ github.ref_name }}
           path: ${{ matrix.artifacts }}
           if-no-files-found: error
 
