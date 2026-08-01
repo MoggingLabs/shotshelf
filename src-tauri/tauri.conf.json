@@ -14,7 +14,7 @@
       {
         "label": "main",
         "title": "Shotshelf",
-        "width": 360,
+        "width": 225,
         "height": 420,
         "resizable": false,
         "maximizable": false,
@@ -30,7 +30,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'",
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'",
       "assetProtocol": {
         "enable": true,
         "scope": []
@@ -42,9 +42,10 @@
     "active": true,
     "targets": "all",
     "category": "Utility",
-    "copyright": "Ã‚Â© MoggingLabs",
+    "copyright": "© MoggingLabs",
     "publisher": "MoggingLabs",
     "externalBin": ["binaries/ffmpeg"],
+    "resources": ["binaries/ffmpeg.LICENSE"],
     "shortDescription": "The shelf that catches every capture.",
     "longDescription": "Shotshelf catches every screenshot and screen recording you take and keeps it one drag away on an always-on-top shelf. Local-only: captures never leave the device.",
     "icon": [

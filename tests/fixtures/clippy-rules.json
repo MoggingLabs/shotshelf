@@ -1,0 +1,19 @@
+{
+  "disallowed": {
+    "disallowed-methods": [
+      "tauri::path::PathResolver::app_data_dir",
+      "tauri::path::PathResolver::app_config_dir",
+      "tauri::path::PathResolver::app_local_data_dir",
+      "tauri::path::PathResolver::app_cache_dir",
+      "shotshelf_lib::dirs::preferences",
+      "tauri::scope::fs::Scope::allow_directory"
+    ],
+    "disallowed-types": ["tauri::path::BaseDirectory"]
+  },
+  "denied": {
+    "clippy::cast_sign_loss": "warn",
+    "clippy::cast_precision_loss": "warn",
+    "clippy::cast_possible_truncation": "warn",
+    "clippy::cast_possible_wrap": "warn"
+  }
+}

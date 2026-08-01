@@ -5,6 +5,11 @@
  * asks for, inheriting `currentColor`. The shelf previously mixed emoji
  * (📸 🎬 ⚠) with typographic symbols (★ ☆ ⧉ × ▶): different weights, different
  * colours, and a different look on every machine.
+ *
+ * Sizes come off the icon scale in `docs/DESIGN.md` — 10 inside a pill badge,
+ * 12 in a micro marker, 14 in a 24px control, 16 in a 28px control, 24 on a
+ * card face. Callers used to pick 9, 11, 13, 14, 22 and 26 by eye, which is
+ * six near-misses of a five-step scale.
  */
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -22,6 +27,7 @@ const PATHS = {
   camera: ["M4.5 8.5h3l1.6-2.2h5.8l1.6 2.2h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-16a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z", "M12 17.2a3.6 3.6 0 1 0 0-7.2 3.6 3.6 0 0 0 0 7.2Z"],
   film: ["M3.5 5.5h17a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-17a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1Z", "M8 5.5v13", "M16 5.5v13", "M2.5 12h19"],
   alert: ["M12 4.5 2.8 20h18.4L12 4.5Z", "M12 10.5v4", "M12 17.4v.2"],
+  folder: ["M3.5 6.5h5.2l2 2.5h9.8a1 1 0 0 1 1 1v8.5a1 1 0 0 1-1 1h-17a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1Z"],
 } as const;
 
 export type IconName = keyof typeof PATHS;

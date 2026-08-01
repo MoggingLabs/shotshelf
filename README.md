@@ -17,10 +17,24 @@ take and keeps it one drag away — so you never dig through folders for the cli
 
 ---
 
-> **Status: the shell runs.** Cross-platform desktop app on **Tauri v2** — the frameless, always-on-top
-> edge window and its tray icon are in; the catch engine, thumbnails and drag-out come next. Prior-art
-> research settled fork-vs-build (nothing forkable does cross-platform auto-catch, so we build) and
-> confirmed the scary part, native drag-out, is a solved plugin. See `prompts/RESEARCH.md`. Part of
+> **Status: built, gated, and run end-to-end on Windows — once, unpackaged.** Every gate below is
+> green on Windows, macOS and Linux, and the front-end suite drives the real UI in a browser. On
+> 2026-07-31 the development build was launched for the first time, on Windows 11, and the whole
+> loop was driven with synthetic captures: a screenshot and a recording caught off disk, an image
+> caught off the clipboard, thumbnails and a poster frame rendered, text recognised on-device, a
+> credential flagged on the card, an annotation drawn and saved, a capture copied to the clipboard
+> and a native drag started. The installers were then built for the first time on any machine —
+> an `.msi` and an NSIS `.exe` — and the **packaged** binary was launched from the MSI's own
+> contents, caught a screenshot and a recording, and drew a poster frame with the ffmpeg that
+> shipped inside it. **macOS and Linux have still never run it, and nothing is signed** — what
+> remains unverified is named in
+> [SECURITY.md](./SECURITY.md#what-has-not-been-verified). Cross-platform desktop app
+> on **Tauri v2**. The catch engine, the corner
+> popover, native drag-out, recordings, settings and packaging are all in — and on top of them:
+> on-device text recognition, a credential warning, a five-tool annotation editor with real
+> redaction, before/after comparison, quick look, multi-select and a keyboard map. Prior-art
+> research settled fork-vs-build (nothing forkable does cross-platform auto-catch, so we build)
+> and confirmed the scary part, native drag-out, is a solved plugin. The research notes behind those choices are kept locally and are not in the repo. Part of
 > [MoggingLabs Internals](https://github.com/MoggingLabs/mogginglabs-internals), in a new category:
 > an **internal desktop utility** (not a platform driver like the `-wire` tools).
 
@@ -33,17 +47,27 @@ instead of fixing our filing habits.
 
 ## ✨ What it does
 
-- **Catches** every new screenshot and screen recording automatically (watches the OS capture
-  locations + clipboard).
+- **Catches** every new screenshot and screen recording while it is running (watches the OS
+  capture locations + clipboard), and brings back up to twenty captures from the last 24
+  hours it was not running to see. Shotshelf does **not** add itself to startup — see
+  [Run it](#-run-it) — so after a reboot you launch it yourself, and the backfill is what stops
+  that costing you the morning's captures.
 - **Holds** them in a popover in the corner of your screen, newest first, as thumbnails.
 - **Drags out** — grab an item off the shelf and drop it straight into an email, editor, or chat. No
-  Finder/Explorer spelunking, no 4-second window.
+  Finder/Explorer spelunking, no 4-second window. Pick several and they go together, in order.
+- **Reads them locally** — recognises the text in a screenshot on your machine, and warns you on
+  the card if it looks like you are about to send a credential. Windows and macOS use the
+  recogniser built into the OS; Linux uses tesseract if the machine has it. Where none is
+  available the shelf says so rather than letting an unchecked capture look checked.
+- **Compares two** — pick a before and an after and get one image with what changed outlined,
+  which is the unit that actually carries meaning when you are iterating with a model.
 
 One job, done well. No accounts, no cloud, no 15 settings.
 
 ## 🧱 How it works (target)
 
-1. **Catch engine** — watches the OS screenshot/recording save folders (Windows + macOS) with the Rust
+1. **Catch engine** — watches the OS screenshot/recording save folders (all three, with Linux the broadest — see
+  [USAGE](./docs/USAGE.md)) with the Rust
    [`notify`](https://github.com/notify-rs/notify) crate, plus a clipboard watch
    (`tauri-plugin-clipboard`) for clipboard-only captures (Win+Shift+S / ⌘⌃⇧4). Emits a "new capture" event.
 2. **Shelf UI** — an always-on-top, frameless edge widget rendering recent captures as thumbnails
@@ -58,8 +82,10 @@ Per our standing rule, we don't rewrite what exists. Research found **no forkabl
 that auto-catches screenshots** — every one that does (Dropover, FlowShelf) is closed-source macOS-only,
 which is exactly our opening. So we **build the combination**, but **adopt** the hard parts:
 `tauri-plugin-drag`/`drag-rs` (drag-out), `notify` + `tauri-plugin-clipboard` (capture detection), and
-bundled ffmpeg (video thumbnails). We **interoperate** with ShareX rather than fork it (watch its output
-folder). Full detail in `prompts/RESEARCH.md`.
+bundled ffmpeg (video thumbnails). We **interoperate** with capture tools rather than fork
+them — by watching folders, hooking nothing. ShareX's default output folder is not among the ones
+watched by default, so a ShareX user points `SHOTSHELF_WATCH_DIRS` at it or changes ShareX's
+output; naming it as though it worked untouched was wrong.
 
 ## 🚀 Run it
 
@@ -78,10 +104,19 @@ nobody has run Shotshelf on a Linux desktop, so the tray, the capture paths and 
 all unproven there.
 
 ```bash
-npm install            # also fetches the ffmpeg sidecar (~80 MB, one platform)
-npm run tauri dev      # dev build, frontend hot-reloads
-npm run tauri build    # release bundle (.msi/.exe on Windows, .dmg/.app on macOS)
+npm install                     # also fetches the ffmpeg sidecar (~80 MB, one platform)
+npx playwright install chromium # once per clone; the browser gates need it
+npm run tauri dev               # dev build, frontend hot-reloads
+npm run tauri build             # release bundle (.msi/.exe on Windows, .dmg/.app on macOS)
 ```
+
+**Starting it automatically is a manual step, and deliberately not automated here.** Shotshelf
+registers no login item and writes nothing to a startup folder — an app that adds itself to
+startup without being asked is a bad neighbour, and registering a login item is something that
+should be offered in Settings rather than assumed — which is work this branch has not done. Until then: on Windows put a shortcut
+in `shell:startup`, on macOS add it under System Settings → General → Login Items, on Linux drop
+a `.desktop` file in `~/.config/autostart`. A launch picks up up to twenty captures from the previous 24
+hours, so a late start is not a lost morning.
 
 Identical commands on every OS. The shelf is a popover that rests in the bottom-right corner of
 the screen and has **no taskbar or Dock entry** by design — the tray icon (Windows, Linux) /
@@ -92,30 +127,90 @@ the only ways in. Building the Rust side on its own
 
 ```
 src/            frontend — vanilla TS + Vite, deliberately dependency-light
-src-tauri/      Rust — window docking, tray icon, plugin registration
-  catch/        the catch engine: folder watchers + clipboard watch
-  capabilities/ Tauri v2 permissions (local filesystem, clipboard, drag — no network)
+src-tauri/
+  src/          Rust — window docking, tray icon, plugin registration
+    catch/      the catch engine: folder watchers + clipboard watch
+  capabilities/ what the webview itself may do (see below)
 app-icon.png    icon source; regenerate the set with `npm run tauri icon app-icon.png`
-.github/        CI — builds on Windows and macOS
+.github/        CI — lints, tests and builds on Windows, macOS and Linux
 ```
 
 Most of the per-OS code sits behind `cfg` gates that only the matching host compiles, so CI
-builds both: every push and PR runs `tsc` → `vite build` → `cargo fmt --check` → `cargo clippy
--D warnings` → `cargo build` on **windows-latest and macos-latest**. Run the same gate locally
-with `npm run build` then `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`.
+builds all three. Every push to **any branch**, and every pull request from a fork, runs the
+following on **windows-latest, macos-latest and ubuntu-latest**.
+
+It used to be pushes to `main` plus pull requests. Widening it means a branch does not need an
+open pull request to be checked, and that pushes between pull-request syncs are checked too. An
+earlier version of this paragraph justified the change by claiming this branch had run without
+CI entirely — it had not; pull request #14 has been open since 2026-07-28 and CI ran on it:
+
+| Gate | What it catches |
+| :-- | :-- |
+| `npm run lint` | ESLint with type-aware rules — floating promises, unchecked IPC |
+| `npm run deadcode` | knip; every registered Tauri command has a caller and every invoked one is registered; every backticked file and `module::item` in a comment resolves; only `dirs.rs` resolves a data root, only `settings.rs` reaches the roaming one, and only three named modules open a *directory* to the webview |
+| `npm run test:unit` | the pure rules, in Node with no browser |
+| `npm run build` | `tsc --noEmit` over `src` **and** `tests`, then the bundle |
+| `npm run test:e2e` | the real front-end in a browser with the Tauri runtime stubbed |
+| `npm run test:visual` | geometry and computed style everywhere; pixel goldens on Linux |
+| `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --lib`, `cargo build` | the Rust half (CI runs `--all-targets`; see below) |
+
+`npm run gate` runs that lot locally. It runs `cargo test --lib --test ipc` where CI runs
+`cargo test --all-targets`; both execute every test this crate has, and CI takes the wider form
+so that a *new* integration test is run rather than silently skipped.
+
+Two more checks exist and are deliberately **not** in either the matrix above or `npm run gate`:
+
+- **`npm run advisories`** holds the RUSTSEC set to `tests/fixtures/known-advisories.json`,
+  failing both on a new advisory and on one that has *cleared* — the second half matters, because
+  `SECURITY.md` says the `glib` entry "will clear when Tauri updates" and nothing was watching for
+  the day it did. It is out of the gate because its answer changes with no commit at all: RUSTSEC
+  publishes on its own schedule, so inside the gate an advisory filed overnight turns every
+  unrelated change red, which is how a check gets ignored and then deleted. It also wants
+  `cargo install cargo-audit --locked` and the network, and the gate is meant to run on a laptop
+  with neither. `.github/workflows/audit.yml` runs it weekly and whenever a lockfile moves.
+- **The smoke checklist in [PARITY](./docs/PARITY.md)**, which is a person running the app for
+  five minutes. Every step in it is something no gate here can reach — drag-out into another
+  application most of all.
+
+`.github/workflows/release.yml` also builds the installers on a weekly schedule now, rather than
+only on a `v*` tag. Nothing had ever run `tauri build` anywhere, so the entire bundling path was
+unexecuted code that would first be exercised on the day someone needed it. Every test this crate has is a `#[cfg(test)] mod` in
+the library, so the coverage is identical today — CI uses the wider form so that an integration
+test under `src-tauri/tests/` would actually be run rather than silently skipped, the day one
+exists. (An earlier version of this paragraph called such a test "the gate `webview_path.rs`
+argues the repo most needs"; that file retracted the claim, and `SECURITY.md` records that the
+docs went on repeating it. The variable was never the target kind.) The narrower local form exists because Windows Smart App
+Control refuses the freshly linked bin test harness on the development machine; see
+[SECURITY.md](./SECURITY.md#what-has-not-been-verified).
+
+One prerequisite, once per clone: `npx playwright install chromium`, which `npm install` does
+not do for you.
+
+The three-OS matrix is not ceremony: it has caught an unused parameter, two platform-only
+dead-code errors and an `unsafe` block that guarded nothing, none of which the other two hosts
+could see.
+
+Pixel goldens are taken on Linux and compared on Linux — font rasterisation differs between
+operating systems, so the appearance specs skip themselves elsewhere. Regenerate them with the
+**Appearance goldens** workflow, then look at the images before committing them.
 
 ### Where it watches
 
 | | Capture folders | Clipboard-only captures |
 | :-- | :-- | :-- |
 | **Windows** | `%UserProfile%\Pictures\Screenshots`, `%UserProfile%\Videos\Captures` (Game Bar), `%UserProfile%\Videos\Screen Recordings` (Snipping Tool), `…\OneDrive\Pictures\Screenshots` | Win+Shift+S |
-| **macOS** | whatever `defaults read com.apple.screencapture location` returns, else `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
+| **macOS** | whatever `defaults read com.apple.screencapture location` returns **if that folder is there**, else `~/Desktop` — ⌘⇧5 recordings land there too | ⌘⌃⇧4 |
 | **Linux** | `~/Pictures/Screenshots` (GNOME, XDG portal), `~/Pictures` (Spectacle, Flameshot), `~/Videos/Screencasts`, `~/Videos` | same clipboard watch |
 
-Folders that don't exist are skipped, and the resolved list is logged at startup. macOS reads
+A capture folder that does not exist yet is created, but only beside a parent that already does, and
+never directly inside your home folder — so `Pictures\Screenshots` appears on a machine that has
+never taken a screenshot, `~/Pictures` and `~/Videos` on Linux are watched only if they are already
+there, and nothing is
+invented inside a OneDrive folder you do not have. The resolved list is logged at startup. macOS reads
 the screenshot location once per launch, so `defaults write com.apple.screencapture location …`
 takes effect on the next start. Set `SHOTSHELF_WATCH_DIRS` (`;`-separated on Windows, `:`
-elsewhere) to override the list until the settings file lands. Clipboard captures are written
+elsewhere) to override the list. Deliberately an environment variable rather than a setting:
+it is for a test run or an odd layout, not for everyday use. Clipboard captures are written
 into the app data dir — never the repo.
 
 Win+PrtSc saves a file **and** copies to the clipboard, so both watchers see the same
@@ -126,8 +221,9 @@ tell the two apart.
 ### The shelf
 
 The shelf is a **popover resting in the bottom-right corner of the screen**, 225×420, not a window that sits on your
-screen. It opens on a tray click or the hotkey — focused, so Esc and clicking away dismiss it
-like any other popover — and when a capture lands it **peeks** for about four seconds without
+screen. It opens on a tray click or the hotkey — focused, so Esc dismisses it, and it stays put
+while you work in other windows rather than vanishing on focus loss — and when a capture lands
+it **peeks** for about a minute without
 ever taking focus, then closes itself. Hovering it holds it open; dragging out of it will not
 dismiss it. A shelf that appears on every screenshot and *stays* is the thing people end up
 turning off, and a shelf that steals focus mid-sentence is the complaint Dropover's users made.
@@ -142,22 +238,37 @@ The aspect ratio is the whole point: a screenshot keeps its meaning at the *top*
 headers, the first line of a terminal — and the shelf's original 3.8:1 tiles cropped a 1080p
 capture to the middle 46%, throwing that away and rendering dark captures as empty holes.
 
-The shelf holds **50** captures and scrolls; the 51st pushes the oldest off the end. Hovering
-a tile reveals pin, copy and remove controls — removing takes it off the shelf, and the file
-itself is never touched, moved or deleted. Recordings keep a permanent badge with their length
+The shelf holds **50 unpinned** captures by default and scrolls; the 51st pushes the oldest
+unpinned one off the end. Pinned captures do not count towards it and are capped separately at
+500, and the 50 is `maxItems` in `settings.json`, adjustable between 1 and 200. Hovering
+a tile reveals pin, copy, show-in-folder and remove controls — show-in-folder opens the real
+file selected in Explorer or Finder, and removing takes it off the shelf while the file
+itself is never touched, moved or deleted. Recordings keep a badge — whenever the card is not hovered — with their length
 and size, because that is identity rather than chrome.
 
 ### Settings
 
 The gear in the title strip opens the whole surface: how long captures **stay**, how many the
-shelf **holds**, and the **hotkey**. That's the entire list, and it's meant to stay that way.
+shelf **holds**, whether to **send smaller copies**, and the **hotkey**. That's the entire list of *controls*,
+and it's meant to stay short.
 
-Everything lives in one hand-editable JSON file, on device, never synced:
+Two hand-editable JSON files, and they are two on purpose — one of them *does* sync, which is
+exactly why the other one exists:
 
-| | Settings file |
-| :-- | :-- |
-| **Windows** | `%APPDATA%\com.mogginglabs.shotshelf\settings.json` |
-| **macOS** | `~/Library/Application Support/com.mogginglabs.shotshelf/settings.json` |
+| | Preferences | Pinned captures |
+| :-- | :-- | :-- |
+| **Windows** | `%APPDATA%\com.mogginglabs.shotshelf\settings.json` | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\pinned.json` |
+| **macOS** | `~/Library/Application Support/com.mogginglabs.shotshelf/settings.json` | `~/Library/Application Support/com.mogginglabs.shotshelf/pinned.json` |
+| **Linux** | `~/.config/com.mogginglabs.shotshelf/settings.json` | `~/.local/share/com.mogginglabs.shotshelf/pinned.json` |
+
+The split is a privacy one, **on Windows and Linux**. On Windows `%APPDATA%` is the **roaming**
+profile, which a domain roaming profile or Enterprise State Roaming copies to a network share at
+logoff — and a pin is an
+absolute path to a capture, which carries client and project names as readily as a window title.
+A hotkey and an item cap can roam; five hundred capture paths cannot. Pins live in local app
+data, which nothing syncs, alongside `shotshelf.log`. On macOS the two paths are the same
+folder — there is no roaming profile to separate them from — so the split is a no-op there, and
+`docs/USAGE.md` says so where it matters, in the uninstall instructions.
 
 The default hotkey is **`CommandOrControl+Shift+S`** — Ctrl+Shift+S on Windows, ⌘⇧S on macOS.
 Worth knowing: a global shortcut takes that combination away from *every* app, and on macOS
@@ -167,14 +278,18 @@ to start; a shortcut that won't register is refused and the previous one stays a
 
 **Retention** takes captures off the shelf, never off the disk — nothing here deletes, moves or
 modifies a capture. **Pinned** captures (the ★ on a tile) ignore retention and the item limit,
-and are the only shelf state that survives a restart; only their paths and a timestamp are
-stored, never capture contents. Retention is in hours and accepts fractions, which is the only
-practical way to watch expiry work without waiting an hour.
+and are the only shelf state that survives a restart. Only their paths, kind and timestamp are
+stored — never capture contents — alongside a note of how recent the newest capture seen was,
+which is how a relaunch knows not to bring back something you removed.
+
+Retention is in hours and accepts fractions, which is the only practical way to watch expiry work without waiting an hour.
 
 The popover places itself in the corner each time it opens, measured against the monitor's work
 area rather than its full size — so it clears the taskbar wherever that sits, and rearranging
 displays needs no setting at all. The column is pinned by that same corner, so as it grows it
-moves upward and the newest card stays where your eye already is.
+moves upward and the newest card stays where your eye already is. On Wayland it does not: a
+Wayland client has no protocol for choosing its own position, so the shelf appears wherever the
+compositor puts it.
 
 ### Recordings
 
@@ -192,6 +307,7 @@ recording is never touched.
 | :-- | :-- |
 | **Windows** | `%LOCALAPPDATA%\com.mogginglabs.shotshelf\posters` |
 | **macOS** | `~/Library/Caches/com.mogginglabs.shotshelf/posters` |
+| **Linux** | `~/.cache/com.mogginglabs.shotshelf/posters` |
 
 The sidecar is ~80 MB per platform, so it's fetched at install time by
 `scripts/prepare-sidecar.mjs` (via `ffmpeg-static`) and git-ignored rather than committed — it
@@ -211,18 +327,61 @@ Each tile also has a **copy** button for the apps that take a paste but refuse a
 images go on the clipboard as pixels, recordings as a file reference. Shotshelf flags its own
 clipboard writes so copying a capture doesn't shelve a second copy of it.
 
+The webview holds three permissions and no more: listen for events, window drag-start for the
+title strip, and the drag plugin. `unlisten` was a fourth until it was noticed that nothing
+calls it — every `listen` registration here is subscribed for the life of the window — so it
+was dead reach granted to the least-trusted process. Notably **not** `core:default`, which is
+what this granted until it was audited — nine permission sets including `core:image`, whose
+`from-path` and `rgba` together are a file-read primitive that bypasses both the asset-protocol
+scope and `webview_path`, and `core:tray`/`core:menu`, which let the page rewrite the tray icon
+and the app menu. No filesystem, no clipboard, no shell, no network.
+
 Thumbnails are rendered straight from disk over Tauri's asset protocol, never inlined as
 base64. That protocol is scoped shut by default, and the scope is granted at **runtime** from
-the same resolved watch list the engine uses — non-recursively, plus the clipboard folder.
+the same resolved watch list the engine uses, non-recursively, plus the clipboard folder, the
+edits directory and the poster cache. **The stored pin list grants nothing.** No count is given
+here either: it depends on how many watch folders the OS turns out to have, and two earlier
+versions of this sentence quoted numbers that were wrong.
+`webview_path::existing_file` consults exactly this scope before Rust reads any capture.
+
+Pins are the interesting case, and this paragraph twice described a mechanism the code does not
+have. A capture restored at launch is drawn before the engine has resolved the watch list, so
+its thumbnail can be asked for while the scope is still shut. That was fixed once by granting
+each stored pin — first by directory, then by file — and both are the same mistake at different
+sizes: `pinned.json` is a plain file the user can edit, and two commands let the webview write
+it, so one added path plus a restart admitted an arbitrary file to `describe_capture`,
+`copy_capture` and `prepare_drag`. The race is real; the grant was the wrong end of it. The
+front end redraws those tiles once the catch engine reports ready, which fixes the rendering
+without widening what Rust will read.
 A static scope in `tauri.conf.json` could not express the macOS location, which is only known
 after `defaults read` has run, nor a `SHOTSHELF_WATCH_DIRS` override. The asset URL differs by
-platform (`http://asset.localhost/…` on Windows, `asset://localhost/…` on macOS);
+platform (`http://asset.localhost/…` on Windows, `asset://localhost/…` on macOS **and
+Linux** — Tauri's own helper branches on Windows and Android, so everything else takes the
+second form);
 `convertFileSrc` picks the right one and the CSP allows both.
 
 ## 📦 Releasing
 
 Installing and using Shotshelf is [docs/USAGE.md](./docs/USAGE.md). This is how the installers
 get made.
+
+**The whole release path runs today, unsigned.** Pushing a `v*` tag runs the full gate on both
+bundling platforms, builds the installers, and publishes a GitHub Release carrying them plus
+`SHA256SUMS.txt` — with no signature, the checksums are the only integrity statement, and the
+release notes say so. Everything below the tag is automated; nothing about it changes when
+signing arrives.
+
+**To turn on signing, set repository secrets and change nothing else.** The workflow already
+passes every one of these through, checks that a configured key really produced signatures, and
+fails the release if it did not:
+
+| Secret | Turns on |
+| :-- | :-- |
+| `WINDOWS_CERT_THUMBPRINT` | Authenticode on the `.msi`/`.exe` (cert must be in the runner's store — for GitHub-hosted runners, import it in a step from a base64 secret first) |
+| `APPLE_CERTIFICATE` + `APPLE_CERTIFICATE_PASSWORD` | The Developer ID certificate itself, base64, for a keychain-less runner |
+| `APPLE_SIGNING_IDENTITY` | Which identity signs the `.app` |
+| `APPLE_ID` + `APPLE_PASSWORD` + `APPLE_TEAM_ID` | Notarization |
+| `TAURI_SIGNING_PRIVATE_KEY` (+ `…_PASSWORD`) | Updater artifacts and their `.sig`s — without it none are produced, deliberately |
 
 ```bash
 npm run release              # signs if the environment can, otherwise unsigned
@@ -238,6 +397,7 @@ still succeeds and emits unsigned artifacts.
 | :-- | :-- |
 | `WINDOWS_CERT_THUMBPRINT` | Authenticode signing on Windows (cert must be in the Windows cert store) |
 | `APPLE_SIGNING_IDENTITY` | Developer ID signing on macOS |
+| `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD` | The Developer ID certificate itself, base64-encoded, for a runner with no keychain — both are read by `scripts/build-release.mjs` and passed by the release workflow |
 | `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` | macOS notarization (or `APPLE_API_KEY` + `APPLE_API_ISSUER` + `APPLE_API_KEY_PATH`) |
 | `TAURI_SIGNING_PRIVATE_KEY` | Signing the update payload — without it, installed apps reject the update |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | If that key has a password |
@@ -248,8 +408,10 @@ round-trip to Apple's notary service before Gatekeeper will open it.
 
 ### The update feed
 
-Update artifacts (and their `.sig` files) are produced **only when `TAURI_SIGNING_PRIVATE_KEY` is
-set** — an unsigned one is rejected by every installed app, and Tauri refuses to build one
+Update artifacts (and their `.sig` files) are produced **only when `TAURI_SIGNING_PRIVATE_KEY`
+is set** — `scripts/build-release.mjs` turns `createUpdaterArtifacts` on for exactly that case,
+and deliberately not in the committed config, because with a `pubkey` present and no private key
+Tauri refuses to build at all — an unsigned one is rejected by every installed app, and Tauri refuses to build one
 without the key. A build without it still produces perfectly good installers.
 
 The app asks the endpoint in `tauri.conf.json`, with `{{target}}`, `{{arch}}` and
@@ -268,11 +430,18 @@ caller is current. The manifest shape:
   "notes": "What changed",
   "pub_date": "2026-07-27T12:00:00Z",
   "platforms": {
-    "windows-x86_64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf_0.2.0_x64-setup.nsis.zip" },
-    "darwin-aarch64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf_0.2.0_aarch64.app.tar.gz" }
+    "windows-x86_64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf_0.2.0_x64-setup.exe" },
+    "darwin-aarch64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf.app.tar.gz" }
   }
 }
 ```
+
+The macOS filename carries **no version and no architecture** — `tauri-bundler` builds it as
+`<product name>.app.tar.gz`, and that is what the workflow uploads. This example used to name
+`Shotshelf_0.2.0_aarch64.app.tar.gz`, which is not produced by anything, so an operator
+following it published a URL that 404s for every macOS client. Because the name never changes,
+each release overwrites the last one if you copy artifacts into a single directory — give the
+hosted copy a versioned name of your own and point the manifest at that.
 
 The **public** half of the updater key is in `tauri.conf.json`; the private half must never be
 committed — `*.key` is git-ignored. Regenerate the pair with
@@ -290,15 +459,23 @@ already-installed apps.
 - [x] **v0.2** native drag-out (the crux) via `tauri-plugin-drag`, with a clipboard-copy fallback
 - [ ] **v0.3** screen recordings (ffmpeg thumbs), settings/persistence, cross-platform parity, packaging
   - [x] recordings — bundled ffmpeg poster frames, duration + size on the tile
-  - [x] settings + persistence — edge/monitor, retention, pinning, global hotkey
-  - [ ] cross-platform parity pass
+  - [x] settings + persistence — retention, item cap, pinning, export sizing, global hotkey
+  - [ ] cross-platform parity pass — matrix and smoke checklist in [PARITY](./docs/PARITY.md);
+    the Windows column is filled from a real run, macOS and Linux have never been launched
   - [x] packaging — signed installers, bundled ffmpeg, internal updater, [USAGE](./docs/USAGE.md)
 
 ## 🔐 Privacy — captures never leave your machine
 
 Screenshots and recordings routinely contain sensitive material (client data, tokens on screen).
-Shotshelf is **local-only**: no cloud, no telemetry, no upload. Thumbnails and any index stay on the
-device. See [SECURITY.md](./SECURITY.md). This repo never contains real captures.
+Shotshelf is **local-only**: no cloud, no telemetry, no upload. There is no capture index, and no
+thumbnail files for images — a card renders the capture itself. A recording cannot be drawn that
+way, so Shotshelf extracts one poster frame per recording into its cache and the card renders
+that. Shotshelf does write picture data
+of its own, all local and all listed in [USAGE](./docs/USAGE.md) — including `clipboard/`, which
+holds captures caught off the clipboard and is the *only* copy of those: video poster
+frames, the downscaled copies made for hand-off when "Send smaller copies" is on, saved edits
+and comparisons, and one drag-preview image. Settings live in two JSON files, and the one
+naming captures is kept out of the roaming profile on purpose. See [SECURITY.md](./SECURITY.md). This repo never contains real captures.
 
 ## ⚖️ Internal use
 
@@ -306,7 +483,7 @@ Shotshelf is an internal MoggingLabs utility (not a product). MIT, no warranty.
 
 ## 🤝 Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md). Reuse before rewriting; keep both platforms working; never
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Reuse before rewriting; keep all three platforms working; never
 commit captures or user data.
 
 ## 📄 License

@@ -28,16 +28,47 @@ const READ_RETRY: Duration = Duration::from_millis(80);
 
 /// Win+PrtSc saves a PNG *and* copies it to the clipboard, so one screenshot
 /// reaches both watchers. Hold every clipboard image back long enough for the
-/// folder watcher to finish (debounce + settle is roughly 750 ms), then drop
-/// this copy if the same screenshot already arrived as a file — the file has a
-/// real name and a real path, and this is only an echo of it.
-const ECHO_GRACE: Duration = Duration::from_millis(1500);
-const ECHO_WINDOW: Duration = Duration::from_secs(4);
+/// folder watcher to finish, then drop this copy if the same screenshot already
+/// arrived as a file — the file has a real name and a real path, and this is
+/// only an echo of it.
+///
+/// Twice `folders::SLOWEST_IMAGE`, rather than a hand-chosen 1500 ms under a
+/// comment restating that module's timings as "roughly 750 ms". Those timings
+/// are three constants private to `folders.rs`; nothing joined them to this
+/// one, so raising any of them would have silently shelved every Win+PrtSc
+/// twice and left an unprunable duplicate PNG behind. The factor of two is the
+/// decision that belongs here — the number it multiplies belongs there.
+// Same const arithmetic as `SLOWEST_IMAGE`, which this is derived from.
+#[allow(clippy::cast_possible_truncation)]
+const ECHO_GRACE: Duration =
+    Duration::from_millis(super::folders::SLOWEST_IMAGE.as_millis() as u64 * 2);
 
-pub fn start<R: Runtime>(app: &AppHandle<R>, sink: Arc<CaptureSink>) {
+/// How long after a folder image a clipboard copy still counts as its echo.
+///
+/// Derived from the grace above rather than written out, because the whole rule
+/// only works while `ECHO_GRACE < ECHO_WINDOW`: the worker sleeps the grace and
+/// *then* asks whether the marker is younger than the window, so a grace that
+/// outgrows the window means the answer is always no. Every Win+PrtSc would
+/// shelve twice and leave an unpruned PNG — verbatim the defect `folders.rs`
+/// says these constants exist to prevent.
+///
+/// Two of the three numbers already moved together; this was the third, a
+/// hand-written `from_secs(4)`, and it is the one the rule depends on. Raising
+/// `IMAGE_STABLE_TICKS` from one to six — the same class of edit
+/// `folders.rs` names as the motivating hazard — put a 5000 ms grace against a
+/// 4000 ms window with nothing to say so. Written as grace + slack, the
+/// inequality holds by construction and `ECHO_SLACK` is the decision that
+/// genuinely belongs in this file: how much later than the folder watcher's
+/// worst case a copy may still arrive and be recognised.
+const ECHO_SLACK: Duration = Duration::from_millis(2_500);
+const ECHO_WINDOW: Duration = ECHO_GRACE.saturating_add(ECHO_SLACK);
+
+/// Returns whether the monitor is actually running, which the status line
+/// needs: it used to append "+ the clipboard" whatever happened here.
+pub fn start<R: Runtime>(app: &AppHandle<R>, sink: Arc<CaptureSink>) -> bool {
     if let Err(err) = app.state::<Clipboard>().start_monitor(app.clone()) {
-        eprintln!("shotshelf: could not start the clipboard monitor: {err}");
-        return;
+        crate::diag::warn(&format!("could not start the clipboard monitor: {err}"));
+        return false;
     }
 
     let (tx, rx) = mpsc::channel::<()>();
@@ -48,13 +79,16 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, sink: Arc<CaptureSink>) {
         // blocked on a clipboard another app is still holding.
         let _ = tx.send(());
     });
+
+    true
 }
 
 fn spawn_worker<R: Runtime>(app: AppHandle<R>, rx: mpsc::Receiver<()>, sink: Arc<CaptureSink>) {
     std::thread::spawn(move || {
-        // Copying the same image twice should not shelve it twice. Phase 04's
-        // copy-to-clipboard fallback will land here too, and this is what stops
-        // it from bouncing straight back onto the shelf.
+        // Copying the same image twice should not shelve it twice. The shelf's
+        // own copy-to-clipboard lands here too — see `OWN_WRITE_WINDOW` in
+        // `share.rs`, which is the other half of stopping a copy from bouncing
+        // straight back onto the shelf as a fresh capture.
         let mut last_image: Option<u64> = None;
 
         while rx.recv().is_ok() {
@@ -70,7 +104,7 @@ fn spawn_worker<R: Runtime>(app: AppHandle<R>, rx: mpsc::Receiver<()>, sink: Arc
                 Ok(Some(bytes)) => bytes,
                 Ok(None) => continue, // text, files, or nothing at all
                 Err(err) => {
-                    eprintln!("shotshelf: could not read the clipboard: {err}");
+                    crate::diag::warn(&format!("could not read the clipboard: {err}"));
                     continue;
                 }
             };
@@ -85,13 +119,30 @@ fn spawn_worker<R: Runtime>(app: AppHandle<R>, rx: mpsc::Receiver<()>, sink: Arc
             // check comes before the write, so an echo never leaves a file
             // behind either.
             std::thread::sleep(ECHO_GRACE);
-            if sink.take_folder_echo(ECHO_WINDOW) {
-                continue;
+            // Only an echo if it is the same *picture*, not merely close in
+            // time. The plugin hands over PNG bytes whatever the OS held, so
+            // the encodings never match byte for byte — the shape is the
+            // cheapest thing both sides can agree on, and it is read from the
+            // header rather than by decoding.
+            let shape = image::ImageReader::new(std::io::Cursor::new(&bytes))
+                .with_guessed_format()
+                .ok()
+                .and_then(|reader| reader.into_dimensions().ok());
+            if let Some(shape) = shape {
+                if sink.take_folder_echo(ECHO_WINDOW, shape) {
+                    continue;
+                }
             }
 
             match write_capture(&app, &bytes) {
                 Ok(path) => sink.emit(&app, &path, CaptureKind::Image, Source::Clipboard),
-                Err(err) => eprintln!("shotshelf: could not save the clipboard image: {err}"),
+                // On screen, not only in the log. This is the one capture with
+                // no other copy: the bytes are in the clipboard and nowhere
+                // else, so failing to write them loses the screenshot outright.
+                Err(err) => super::report_problem(
+                    &app,
+                    &format!("That screenshot could not be saved: {err}"),
+                ),
             }
         }
     });
@@ -136,20 +187,58 @@ fn digest_of(bytes: &[u8]) -> u64 {
 /// and never a shared temp location. The shelf has to be able to read from
 /// here too, which is why this is shared rather than inlined below.
 pub(super) fn capture_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
-    app.path()
-        .app_data_dir()
-        .ok()
-        .map(|dir| dir.join("clipboard"))
+    // Local app data, never roaming. These files are screen captures and they
+    // are the only copy — see `dirs::local`, which is where that rule
+    // lives now rather than in four docstrings pointing at each other.
+    crate::dirs::local(app, "clipboard").ok()
 }
 
-/// Clipboard captures have no file of their own, so give them one. Phase 06
-/// adds the retention policy that cleans this folder up.
+/// Clipboard captures have no file of their own, so give them one.
+///
+/// Nothing prunes this folder, and that is deliberate rather than pending: a
+/// clipboard capture is an original with no copy anywhere else, so an
+/// automatic sweep here would be the only thing in the app that destroys a
+/// capture. It grows until the user clears it, and the usage guide says so
+/// plainly in the uninstall section.
 fn write_capture<R: Runtime>(app: &AppHandle<R>, bytes: &[u8]) -> Result<PathBuf, String> {
+    // `dirs::local` creates it; saying so again here made the contract
+    // unreadable from the call site.
     let dir = capture_dir(app).ok_or("no app data directory")?;
-    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
 
     let path = dir.join(format!("clipboard-{}.png", now_ms()));
     std::fs::write(&path, bytes).map_err(|err| err.to_string())?;
 
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_echo_window_outlasts_the_grace_the_worker_sleeps() {
+        // The whole Win+PrtSc rule rests on this one inequality and nothing
+        // asserted it. The worker sleeps `ECHO_GRACE` and *then* asks whether
+        // the folder marker is younger than `ECHO_WINDOW`, so a grace that
+        // outgrows the window means the answer is always no: every Win+PrtSc
+        // shelves twice and leaves an unpruned PNG in a folder the app never
+        // prunes — verbatim the defect `folders.rs` says these constants exist
+        // to prevent.
+        //
+        // Two of the three numbers already moved together; this was the third,
+        // a hand-written `from_secs(4)`. Raising `IMAGE_STABLE_TICKS` from one
+        // to six — the same class of edit `folders.rs` names as the motivating
+        // hazard — put a 5000 ms grace against a 4000 ms window with nothing
+        // anywhere to say so.
+        assert!(
+            ECHO_WINDOW > ECHO_GRACE,
+            "the marker has already expired by the time the worker looks at it: \
+             grace {ECHO_GRACE:?}, window {ECHO_WINDOW:?}",
+        );
+
+        // And it moves with the watcher it is waiting for, rather than being a
+        // constant that happens to be big enough today.
+        assert_eq!(ECHO_GRACE, super::super::folders::SLOWEST_IMAGE * 2);
+        assert_eq!(ECHO_WINDOW, ECHO_GRACE + ECHO_SLACK);
+    }
 }

@@ -1,0 +1,26 @@
+{
+  "_why": "Every RUSTSEC advisory this tree currently carries, so a new one fails loudly and a cleared one prompts an update to SECURITY.md. Held to `cargo audit` by scripts/check-advisories.mjs. No entry here is a vulnerability: `cargo audit` reports 0 of those, and this file must stay that way — a real vulnerability belongs fixed, not listed.",
+  "vulnerabilities": [],
+  "unsound": {
+    "RUSTSEC-2024-0429": "glib — VariantStrIter iterator unsoundness. Linux only, via GTK/WebKitGTK under Tauri. Not resolvable from here: the fix is in glib 0.20, which arrives when Tauri's GTK stack moves. Shotshelf never calls VariantStrIter."
+  },
+  "unmaintained": {
+    "RUSTSEC-2024-0411": "gdkwayland-sys — gtk-rs GTK3 bindings, unmaintained upstream",
+    "RUSTSEC-2024-0412": "gdk — gtk-rs GTK3 bindings, unmaintained upstream",
+    "RUSTSEC-2024-0413": "atk — gtk-rs GTK3 bindings, unmaintained upstream",
+    "RUSTSEC-2024-0414": "gdkx11-sys — gtk-rs GTK3 bindings, unmaintained upstream",
+    "RUSTSEC-2024-0415": "gtk — gtk-rs GTK3 bindings, unmaintained upstream",
+    "RUSTSEC-2024-0416": "atk-sys — gtk-rs GTK3 bindings, unmaintained upstream",
+    "RUSTSEC-2024-0417": "gdkx11 — gtk-rs GTK3 bindings, unmaintained upstream",
+    "RUSTSEC-2024-0418": "gdk-sys — gtk-rs GTK3 bindings, unmaintained upstream",
+    "RUSTSEC-2024-0419": "gtk3-macros — gtk-rs GTK3 bindings, unmaintained upstream",
+    "RUSTSEC-2024-0420": "gtk-sys — gtk-rs GTK3 bindings, unmaintained upstream",
+    "RUSTSEC-2024-0370": "proc-macro-error — build-time only, reached through a macro dependency",
+    "RUSTSEC-2024-0436": "paste — build-time only, proc-macro helper",
+    "RUSTSEC-2025-0075": "unic-char-range — Unicode tables, pulled in transitively",
+    "RUSTSEC-2025-0080": "unic-common — Unicode tables, pulled in transitively",
+    "RUSTSEC-2025-0081": "unic-char-property — Unicode tables, pulled in transitively",
+    "RUSTSEC-2025-0098": "unic-ucd-version — Unicode tables, pulled in transitively",
+    "RUSTSEC-2025-0100": "unic-ucd-ident — Unicode tables, pulled in transitively"
+  }
+}

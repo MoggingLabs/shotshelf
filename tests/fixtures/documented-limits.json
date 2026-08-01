@@ -1,0 +1,8 @@
+{
+  "handoffCacheEntries": 60,
+  "backfillCaptures": 20,
+  "backfillHours": 24,
+  "keptCorruptCopies": 5,
+  "exportLongEdgePx": 1568,
+  "logRestartKib": 512
+}

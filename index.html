@@ -14,6 +14,27 @@
         <span class="shelf__mark" id="shelf-mark" data-tauri-drag-region></span>
         <span class="shelf__title" id="shelf-count" data-tauri-drag-region>Shelf</span>
         <span class="shelf__grow" data-tauri-drag-region></span>
+        <!-- Marking up needs exactly one capture to mark up. -->
+        <button
+          class="shelf__btn shelf__btn--compare"
+          id="shelf-edit"
+          type="button"
+          title="Mark up this capture"
+          hidden
+        >
+          Edit
+        </button>
+        <!-- Only earns its place when exactly two captures are picked: a
+             comparison of one thing, or of five, is not a thing. -->
+        <button
+          class="shelf__btn shelf__btn--compare"
+          id="shelf-compare"
+          type="button"
+          title="Compare the two picked captures"
+          hidden
+        >
+          Compare
+        </button>
         <button class="shelf__btn" id="shelf-settings" type="button" title="Settings">
           <span class="sr-only">Settings</span>
         </button>
@@ -37,6 +58,13 @@
           <input id="setting-max" type="number" min="1" max="200" step="1" />
         </label>
         <label class="settings__row">
+          <span
+            title="Vision models resize what they are given to about 1568px anyway, so this costs nothing when you are feeding a chat. Off by default because a drag-out also feeds design tools and bug reports."
+            >Send smaller copies</span
+          >
+          <input id="setting-downscale" type="checkbox" />
+        </label>
+        <label class="settings__row">
           <span>Hotkey</span>
           <input id="setting-hotkey" type="text" spellcheck="false" autocomplete="off" />
         </label>
@@ -44,7 +72,23 @@
         <p class="settings__hint">Pinned captures ignore “Keep for” and come back after a restart.</p>
       </section>
 
-      <main class="shelf__items" id="shelf-items" data-empty="true"></main>
+      <!-- The list and the overlay share one box, and that box is what the
+           overlay is allowed to cover. Both halves of that are load-bearing.
+
+           The overlay is a *sibling* of #shelf-items rather than a child:
+           that element is rebuilt wholesale on every render, so a capture
+           landing mid-annotation used to remove the editor from under the
+           user while the module still held a pointer to the detached node.
+
+           And it is a sibling *inside this wrapper* rather than inside
+           .shelf: stretched across the whole panel it covered the title
+           strip — the only drag handle a frameless window has, plus Hide and
+           Settings — and painted over the alert strip that reports the
+           editor's own failed saves. -->
+      <div class="shelf__body">
+        <main class="shelf__items" id="shelf-items" data-empty="true"></main>
+        <div class="shelf__overlay" id="shelf-overlay"></div>
+      </div>
 
       <!-- Only appears when something actually needs saying. -->
       <p class="shelf__alert" id="shelf-alert" hidden></p>

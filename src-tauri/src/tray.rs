@@ -84,9 +84,39 @@ pub fn set_capture_count<R: Runtime>(app: AppHandle<R>, count: usize) {
     };
     let _ = tray.set_tooltip(Some(label));
 
-    // macOS can put text beside a menu bar icon; Windows has no equivalent, so
-    // there the tooltip is the only place the count can appear.
-    #[cfg(target_os = "macos")]
+    // macOS puts text beside the menu bar icon; Linux puts it on the
+    // AppIndicator label. Windows is the one platform with no equivalent, so
+    // there the tooltip above really is the only place the count can appear.
+    //
+    // This was macOS-only, under a comment that named Windows and did not
+    // consider Linux — where it is the *tooltip* that has no equivalent:
+    // `tray-icon`'s GTK backend implements `set_tooltip` as a no-op that
+    // discards its argument and returns `Ok`, and `set_title` as a real
+    // `set_label`. So the one call that works was compiled out, on the
+    // platform where `docs/USAGE.md` tells the user the tray is their primary
+    // way in because clicks do not reach the app there.
+    //
+    // A previous attempt at this widened the wrong `cfg` — the icon selection
+    // in `init` — which on Linux left two `let icon` bindings, the first
+    // shadowed and unread, and `-D warnings` refuses that. The Linux CI leg
+    // could not compile, and the local gate could not see it.
+    // "Not Windows" — deliberately *wider* than the crate's usual
+    // `not(any(windows, macos))`, which names the GTK platform.
+    //
+    // Both macOS and every GTK platform have a real `set_title`; only Windows
+    // does not. The sites that spell it the narrower way are each choosing a
+    // GTK-specific *implementation*, which is a different question from "does
+    // this API exist here". No list of those sites is given: the first attempt
+    // at one was wrong on its count, and the attempt to correct that was wrong
+    // about `share.rs`, which uses the narrow form and always has. Two wrong
+    // enumerations of one set is the argument for stating the criterion
+    // instead.
+    //
+    // What was wrong before was `any(macos, linux)`: an enumeration, so the
+    // capture count silently never reached the tray on any other Unix
+    // `tray-icon` builds for. Widening fixed that; matching the other five would
+    // have re-broken macOS.
+    #[cfg(not(target_os = "windows"))]
     let _ = tray.set_title(if count == 0 {
         None
     } else {

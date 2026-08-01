@@ -17,11 +17,18 @@ test("a nonsensical size does not render as NaN", () => {
   assert.equal(formatBytes(-1), "—");
 });
 
-test("durations read as minutes and seconds", () => {
+test("durations read as minutes and seconds, and hours when there are any", () => {
   assert.equal(formatDuration(8_000), "0:08");
   assert.equal(formatDuration(65_000), "1:05");
-  assert.equal(formatDuration(3_723_000), "62:03");
   assert.equal(formatDuration(0), "0:00");
+
+  // This used to assert "62:03", pinning the absence of an hour field as though
+  // it were the rule. It is not a duration anyone writes, and `docs/USAGE.md`
+  // says the badge carries the recording's length. The hour appears only when
+  // there is one, so the common case stays two fields wide on a small badge.
+  assert.equal(formatDuration(3_723_000), "1:02:03");
+  assert.equal(formatDuration(3_599_000), "59:59", "the last second before an hour");
+  assert.equal(formatDuration(3_600_000), "1:00:00");
 });
 
 test("filenames come off both Windows and macOS paths", () => {
@@ -49,4 +56,82 @@ test("day keys sort chronologically as plain strings", () => {
   const ninth = dayKey(new Date(2026, 5, 9).getTime());
   const tenth = dayKey(new Date(2026, 5, 10).getTime());
   assert.ok(ninth < tenth, `${ninth} should sort before ${tenth}`);
+});
+
+test("a day key is the calendar date it says it is", () => {
+  // Ordering assertions alone let a zero-based `getMonth()` through for weeks:
+  // every key was shifted a month early, and since the shift was uniform,
+  // every comparison still passed. Assert the value, not just the relation.
+  assert.equal(dayKey(new Date(2026, 0, 5).getTime()), "2026-01-05", "January is 01, not 00");
+  assert.equal(dayKey(new Date(2026, 10, 5).getTime()), "2026-11-05", "November is 11, not 10");
+  assert.equal(dayKey(new Date(2026, 11, 31).getTime()), "2026-12-31");
+});
+
+test("the Yesterday boundary follows the clock, not a 24-hour constant", () => {
+  // A local day is 23 hours when the clock springs forward and 25 when it
+  // falls back, so `midnight - 86_400_000` misses yesterday's start by an hour
+  // twice a year. Assigning `TZ` here is what makes that reachable: Node clears
+  // its cached zone on assignment, and CI runs in UTC, which has no DST at all.
+  const previous = process.env["TZ"];
+  process.env["TZ"] = "Europe/London";
+
+  try {
+    // 2026-03-29 01:00 UTC is when London goes to BST, so 2026-03-29 is 23
+    // hours long. `now` is noon on the 30th; yesterday is the short day.
+    const now = new Date(2026, 2, 30, 12, 0, 0).getTime();
+    const yesterdayStarted = new Date(2026, 2, 29, 0, 0, 0).getTime();
+
+    assert.equal(dayLabel(yesterdayStarted, now), "Yesterday");
+    // One millisecond earlier is the day before, and must not be "Yesterday" —
+    // the 24-hour subtraction reached a whole hour past this point.
+    assert.notEqual(dayLabel(yesterdayStarted - 1, now), "Yesterday");
+    assert.notEqual(dayLabel(yesterdayStarted - 3_600_000, now), "Yesterday");
+
+    // And the long day, in the other direction: 2026-10-25 is 25 hours, so a
+    // capture in its first hour was filed under a date heading while the rest
+    // of the same day read "Yesterday".
+    const autumnNow = new Date(2026, 9, 26, 12, 0, 0).getTime();
+    const autumnStarted = new Date(2026, 9, 25, 0, 30, 0).getTime();
+    assert.equal(dayLabel(autumnStarted, autumnNow), "Yesterday");
+  } finally {
+    if (previous === undefined) delete process.env["TZ"];
+    else process.env["TZ"] = previous;
+  }
+});
+
+test("Yesterday rolls into the previous month and year", () => {
+  // `getDate() - 1` is 0 on the first of a month, which `Date` resolves to the
+  // last day of the one before — including across a year boundary.
+  const firstOfMarch = new Date(2026, 2, 1, 12, 0, 0).getTime();
+  assert.equal(dayLabel(new Date(2026, 1, 28, 23, 0, 0).getTime(), firstOfMarch), "Yesterday");
+
+  const newYear = new Date(2026, 0, 1, 12, 0, 0).getTime();
+  assert.equal(dayLabel(new Date(2025, 11, 31, 23, 0, 0).getTime(), newYear), "Yesterday");
+});
+
+test("a size never renders in the unit below the one it belongs to", () => {
+  // The unit was picked from the unrounded value, so 1,048,064 bytes left it at
+  // 1023.5 kB and `toFixed(0)` printed "1024 kB" on a badge that should read
+  // "1.0 MB". A band of sizes below every power of 1024 was affected.
+  assert.equal(formatBytes(1_048_064), "1.0 MB");
+  assert.equal(formatBytes(1_048_575), "1.0 MB");
+  assert.equal(formatBytes(1_073_741_312), "1.0 GB");
+  // And the ordinary cases are untouched.
+  assert.equal(formatBytes(1023), "1023 B");
+  assert.equal(formatBytes(1024), "1.0 kB");
+});
+
+test("a day heading carries the year only when it is not this one", () => {
+  // `dayKey` carries the year, so a pin from last July and one from this July
+  // are correctly two groups — and both headed "26 July", which reads as one
+  // group split for no reason. Pinned captures ignore retention and the item
+  // cap and survive restarts, so that pair is ordinary.
+  const now = new Date(2026, 6, 30, 12, 0, 0).getTime();
+
+  const thisYear = dayLabel(new Date(2026, 6, 26, 9, 0, 0).getTime(), now);
+  const lastYear = dayLabel(new Date(2025, 6, 26, 9, 0, 0).getTime(), now);
+
+  assert.notEqual(thisYear, lastYear, "two years cannot share one heading");
+  assert.match(lastYear, /2025/);
+  assert.doesNotMatch(thisYear, /2026/, "this year is the default and stays unsaid");
 });

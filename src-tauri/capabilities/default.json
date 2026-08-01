@@ -1,18 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Baseline permissions for the Shotshelf shelf window. Every entry is local-device only — nothing here can reach the network. Clipboard read/monitor catch Win+Shift+S / cmd-ctrl-shift-4 captures (phase 02); clipboard write backs the copy fallback for drag-out (phase 04).",
+  "description": "What the shelf window itself may do. Capabilities gate the webview — the least-trusted process here — and nothing else: work done in Rust with an AppHandle is not covered by this file, so a permission listed for the benefit of Rust code grants reach to the webview and buys nothing. Every entry below has a caller in src/, and that is the whole rule. It was not: this listed `core:default`, which is nine permission sets. Two of them mattered rather than merely being untidy. `core:image` allows `from-path` and `rgba` together, which is a file-read primitive that goes around `webview_path` and the asset-protocol scope — the two things the app's confinement rests on — and reaches any decodable image on disk. `core:tray` and `core:menu` let the webview rewrite the tray icon, replace the menus and set the app menu. Neither is used by anything. The whole Tauri JS surface this app touches is `invoke` and `convertFileSrc` (not ACL-gated), `listen`, and `getCurrentWindow().onFocusChanged`, which routes through `listen` — plus `data-tauri-drag-region` in index.html and the drag plugin. Those are the three below — `unlisten` was a fourth until it was noticed that nothing calls it: `subscribe` in main.ts discards every registration, and no `once` is used, so the only caller of `plugin:event|unlisten` would have been code that does not exist. NOT VERIFIED AT RUNTIME: the packaged app has never been launched, so a narrowing that is too tight would show up as a broken webview rather than as a failing gate. See SECURITY.md.",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    "core:window:allow-show",
-    "core:window:allow-hide",
-    "core:window:allow-set-focus",
+    "core:event:allow-listen",
     "core:window:allow-start-dragging",
-    "fs:default",
-    "clipboard:read-all",
-    "clipboard:monitor-all",
-    "clipboard:write-all",
     "drag:default"
   ]
 }

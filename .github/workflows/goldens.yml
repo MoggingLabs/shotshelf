@@ -1,0 +1,58 @@
+name: Appearance goldens
+
+# Pixel goldens are taken on Linux and compared on Linux, because font
+# rasterisation differs between operating systems and a golden compared across
+# them fails on every glyph. Nobody here develops on Linux, so this is how the
+# reference images get made: run it, download the artifact, look at the images,
+# and commit them.
+#
+# Deliberately manual *in effect*: this only ever uploads an artifact for a
+# person to look at — it never commits. The push trigger below exists because
+# `workflow_dispatch` can only start a workflow that exists on the default
+# branch, which this one did not when the design system landed on a feature
+# branch and invalidated every golden at once. A visual regression still
+# cannot sign off on itself: the human inspecting and committing the images
+# is the approval, and that step has no automation.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - src/styles.css
+      - index.html
+      - "tests/visual/**"
+      - .github/workflows/goldens.yml
+
+permissions:
+  contents: read
+
+jobs:
+  goldens:
+    name: Regenerate on Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx playwright install chromium --with-deps
+
+      - name: Take the goldens
+        run: npx playwright test tests/visual --update-snapshots
+
+      - name: Upload them
+        uses: actions/upload-artifact@v7
+        # This workflow exists to hand back goldens when the visual suite
+        # *fails*, and without `always()` the upload is skipped in exactly that
+        # case. `ci.yml` gets this right; this one did not.
+        if: always()
+        with:
+          name: appearance-goldens
+          path: tests/visual/**/*.png
+          retention-days: 7
+          if-no-files-found: error

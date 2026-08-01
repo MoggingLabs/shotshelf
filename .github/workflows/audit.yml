@@ -1,0 +1,94 @@
+name: Advisories
+
+# What the dependency tree is carrying, and whether it changed.
+#
+# `SECURITY.md` tracked this by hand and said "one open advisory"; `cargo audit`
+# reports eighteen — one unsoundness and seventeen unmaintained crates, most of
+# them Tauri's GTK3 stack. None is a vulnerability. The problem was never the
+# reasoning about them, it was that a hand-written list of a moving set has no
+# signal when it stops being true.
+#
+# Deliberately its own workflow, not a job in `ci.yml`:
+#
+#   - It is the one check whose answer can change with **no commit at all** —
+#     RUSTSEC publishes on its own schedule. Inside `ci.yml` that means an
+#     advisory filed overnight turns every unrelated pull request red, which is
+#     how a check gets ignored and then removed.
+#   - It needs the network and a `cargo install`, and `npm run gate` is meant to
+#     run on a laptop with neither.
+#
+# So: weekly, plus whenever a lockfile actually moves, plus on demand.
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  push:
+    paths:
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - package-lock.json
+      - tests/fixtures/known-advisories.json
+      - .github/workflows/audit.yml
+  pull_request:
+    paths:
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - package-lock.json
+      - tests/fixtures/known-advisories.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  advisories:
+    name: Rust and npm advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Cached, because building `cargo-audit` from source on every run is
+      # several minutes for a tool that changes far less often than this fires.
+      - name: Cache cargo-audit
+        id: audit-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}
+
+      - name: Install cargo-audit
+        if: steps.audit-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --locked
+
+      # The Rust half: the reported set against the recorded one, both ways.
+      # A *new* advisory fails, and so does one that has cleared — the glib
+      # entry is documented as "will clear when Tauri updates", and this is
+      # what notices the day it does.
+      - name: Rust advisories
+        run: node scripts/check-advisories.mjs
+
+      # The npm half needs no fixture: this tree has no accepted findings, so
+      # the honest threshold is zero rather than a list of exceptions. `--omit
+      # dev` is deliberate — a devDependency advisory matters to a contributor's
+      # machine, not to a shipped build, and mixing the two is how the signal
+      # gets lost. Both are reported; only the production one fails.
+      - name: npm advisories (production)
+        run: npm audit --omit dev --audit-level=low
+
+      - name: npm advisories (development, advisory only)
+        if: '!cancelled()'
+        continue-on-error: true
+        run: npm audit --audit-level=high

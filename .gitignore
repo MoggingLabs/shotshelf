@@ -39,8 +39,15 @@ snapshots/
 *.snapshot.json
 recon/
 
-# ── Local-only build prompts (never shipped) ────────────────────────
-prompts/
+# ── Build prompts ───────────────────────────────────────────────────
+# `prompts/` was git-ignored under a "never shipped" rule, then tracked
+# (2026-07-31) so the build prompts and RESEARCH.md survive machine moves — at
+# the time, safe only because the repo was made private in the same change. On
+# 2026-08-01 the owner chose to make the repo PUBLIC again to restore free CI,
+# keeping prompts/ and docs/council/ tracked: they are methodology, not
+# secrets, and the tracked tree was scanned for credential-shaped strings
+# before the flip. The gates still forbid what must never ship — captures,
+# keys, real user paths.
 
 # ── Third-party reference repos (unlicensed; consult, don't ship) ────
 reference/
@@ -66,3 +73,13 @@ src-tauri/binaries/
 *.exe
 release/
 out/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# Review agents run in throwaway git worktrees under here. They are clones of
+# this repository, not part of it — one round committed two of them by accident.
+.claude/worktrees/

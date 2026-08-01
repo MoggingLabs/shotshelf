@@ -1,14 +1,24 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    // ES2022 because Tauri v2 only runs on WebView2 and WKWebView, both of
+    // which are far past it — and because ES2020 silently withheld
+    // `Array.prototype.at`, leaving `.at(-1)` typed as an error and every
+    // expression built on it unchecked.
+    "target": "ES2022",
     "useDefineForClassFields": true,
     "module": "ESNext",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "moduleResolution": "bundler",
     // Node's built-in test runner resolves the real file, so imports carry the
     // .ts extension. Vite is happy with them either way.
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
+    // The gate scripts are plain Node .mjs. In the project so the type-aware
+    // lint sees them as project files — typescript-eslint caps its default-
+    // project escape hatch at eight files and the ninth script hit it. Without
+    // `checkJs` they are parsed, not type-checked, which is what they were
+    // getting under the escape hatch anyway.
+    "allowJs": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
@@ -22,5 +32,9 @@
 
     "types": ["vite/client", "node"]
   },
-  "include": ["src"]
+  // Tests and build config are type-checked too. A harness that has drifted
+  // from the app it drives is a gate that has quietly stopped biting, and the
+  // compiler is the cheapest place to notice. The scripts ride along parsed
+  // but unchecked — see `allowJs` above.
+  "include": ["src", "tests", "scripts", "vite.config.ts", "playwright.config.ts"]
 }

@@ -8,9 +8,25 @@ name: Release
 # succeeds and produces UNSIGNED artifacts — useful for checking the bundle,
 # useless for handing to a teammate.
 
+# The weekly run is a smoke test, not a release.
+#
+# `SECURITY.md` records that no installer has ever been built on any machine:
+# this workflow fired on `v*` tags, of which there are none, and on manual
+# dispatch, which had never been run. `ci.yml` runs `cargo build` and never
+# `tauri build`, so the entire bundling path — `scripts/build-release.mjs`, the
+# sidecar, NSIS/MSI/DMG generation, updater artifacts — was unexecuted code.
+# The first time anyone ran it would have been the day it was needed.
+#
+# A schedule is the cheapest way to stop that being true. It costs two runners
+# a week and it fails on the Monday the bundler breaks rather than on the
+# afternoon someone is trying to ship. Deliberately not on every push to main:
+# a full release build on two OSes is far more runner time than the change
+# rate here justifies, and `ci.yml` already covers whether the code compiles.
 on:
   push:
     tags: ["v*"]
+  schedule:
+    - cron: "0 4 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -24,6 +40,29 @@ jobs:
   bundle:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    # A release build is the gate plus a full optimised Tauri bundle, so this is
+    # roomier than `ci.yml`'s. It is still a ceiling rather than an estimate:
+    # the default is six hours, and a bundler waiting on a notarization service
+    # that never answers would sit there for all of them.
+    timeout-minutes: 90
+    # Promoted to a job-level env var because `secrets` is **not** among the
+    # contexts available to a step's `if:` — GitHub's context table lists
+    # github, needs, strategy, matrix, job, runner, env, vars, steps and inputs,
+    # and nothing else. `if: ${{ secrets.X != '' }}` therefore either fails the
+    # workflow outright or silently never runs; either way the signature check
+    # below, which is the only thing in the repo that notices a configured key
+    # producing no `.sig`, was not a check at all. `env` *is* available, so this
+    # is the shape GitHub's own secrets guide prescribes.
+    #
+    # A *boolean*, not the key. Job-level `env` applies to every step, so
+    # putting the minisign private key here would hand it to `npm ci` — which
+    # runs `postinstall` and every lifecycle script in the dependency tree — and
+    # to `npm run gate`, where every crate's `build.rs` and proc-macro runs with
+    # the full environment. The comparison happens here, once; only `'true'` or
+    # `'false'` travels. `TAURI_SIGNING_PRIVATE_KEY` itself still reaches the
+    # bundler alone, through the step-level `env` block.
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +84,37 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The tag is the fourth place the version is written, and the only one
+      # outside the repo.
+      #
+      # `src/version.test.ts` joins the three in-repo literals to each other and
+      # is blind to this one, so `git tag v0.2.0` on a tree at 0.1.0 built
+      # artifacts named `Shotshelf_0.1.0_…` under a `0.2.0` release. An operator
+      # following README's manifest example then publishes a `0.2.0` URL that
+      # 404s for every Windows client — or points it at the 0.1.0 file, in which
+      # case `{{current_version}}` never advances and the update is re-offered
+      # for ever.
+      #
+      # Compared against `tauri.conf.json` alone, deliberately: that is the
+      # literal the bundle is named with, and the unit test already guarantees
+      # the other two agree with it. Checking all three here would be a second
+      # copy of a rule that has an owner.
+      #
+      # Before the gate, because it costs a second and the gate costs minutes.
+      - name: Check the tag matches the shipping version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          shipping=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          tagged="${GITHUB_REF_NAME#v}"
+          if [ "$shipping" != "$tagged" ]; then
+            echo "::error::tag $GITHUB_REF_NAME ships version $shipping." \
+                 "Bump tauri.conf.json (and let src/version.test.ts check the rest)," \
+                 "or retag."
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME matches the shipping version $shipping."
+
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -54,14 +124,45 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build frontend
-        run: npm run build
-
+      # The toolchain, before the gate rather than after it.
+      #
+      # `npm run gate` runs `cargo fmt --check`, `clippy -D warnings`,
+      # `cargo test` and `cargo build`. With these two steps below the gate, all
+      # four ran on whatever Rust the runner image happened to ship, uncached —
+      # a different compiler from the one `ci.yml` checks with and from the one
+      # that goes on to build the bundle a few steps later.
       - uses: dtolnay/rust-toolchain@stable
+        # Asked for rather than assumed. The gate's first two commands are
+        # `cargo fmt --check` and `cargo clippy`, this action installs with
+        # `--profile minimal`, and only the runner image happening to
+        # preinstall them made it work. `ci.yml` already spells it out.
+        with:
+          components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+
+      # The gate, before anything is bundled.
+      #
+      # This workflow triggers on a `v*` tag and `ci.yml` does not — so a tag
+      # on a red commit built and "released" it, with no lint, no tests and no
+      # clippy anywhere in the path. A release is the one build that must not
+      # be the unchecked one.
+      #
+      # One part of it is a no-op here, and deliberately: the pixel goldens in
+      # `tests/visual/appearance.spec.ts` skip on anything but Linux — font
+      # rasterisation differs between platforms — and there is no Linux runner
+      # in this matrix, because there is no Linux artifact to build. Appearance
+      # is gated by `ci.yml`, which does run on `ubuntu-latest`, on the same
+      # commit. Worth knowing rather than assuming this run covers it.
+      - name: Gate
+        run: |
+          npx playwright install chromium --with-deps
+          npm run gate
+
+      - name: Build frontend
+        run: npm run build
 
       - name: Bundle installers
         run: npm run release
@@ -77,6 +178,31 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
+      # A release with signing configured but broken must not look like a good
+      # one.
+      #
+      # `if-no-files-found: error` checks the *aggregate*, so it cannot see
+      # this: with a typo'd or expired key, `build-release.mjs` never sets
+      # `createUpdaterArtifacts`, Windows still uploads two installers and macOS
+      # still uploads a `.dmg` — the job goes green having produced no updater
+      # payload and no signature at all. Nothing else in the repo checks that a
+      # `.sig` exists.
+      #
+      # Conditional on the secret, because an unsigned build is a supported and
+      # documented outcome. The failure being caught is "you meant to sign and
+      # did not", which is silent in every other signal.
+      - name: Check the signed artifacts were actually signed
+        if: env.HAS_SIGNING_KEY == 'true'
+        shell: bash
+        run: |
+          signatures=$(find src-tauri/target/release/bundle -type f -name '*.sig' | wc -l)
+          if [ "$signatures" -eq 0 ]; then
+            echo "::error::a signing key is configured but no .sig was produced." \
+                 "The updater payload would be unusable; check the key and its password."
+            exit 1
+          fi
+          echo "Produced $signatures signature(s)."
+
       # Proves the sidecar actually made it inside, rather than only into the
       # build directory — a bundle without ffmpeg still runs, it just silently
       # stops making poster frames.
@@ -90,8 +216,80 @@ jobs:
           echo "--- ffmpeg alongside the binary ---"
           find src-tauri/target/release -maxdepth 1 -name 'ffmpeg*' -exec ls -lh {} \;
 
+      # Named with the ref, so a hand-dispatched build cannot be mistaken for a
+      # tagged release.
+      #
+      # `workflow_dispatch` runs from a branch, where `github.ref_type` is
+      # `branch`, so the tag-vs-version check above is skipped — correctly,
+      # since there is no tag to check. What was wrong is that the result was
+      # then indistinguishable: the artifact was `shotshelf-windows-latest`
+      # either way, with no ref and no version anywhere in the name.
       - uses: actions/upload-artifact@v7
         with:
-          name: shotshelf-${{ matrix.os }}
+          name: shotshelf-${{ matrix.os }}-${{ github.ref_name }}
           path: ${{ matrix.artifacts }}
           if-no-files-found: error
+
+  # A tag becomes a GitHub Release people can actually download from.
+  #
+  # Workflow artifacts require a signed-in GitHub account and expire; handing a
+  # teammate an installer means handing them a URL that works. Only on tags —
+  # the weekly schedule and hand dispatches stay smoke tests whose output lives
+  # and dies as artifacts — and with `contents: write` scoped to this one job,
+  # not the workflow: the bundle job runs `npm ci` and the whole gate, and none
+  # of that code needs a token that can write to the repository.
+  publish:
+    name: Publish the release
+    needs: bundle
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: shotshelf-*
+          merge-multiple: true
+          path: dist
+
+      # The artifacts keep their `src-tauri/target/…` directory shape; a
+      # Release wants flat files with a checksum list alongside. Checksums are
+      # what let an unsigned internal build be verified at all — no signature
+      # means the SHA256 is the only integrity statement there is.
+      - name: Flatten and checksum
+        working-directory: dist
+        run: |
+          find . -type f \( -name '*.msi' -o -name '*.exe' -o -name '*.dmg' \
+            -o -name '*.tar.gz' -o -name '*.sig' \) -exec mv {} . \;
+          find . -mindepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create the GitHub Release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md << 'EOF'
+          Built by the release workflow from this tag, with the full gate run
+          on both bundling platforms first.
+
+          **Signing status is stated per artifact era, not assumed.** If no
+          `.sig` files are attached, this build is **unsigned**: Windows will
+          show SmartScreen warnings (and machines enforcing Smart App Control
+          will refuse it entirely), and macOS requires right-click → Open the
+          first time. `SHA256SUMS.txt` is the integrity statement — verify a
+          download against it before installing.
+
+          What has and has not been verified on each OS is `docs/PARITY.md`,
+          and what the app does and never does is `SECURITY.md` — local-only,
+          one update-check request, captures never leave the machine.
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Shotshelf $GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            --verify-tag \
+            *.msi *.exe SHA256SUMS.txt $(ls *.dmg *.tar.gz *.sig 2>/dev/null || true)

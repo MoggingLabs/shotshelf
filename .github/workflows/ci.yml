@@ -7,9 +7,42 @@ name: CI
 # still hold together. This is not theoretical: the first Linux run caught an
 # unused parameter in `apply_material`, which has no backdrop branch there.
 
+# Every branch, not just `main`.
+#
+# **The first version of this comment was wrong and is worth keeping wrong-side-up.**
+# It said `feat/enrich-and-edit` was "109 commits with no pull request — so not
+# one of them was ever checked by anything". Pull request #14 has been open on
+# that branch since 2026-07-28, and CI ran on it: the 2026-07-30 run had Windows
+# and macOS green and Linux red. The claim was asserted from reading this file's
+# triggers instead of from looking, which is the exact defect this repository
+# most often catches in its own prose.
+#
+# What is true: the branch tip did ship a red `npm run deadcode`, and CI did not
+# catch it — because every run since 2026-07-31 has died in seconds on "the job
+# was not started because recent account payments have failed or your spending
+# limit needs to be increased". A billing stop, not a trigger gap.
+#
+# Running on every branch is still worth having, for the narrower reason that a
+# branch should not need a pull request to be checked, and pushes between syncs
+# should be checked too. It is not the reason the gate went red.
+#
+# A long-lived branch is the normal way this product is built, so "open a pull
+# request earlier" is a process fix for a tooling problem. The `if:` below is
+# what keeps that from doubling every run: a branch in this repository is
+# checked on push, and `pull_request` is left to do the one job push cannot —
+# checking a fork, whose commits never land here as a push event.
+#
+# **One thing to check before relying on this.** For a same-repository pull
+# request the job is *skipped*, because the identical commit was already checked
+# on push. If this repository ever turns on required status checks naming
+# `Windows` / `macOS` / `Linux`, a skipped job may never report and the pull
+# request can sit unmergeable for ever. Nothing here can see the repository's
+# branch-protection settings, so this is written down rather than assumed. The
+# fix, if that happens, is one line: delete the `if:` and accept that a
+# same-repo pull request runs the matrix twice.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
@@ -24,6 +57,13 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository
+    # The default is six hours. Every leg of this has finished well inside
+    # twenty minutes, and a hung runner should stop being charged for long
+    # before it stops being useful.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -62,16 +102,44 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      # Node's own runner, on the pure helpers. Every bug these cover shipped
+      # Correctness rules, not house style: floating promises and unawaited
+      # IPC are the shape of the bugs that have actually shipped here.
+      - name: Lint
+        run: npm run lint
+
+      # "No dead code" is a requirement, so it is enforced rather than
+      # remembered. This has already caught an unused constant, an unused
+      # export, and a plugin that was registered and granted a filesystem
+      # capability while nothing called it.
+      - name: Dead code
+        if: '!cancelled()'
+        run: npm run deadcode
+
+      # Node's own runner, on the pure rules. Every bug these cover shipped
       # once: a byte count rendered as "48 B", day keys that sorted December
-      # before June.
-      - name: Test frontend
-        run: npm test
+      # before June, a month index written out zero-based.
+      - name: Unit tests
+        if: '!cancelled()'
+        run: npm run test:unit
 
       # Type-checks with `tsc --noEmit` and writes dist/, which the Rust build
       # embeds via `frontendDist` — so this has to run before cargo.
       - name: Build frontend
+        if: '!cancelled()'
         run: npm run build
+
+      - name: Install Playwright browser
+        if: '!cancelled()'
+        run: npx playwright install chromium --with-deps
+
+      # The real front-end in a real browser, with the Tauri runtime stubbed.
+      # Behaviour on every OS. The geometry-and-computed-style half of the
+      # appearance gate lives in `tests/visual` and runs in the step below, not
+      # here — `npm run test:e2e` is `playwright test tests/e2e` and nothing
+      # else, which this used to claim otherwise.
+      - name: Front-end behaviour
+        if: '!cancelled()'
+        run: npm run test:e2e -- --fail-on-flaky-tests
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -82,16 +150,54 @@ jobs:
           workspaces: src-tauri
 
       - name: rustfmt
+        if: '!cancelled()'
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
 
       - name: clippy
+        if: '!cancelled()'
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
-      - name: Test
-        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+      # `--all-targets`: lib, bins and — crucially — anything under
+      # `src-tauri/tests/`. It is not `--lib`, which was here briefly and would
+      # have silently not run an integration test the moment one was added,
+      # which is the wider form of the same gate the local `npm run gate` runs.
+      #
+      # It is also not plain `cargo test`, which additionally invokes rustdoc.
+      # This crate has no doctests, and rustdoc is one of the binaries Windows
+      # Smart App Control refuses on the development machine when freshly
+      # linked (os error 4551), so including it would make the local gate
+      # unrunnable for no coverage.
+      - name: Rust tests
+        if: '!cancelled()'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
 
       - name: Build app
+        if: '!cancelled()'
         run: cargo build --manifest-path src-tauri/Cargo.toml
+
+      # Pixel goldens are Linux-only by design: font rasterisation differs
+      # between operating systems, and a golden compared across them fails on
+      # every glyph. The specs skip themselves elsewhere.
+      - name: Appearance
+        if: '!cancelled()'
+        run: npm run test:visual -- --fail-on-flaky-tests
+
+      # On failure this carries the diff images. It also carries the snapshot
+      # directory, because a *missing* golden is a failure too and Playwright
+      # writes the new image there — which is how the first set of goldens
+      # gets off the Linux runner and into the repository.
+      - name: Upload appearance diffs and goldens
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: appearance-${{ matrix.name }}
+          path: |
+            playwright-report/
+            test-results/
+            tests/visual/**/*.png
+          retention-days: 7
+          if-no-files-found: ignore
+
 
 # Runners come with what Tauri v2 needs: MSVC + WebView2 on Windows, the Xcode
 # command line tools on macOS. Linux needs the apt step above. This workflow

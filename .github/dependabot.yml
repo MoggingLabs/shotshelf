@@ -1,0 +1,54 @@
+version: 2
+
+# Three ecosystems, because this repository has three and an unattended one is
+# the one that rots. `SECURITY.md` carries an advisory that "will clear when
+# Tauri updates" — a sentence that is only true if something is watching for
+# the update.
+#
+# Weekly rather than daily: the gate is a three-OS matrix plus a full Rust
+# build, and a daily sweep across three ecosystems would spend more runner time
+# on dependency churn than on the product.
+#
+# Grouped, deliberately. Ungrouped, a week where Tauri moves its GTK stack is
+# eleven pull requests that must land together or not at all; grouped, it is
+# one that the gate either passes or does not.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # The toolchain moves as a unit — a TypeScript bump that eslint has not
+      # caught up with fails as a pair, and reviewing it as a pair is the only
+      # way that reads.
+      dev-toolchain:
+        dependency-type: development
+      runtime:
+        dependency-type: production
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Tauri's own crates are version-locked to each other in practice;
+      # splitting them produces pull requests that cannot build alone.
+      tauri:
+        patterns:
+          - "tauri*"
+      rest:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "tauri*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"

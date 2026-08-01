@@ -1,0 +1,66 @@
+# Which directory root a path comes from is a privacy decision, not a filing
+# one — see `src-tauri/src/dirs.rs`. On Windows `app_config_dir` and `app_data_dir` are
+# the same directory (the roaming profile, copied to a network share at logoff
+# under Enterprise State Roaming), and a capture's path names client and
+# project work as readily as a window title does.
+#
+# `dirs.rs` is the one module allowed to resolve a root, so the rule is stated
+# once. Clippy matches on the resolved path, which is what makes this stronger
+# than the substring scan in `scripts/check-dirs.mjs`: it sees UFCS and renamed
+# imports too.
+#
+# `BaseDirectory` is listed as a disallowed *type* rather than left to the
+# script. The script matched the literal text `BaseDirectory::`, which one
+# import alias defeated — it matches the bare name now, and catches this too,
+# but clippy is the one that resolves the path rather than the spelling:
+#
+#     use tauri::path::BaseDirectory as Roaming;
+#     app.path().resolve("pinned.json", Roaming::AppData)
+#
+# That reaches the roaming profile with the script reporting success, because
+# the string never appears. Clippy resolves paths, so the alias is the same type
+# and it fires either way. Both files used to claim the other covered this;
+# neither did.
+#
+# The script still runs, and still covers what clippy cannot: it reads files
+# rustc never compiles — a module not yet declared in `lib.rs`, or one behind a
+# `cfg` for another OS.
+#
+# `src-tauri/src/dirs.rs` carries **no** blanket allowance — it has one per
+# resolving statement, because a file-scope `#![allow(clippy::disallowed_methods)]`
+# also silences `Scope::allow_directory`, which that module must never call. It
+# needs no `disallowed_types` allowance either: it resolves roots by calling the
+# `PathResolver` functions and never names `BaseDirectory`.
+disallowed-methods = [
+  { path = "tauri::path::PathResolver::app_data_dir", reason = "roaming; go through `dirs::preferences`" },
+  { path = "tauri::path::PathResolver::app_config_dir", reason = "roaming; go through `dirs::preferences`" },
+  { path = "tauri::path::PathResolver::app_local_data_dir", reason = "go through `dirs::local`" },
+  { path = "tauri::path::PathResolver::app_cache_dir", reason = "go through `dirs::cache`" },
+  # The roaming root itself, not just the Tauri functions under it.
+  #
+  # `check-dirs.mjs` holds this to one caller by matching the text
+  # `dirs::preferences`, which `use crate::dirs as roots; roots::preferences(app)`
+  # walks straight past — a reviewer wrote a capture path into the roaming
+  # profile that way with both gates green, which is the one thing SECURITY.md
+  # promises cannot happen. Clippy resolves the path, so the alias is the same
+  # function.
+  { path = "shotshelf_lib::dirs::preferences", reason = "the roaming profile: only `settings.rs` may, and only for settings" },
+  # Opening a folder to the webview, rather than a file.
+  #
+  # `allow_directory(p, false)` admits `p` *and* `p/*`. That is right for the
+  # watch list and the two caches Shotshelf writes, and wrong everywhere else —
+  # a pinned-capture grant that used it was a shipped escalation.
+  #
+  # `check-dirs.mjs` has the rule too, but matches the text `.allow_directory(`,
+  # and a reviewer walked past it with
+  # `tauri::scope::fs::Scope::allow_directory(&scope, &dir, false)` — the third
+  # time a spelling-matched rule in that script has been bypassed this way.
+  # Clippy resolves the path, so UFCS and aliases are the same call. The three
+  # legitimate granters carry a named `#[allow]`, which makes each one a
+  # decision in a diff rather than an entry in a list.
+  { path = "tauri::scope::fs::Scope::allow_directory", reason = "opens every file beside the one named; only the three modules whose grants are folders by design may call it" },
+]
+
+disallowed-types = [
+  { path = "tauri::path::BaseDirectory", reason = "resolves a root without naming it; go through `dirs`" },
+]

@@ -10,7 +10,15 @@ edition = "2021"
 [lib]
 # Tauri v2 keeps the app in a library so the binary stays a one-line entry point.
 name = "shotshelf_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+#
+# `rlib` only. The Tauri template ships `["staticlib", "cdylib", "rlib"]` for
+# its mobile targets, and this project has none: no `gen/apple`, no
+# `gen/android`, no mobile entry point, and `main.rs` links the rlib. The
+# other two were built by every `cargo build` in the gate for nothing —
+# a 1.45 GB static archive and a DLL that nothing loads. They were also the
+# red herring `webview_path.rs` spent a paragraph retracting. Add them back
+# with the mobile target that needs them, not before.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -30,13 +38,12 @@ tauri = { version = "2", features = [
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# ── Adopted plugins (see prompts/RESEARCH.md) — registered in src/lib.rs ──
-tauri-plugin-fs = "2"                                             # read captures off disk
+# ── Adopted plugins (the research behind these is kept locally and is not in the repo) — registered in src/lib.rs ──
 tauri-plugin-clipboard = "2"                                      # clipboard images (phase 02)
 tauri-plugin-drag = "2"                                           # native drag-out (phase 04)
 tauri-plugin-shell = "2"                                          # runs the bundled ffmpeg sidecar
 tauri-plugin-global-shortcut = "2"                                # show/hide hotkey (phase 06)
-tauri-plugin-updater = "2"                                        # in-place updates from the internal feed
+tauri-plugin-updater = "2"                                        # asks the internal feed whether a newer build exists; installs nothing
 window-vibrancy = "0.8"                                           # acrylic / vibrancy behind the popover
 tauri-plugin-single-instance = "2"                                # one shelf, one catcher
 
@@ -45,8 +52,127 @@ tauri-plugin-single-instance = "2"                                # one shelf, o
 notify = "8"
 notify-debouncer-full = "0.7"
 
+# Pixel work: downscaling a capture for hand-off, and diffing a before against
+# an after.
+#
+# The narrowing is a statement of intent, not an effective one, and saying so
+# here is the point: `tauri` itself depends on `image` with default features,
+# and Cargo unifies features across the graph, so `cargo tree -f "{p} | {f}"`
+# resolves the full default set — avif, bmp, gif, tiff and the rest — however
+# this line is written. The compile time is paid either way.
+#
+# Kept because it is the correct declaration of what Shotshelf meets (PNG, JPEG
+# and WebP) and it becomes effective the day Tauri narrows its own. The claim it
+# used to make — that this saved compile time for decoders nothing calls — was
+# measurably false, and it is worth knowing that `imaging::load` will in fact
+# decode considerably more than these three.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+# Secret detection over recognised text. Hand-rolling this many patterns would
+# be a worse bet than a well-tested engine, and `regex` guarantees linear time,
+# so a pathological screenshot cannot hang the catch pipeline.
+regex = "1"
+
+# Just the semaphore, to keep a burst of tiles from becoming a burst of OCR
+# engines. Tauri already runs on tokio, so this is the runtime already present.
+tokio = { version = "1", default-features = false, features = ["sync", "time"] }
+
+# "Show in folder": Explorer `/select`, Finder reveal, FileManager1 on Linux.
+# The crate `tauri-plugin-opener` itself wraps, used from the Rust side only,
+# so the webview gains no new permission — `share::reveal_capture` is the one
+# door and it goes through the same scope check as every other capture read.
+# The `reveal` feature's Linux half rides the `dbus` crate this tree already
+# carried; `cargo add` locked only `opener`, `bstr` and `normpath`.
+opener = { version = "0.8.5", features = ["reveal"] }
+
+# The frontmost application's name, which needs no permission at all — unlike
+# its window title, which on macOS needs Screen Recording. See enrich/foreground.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSWorkspace",
+    "NSRunningApplication",
+] }
+
+# Text recognition, the same engine Preview and Quick Look use. Needs no
+# permission and no network — see enrich/ocr.
+objc2-vision = { version = "0.3", default-features = false, features = [
+    "std",
+    "VNRequest",
+    "VNRecognizeTextRequest",
+    "VNObservation",
+    "VNRequestHandler",
+    "VNTypes",
+] }
+# The runtime itself, for the `AnyThread` trait that provides `alloc`.
+objc2 = { version = "0.6", default-features = false, features = ["std"] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSString",
+    "NSArray",
+    "NSURL",
+    "NSError",
+] }
+
 # Rounded window corners, which CSS cannot deliver on its own — see
 # `window::round_corners`. Same version Tauri already depends on, so this only
 # turns on an extra feature rather than pulling a second copy of the crate.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",   # rounded window corners
+    "Media_Ocr",            # the OS text recogniser
+    "Win32_UI_WindowsAndMessaging", # which window was in front
+    "Win32_System_Threading",       # and which program owns it
+    "Graphics_Imaging",     # decoding a capture for it
+    "Storage_Streams",      # feeding it bytes without going through StorageFile
+    "Globalization",        # it follows the user's own language list
+] }
+
+[dev-dependencies]
+# The `test` feature, and only for tests.
+#
+# `tauri::test::mock_builder()` is what lets a test build a real `App` and call
+# a real `#[tauri::command]`. Nothing here could before: no Rust test can
+# construct an `AppHandle` unaided, and `tests/harness/tauri-mock.ts` replaces
+# `window.__TAURI_INTERNALS__` wholesale, so no browser spec executes a command
+# either. The whole IPC tier had no executable gate of any kind.
+#
+# Landing this needed the ComCtl32 v6 manifest `build.rs` now embeds into test
+# targets — without it any test binary reaching the Tauri runtime dies at load
+# with STATUS_ENTRYPOINT_NOT_FOUND. That was recorded for several rounds as an
+# unexplained, probably machine-specific failure. It was neither.
+#
+# In `[dev-dependencies]` so a release build never carries the harness.
+tauri = { version = "2", features = ["test"] }
+
+
+
+# Casts are checked, so the allowances that name them mean something.
+#
+# These four are clippy `pedantic` lints — allow-by-default. Before this block
+# existed the crate carried `#[allow(clippy::cast_*)]` attributes silencing
+# lints nothing had ever enabled: dead attributes, whose inline comments
+# ("Guarded non-negative above.") read as though a tool had demanded the guard,
+# and whose entries in `check-dirs.mjs`'s allowance table documented a decision
+# no tool would ever have raised. Deleting them all left
+# `cargo clippy -- -D warnings` at exit 0.
+#
+# Turning them on is the half that was missing. This crate converts between
+# `u32`, `i32`, `f64`, `u64` and `usize` constantly — screen coordinates, scale
+# factors, image dimensions, byte counts, ffmpeg durations — and a wrong one is
+# a window placed off-screen or an allocation sized from a negative number.
+# `window::place` was exactly that computation and exactly what the first
+# version of this comment cited as the motivation while leaving it unlinted:
+# `area.size.width as i32` *wraps* above 2^31 rather than saturating, so it
+# placed the window at a negative coordinate. It saturates now.
+#
+# No count of the allowances is given here. `check-dirs.mjs` holds them by name
+# and states the rule this sentence would otherwise break — "No count is quoted,
+# here or anywhere: the table is the count" — and the first version of this
+# comment quoted a number that was already wrong when it was written.
+[lints.clippy]
+cast_sign_loss = "warn"
+cast_precision_loss = "warn"
+cast_possible_truncation = "warn"
+cast_possible_wrap = "warn"

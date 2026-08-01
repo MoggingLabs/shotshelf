@@ -1,0 +1,52 @@
+---
+name: shotshelf-standing-constraints
+description: "Shotshelf invariants that must never be broken, and the limits already known and accepted"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: 23456be3-e691-4590-a732-093ca9cbb716
+  modified: 2026-07-31T17:13:28.283Z
+---
+
+Invariants for Shotshelf. A change that breaks one of these is a blocker, and a
+council seat must not propose one as a fix.
+
+- **Local-only.** No network, telemetry or cloud. The *only* network call is the
+  update check, and switching it off opens no socket at all.
+- Never commit captures, user data, signing keys, certs or notarization creds.
+  Secrets come from env/CI only.
+- **`prompts/` is tracked, deliberately** (2026-07-31), and **the repo is
+  public again, deliberately** (2026-08-01, owner decision, to restore free
+  CI). The owner accepted that `prompts/` and `docs/council/` are published:
+  they are methodology, not secrets, and the tracked tree was scanned for
+  credential-shaped strings before the flip. Neither tracked `prompts/` nor
+  public visibility is a violation to report.
+- **Drag-out is a copy, never a move.**
+- Remove / retention / expiry are **shelf-only** and must never delete, move or
+  modify a capture file.
+- No capture path may reach the roaming profile (`%APPDATA%`).
+- All three OSes must work; a per-OS branch wrong on one of them is a blocker.
+- Reuse adopted crates/plugins rather than hand-rolling.
+- macOS Screen Recording permission is documented as NOT required and must
+  stay that way.
+
+**Known and accepted — a seat reporting these is wasting a round:** Windows
+Smart App Control blocks the unsigned dev binary; Linux drag `text/uri-list` is
+not percent-encoded (upstream `drag` crate); Linux global shortcuts can report
+success without the OS taking them, and `tray-icon`'s GTK constructor cannot
+fail; Wayland ignores window positioning; Linux watches `~/Pictures` and
+`~/Videos` broadly; the macOS clipboard URI is `file://` + raw path; Windows Authenticode
+needs a cert already in the machine store. Two entries this list used to carry
+are no longer true and are struck rather than silently dropped: the release
+workflow now publishes a GitHub Release on tags (2026-08-01), and the IPC tier
+has an executable gate — `src-tauri/tests/ipc.rs` drives the real
+`invoke_handler`, so "no browser spec executes a real `#[tauri::command]`"
+remains true but no longer describes a coverage hole.
+
+**A disclosed limit is not a finding — but a *false* disclosure is a blocker.**
+Two disclosures have already been proved false and closed: `show_shelf`'s
+claim about which mutation survives, and `showProblem`'s claim that its
+`#showing` term could not be gated. Check the remaining ones rather than
+accepting them.
+
+See [[council-cycle-state]] for where the review cycle stands.

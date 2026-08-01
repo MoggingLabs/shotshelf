@@ -12,7 +12,7 @@ use std::{
         mpsc::{self, RecvTimeoutError},
         Arc,
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use notify::{
@@ -30,6 +30,29 @@ const DEBOUNCE: Duration = Duration::from_millis(400);
 const SETTLE_TICK: Duration = Duration::from_millis(350);
 /// Screenshots are written in one go, so one unchanged size is enough.
 const IMAGE_STABLE_TICKS: u32 = 1;
+
+/// The longest this watcher can take to report a screenshot it has seen.
+///
+/// Derived, because someone else needs it and a second hand-written copy is a
+/// number that goes stale in silence. `clipboard.rs` holds every clipboard
+/// image back for a multiple of this so a Win+PrtSc — which saves a PNG *and*
+/// copies it — is shelved once rather than twice; its constant used to be a
+/// hand-chosen 1500 ms with a comment saying "debounce + settle is roughly
+/// 750 ms", computed by hand from three constants private to this module.
+///
+/// Raising `SETTLE_TICK`, or `IMAGE_STABLE_TICKS` from one to two — the same
+/// edit `VIDEO_STABLE_TICKS` below already documents wanting — would have left
+/// this watcher finishing *after* the clipboard grace expired, and every
+/// Win+PrtSc would have shelved two copies plus an unpruned PNG. Nothing joined
+/// them and no test could see it. Now the edit moves both.
+///
+/// The same expression as [`settle_budget`], which is why it *is* that
+/// expression now. It was a second copy of the formula, and the two were only
+/// checked against each other: `the_slowest_image_budget_is_the_one_settle_
+/// actually_applies` measures the real tick count and compares it to this — so
+/// dropping `DEBOUNCE` from `settle_budget` alone left every gate green, and
+/// backfill would hand over files the watcher had not finished debouncing.
+pub(super) const SLOWEST_IMAGE: Duration = settle_budget(CaptureKind::Image);
 /// Recordings grow while they record; require a real pause before believing it.
 ///
 /// This has to outlast an encoder *stalling*, not just writing slowly. ffmpeg
@@ -39,6 +62,52 @@ const IMAGE_STABLE_TICKS: u32 = 1;
 /// capture caught mid-write drags out truncated, so this errs slow: ~2.8s of
 /// genuine silence before a recording counts as done.
 const VIDEO_STABLE_TICKS: u32 = 8;
+
+/// The longest the watcher can take to believe a capture of this kind is done.
+///
+/// Derived from the settle loop's own budgets, so the two cannot drift: raising
+/// `VIDEO_STABLE_TICKS` moves this with it.
+///
+/// `to_backfill` needs it because it gets one look at a folder and cannot run a
+/// settle loop. A file written more recently than this may still be growing,
+/// and — crucially — a file that *is* still growing will produce more write
+/// events, all of them after the watcher registered, so the watcher will emit
+/// it properly. Leaving it to the watcher therefore loses nothing, while
+/// shelving it hands over a truncated container.
+///
+/// This replaced `is_readable` as backfill's answer. That signal is real but it
+/// is Windows-only — an exclusive lock is not a thing on macOS or Linux, where
+/// `File::open` succeeds on a file its writer still holds — so it answered
+/// "finished" for every in-flight recording on two of the three platforms while
+/// being presented as the general rule.
+/// `const` so `SLOWEST_IMAGE` can be this rather than a second copy of it, and
+/// so `clipboard.rs`'s `ECHO_GRACE` still derives from a compile-time value.
+// `as_millis` is a `u128` and this is const arithmetic over three constants
+// declared a few lines up, none of them a second long. `u64::try_from` is not
+// usable in a const context, so the conversion is stated here instead —
+// `Duration`'s own `+` and `*` are not const either, which is what made the
+// duplicate formula look unavoidable.
+#[allow(clippy::cast_possible_truncation)]
+#[must_use]
+pub(super) const fn settle_budget(kind: CaptureKind) -> Duration {
+    Duration::from_millis(
+        DEBOUNCE.as_millis() as u64 + SETTLE_TICK.as_millis() as u64 * stable_ticks(kind) as u64,
+    )
+}
+
+/// How many quiet ticks a capture of this kind has to go before it is finished.
+///
+/// One home, because it was written out twice — here and in `settle`'s loop —
+/// and the two only agree by inspection. `settle` is what actually applies the
+/// rule and `settle_budget` is what `to_backfill` and `clipboard.rs` predict it
+/// with; the whole point of deriving the budget is that the prediction moves
+/// when the rule does, which a second copy of the mapping quietly undoes.
+const fn stable_ticks(kind: CaptureKind) -> u32 {
+    match kind {
+        CaptureKind::Image => IMAGE_STABLE_TICKS,
+        CaptureKind::Video => VIDEO_STABLE_TICKS,
+    }
+}
 /// How long a vanished file is kept around before being forgotten.
 const GONE_GRACE: Duration = Duration::from_secs(5);
 /// A file that is still empty this long after its first event is not a capture
@@ -49,7 +118,55 @@ const SETTLE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// Dropping this stops the watcher and its settle thread.
 pub struct FolderWatch {
+    /// The directories the watcher really took, which is what the status line
+    /// must report — see `start`.
+    pub watching: Vec<PathBuf>,
+    /// When each of those directories went live, paired with it.
+    ///
+    /// Per directory rather than one moment for the whole engine, because the
+    /// watchers register one at a time and either single stamp is wrong: taken
+    /// before the first, a file written while the rest were still registering
+    /// is skipped by backfill *and* invisible to a watcher that was not yet
+    /// listening; taken after the last, a file written in that same interval is
+    /// emitted by an already-live watcher *and* offered by backfill, and the
+    /// user gets two cards for one capture.
+    ///
+    /// Per directory there is no interval to be wrong about: a file belongs to
+    /// backfill exactly when it was last written before its own folder's
+    /// watcher started. That is decidable, and it is why this is a list of
+    /// pairs rather than the single `SystemTime` it used to be.
+    pub started: Vec<(PathBuf, SystemTime)>,
     _debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
+}
+
+/// Take each directory in turn, stamping when each one actually went live.
+///
+/// Extracted so the stamping can be tested, which is the whole point of it.
+/// While this was a loop inside `start` it had no gate at all: hoisting a
+/// single `SystemTime::now()` above the loop — the exact engine-wide stamp the
+/// per-directory design exists to replace — left every test green, because the
+/// only test of the rule drives `to_backfill`, which takes the list as a
+/// parameter and cannot see how it was built. `macos_candidates` and `settle`
+/// were pulled out of `cfg`-gated code for the same reason, with the same
+/// comment: unreachable from a test is how it ships wrong.
+///
+/// A directory that fails to register appears in neither list, so nothing later
+/// pairs a file with a watcher that is not running.
+fn register(
+    dirs: &[PathBuf],
+    mut watch: impl FnMut(&Path) -> Result<(), String>,
+) -> Vec<(PathBuf, SystemTime)> {
+    let mut started = Vec::with_capacity(dirs.len());
+
+    for dir in dirs {
+        match watch(dir) {
+            // Stamped as each one is taken, not once for the loop.
+            Ok(()) => started.push((dir.clone(), SystemTime::now())),
+            Err(err) => crate::diag::warn(&format!("cannot watch {}: {err}", dir.display())),
+        }
+    }
+
+    started
 }
 
 pub fn start<R: Runtime>(
@@ -61,17 +178,29 @@ pub fn start<R: Runtime>(
 
     let mut debouncer = new_debouncer(DEBOUNCE, None, move |result| queue(result, &tx))?;
 
-    for dir in dirs {
-        // Non-recursive on purpose: capture folders are flat, and recursing a
-        // whole Pictures tree would be a lot of churn for nothing.
-        if let Err(err) = debouncer.watch(dir, RecursiveMode::NonRecursive) {
-            eprintln!("shotshelf: cannot watch {}: {err}", dir.display());
-        }
-    }
+    // Which directories are genuinely being watched, not which were asked for.
+    //
+    // A per-directory failure was logged and the directory left in the list —
+    // and the status line reads that list, so an exhausted inotify limit, a
+    // macOS permission denial or a folder redirected to an offline share all
+    // left the dot green and the tooltip claiming "Watching 3 folders". The
+    // usage guide tells the user to check that line when nothing appears, so
+    // the one diagnostic offered for the app's central failure was the one
+    // thing that could not report it.
+    // Non-recursive on purpose: capture folders are flat, and recursing a whole
+    // Pictures tree would be a lot of churn for nothing.
+    let started = register(dirs, |dir| {
+        debouncer
+            .watch(dir, RecursiveMode::NonRecursive)
+            .map_err(|err| err.to_string())
+    });
+    let watching: Vec<PathBuf> = started.iter().map(|(dir, _)| dir.clone()).collect();
 
     spawn_settler(app.clone(), rx, sink);
 
     Ok(FolderWatch {
+        watching,
+        started,
         _debouncer: debouncer,
     })
 }
@@ -83,7 +212,7 @@ fn queue(result: DebounceEventResult, tx: &mpsc::Sender<Candidate>) {
         Ok(events) => events,
         Err(errors) => {
             for err in errors {
-                eprintln!("shotshelf: watch error: {err}");
+                crate::diag::warn(&format!("watch error: {err}"));
             }
             return;
         }
@@ -114,7 +243,13 @@ fn is_write(kind: &EventKind) -> bool {
 }
 
 /// Half-written or sidecar files the writer will clean up itself.
-fn is_partial(path: &Path) -> bool {
+///
+/// `pub(super)` so `catch::scan` applies the same rule. It did not, and
+/// `._Screenshot.png` — a macOS AppleDouble stub, present beside every real
+/// file on any exFAT or SMB volume — keeps the `.png` extension and passes
+/// `kind_of`. A first launch on macOS would have filled the shelf with 4 KB
+/// resource forks rendered as broken images.
+pub(super) fn is_partial(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return true;
     };
@@ -266,12 +401,7 @@ fn settle(path: &Path, state: &mut Pending) -> Settled {
         state.stable_ticks = 0;
     }
 
-    let needed = match state.kind {
-        CaptureKind::Image => IMAGE_STABLE_TICKS,
-        CaptureKind::Video => VIDEO_STABLE_TICKS,
-    };
-
-    if state.stable_ticks >= needed {
+    if state.stable_ticks >= stable_ticks(state.kind) {
         Settled::Ready
     } else {
         Settled::Waiting
@@ -284,13 +414,168 @@ fn len_of(path: &Path) -> u64 {
 
 /// Windows keeps an exclusive lock on a file that is still being written, so
 /// being able to open it is a second, cheap "the writer is done" signal.
-fn is_readable(path: &Path) -> bool {
+///
+/// Shared with `to_backfill`, which needs the same answer for the same reason
+/// and had been asking a clock instead.
+pub(super) fn is_readable(path: &Path) -> bool {
     std::fs::File::open(path).is_ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A file on disk with `bytes` in it, and a `Pending` that has never seen it.
+    fn waiting_on(name: &str, bytes: usize, kind: CaptureKind) -> (PathBuf, Pending) {
+        let dir = std::env::temp_dir().join("shotshelf-settle-test");
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        let path = dir.join(name);
+        std::fs::write(&path, vec![0u8; bytes]).expect("a file to settle");
+        (
+            path,
+            Pending {
+                kind,
+                last_len: 0,
+                stable_ticks: 0,
+                first_seen: Instant::now(),
+            },
+        )
+    }
+
+    #[test]
+    fn a_screenshot_settles_in_one_quiet_tick_and_a_recording_does_not() {
+        // `settle` had no test at all, so swapping the two arms of its
+        // `match state.kind` — a one-line edit — left all 135 tests and clippy
+        // green. Swapped, a recording is emitted after a single 350 ms tick,
+        // which is the truncated-drag failure `VIDEO_STABLE_TICKS` exists to
+        // prevent; and a screenshot takes 3.2 s, past `ECHO_GRACE`, so every
+        // Win+PrtSc shelves twice and leaves a duplicate PNG behind.
+        //
+        // The first call only records the length — a file whose size is new is
+        // never stable — so both kinds need one call to observe and then as
+        // many quiet ticks as their budget asks for.
+        let (shot, mut shot_state) = waiting_on("shot.png", 16, CaptureKind::Image);
+        assert!(
+            matches!(settle(&shot, &mut shot_state), Settled::Waiting),
+            "the first sight of a file only measures it"
+        );
+        for _ in 0..IMAGE_STABLE_TICKS {
+            assert!(matches!(settle(&shot, &mut shot_state), Settled::Ready));
+        }
+
+        let (clip, mut clip_state) = waiting_on("clip.mp4", 48, CaptureKind::Video);
+        assert!(matches!(settle(&clip, &mut clip_state), Settled::Waiting));
+        // One tick short of the budget, a recording is still not believed —
+        // this is the ffmpeg stall the constant is sized for.
+        for tick in 1..VIDEO_STABLE_TICKS {
+            assert!(
+                matches!(settle(&clip, &mut clip_state), Settled::Waiting),
+                "a recording quiet for only {tick} tick(s) is not finished"
+            );
+        }
+        assert!(matches!(settle(&clip, &mut clip_state), Settled::Ready));
+
+        // And a file that grows resets the count rather than accumulating it.
+        let (growing, mut growing_state) = waiting_on("growing.png", 16, CaptureKind::Image);
+        assert!(matches!(
+            settle(&growing, &mut growing_state),
+            Settled::Waiting
+        ));
+        std::fs::write(&growing, vec![0u8; 32]).expect("it grows");
+        assert!(
+            matches!(settle(&growing, &mut growing_state), Settled::Waiting),
+            "a file that changed size starts its count again"
+        );
+
+        for path in [shot, clip, growing] {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn the_slowest_image_budget_is_the_one_settle_actually_applies() {
+        // `SLOWEST_IMAGE` is derived from `IMAGE_STABLE_TICKS` so that
+        // `clipboard.rs`'s `ECHO_GRACE` moves whenever this does — its docstring
+        // says "now the edit moves both". Nothing checked that `settle` still
+        // *uses* the constant the derivation was computed from, which is the
+        // half that makes the derivation mean anything.
+        let (shot, mut state) = waiting_on("budget.png", 16, CaptureKind::Image);
+
+        let mut ticks = 0u32;
+        // The first call measures; count only the quiet ticks after it.
+        assert!(matches!(settle(&shot, &mut state), Settled::Waiting));
+        while !matches!(settle(&shot, &mut state), Settled::Ready) {
+            ticks += 1;
+            assert!(ticks < 100, "a still file must settle");
+        }
+        ticks += 1;
+
+        assert_eq!(
+            SLOWEST_IMAGE,
+            DEBOUNCE + SETTLE_TICK * ticks,
+            "SLOWEST_IMAGE no longer describes how long settle really takes"
+        );
+
+        let _ = std::fs::remove_file(shot);
+    }
+
+    #[test]
+    fn each_directory_is_stamped_as_it_is_taken() {
+        // The producer half of the per-directory boundary, which had no gate.
+        //
+        // Hoisting a single `SystemTime::now()` above the loop — the engine-wide
+        // stamp the whole design exists to replace — left all 144 tests green,
+        // because the only test of the rule drives `to_backfill`, which takes
+        // the list as a parameter and cannot see how it was built.
+        //
+        // Two registrations with a real pause between them: their stamps must
+        // differ, and each must fall after its own `watch` call rather than all
+        // sharing one moment.
+        let dirs = vec![PathBuf::from("/first"), PathBuf::from("/second")];
+        let mut before_second = None;
+        let started = register(&dirs, |dir| {
+            if dir == Path::new("/second") {
+                before_second = Some(SystemTime::now());
+            } else {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Ok(())
+        });
+
+        assert_eq!(started.len(), 2);
+        assert_eq!(started[0].0, PathBuf::from("/first"));
+        assert_eq!(started[1].0, PathBuf::from("/second"));
+        assert!(
+            started[1].1 > started[0].1,
+            "both directories share one moment, so the stamp is engine-wide"
+        );
+        assert!(
+            started[1].1 >= before_second.expect("the second watch ran"),
+            "the second stamp was taken before its own watch call"
+        );
+    }
+
+    #[test]
+    fn a_directory_that_will_not_register_is_in_neither_list() {
+        // It must not be paired with a watcher that is not running: backfill
+        // would then hand it over to a watcher that can never emit it.
+        let dirs = vec![PathBuf::from("/ok"), PathBuf::from("/denied")];
+        let started = register(&dirs, |dir| {
+            if dir == Path::new("/denied") {
+                Err("permission denied".to_owned())
+            } else {
+                Ok(())
+            }
+        });
+
+        assert_eq!(
+            started
+                .iter()
+                .map(|(dir, _)| dir.clone())
+                .collect::<Vec<_>>(),
+            vec![PathBuf::from("/ok")]
+        );
+    }
 
     #[test]
     fn ignores_half_written_and_sidecar_files() {

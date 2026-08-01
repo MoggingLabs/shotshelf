@@ -1,0 +1,379 @@
+/**
+ * When the popover is up, and which shape it is in.
+ *
+ * Two shapes, two rules:
+ *
+ * * **column** — a capture landed. A narrow strip sized to just the cards it
+ *   holds, never focused, that empties itself a card at a time and then drops
+ *   back into the tray.
+ * * **browse** — you asked for it. The full list, and it stays put while you
+ *   work in other windows until you actually close it.
+ *
+ * The hard-won part is that Rust owns the *window* and this owns the *intent*,
+ * and the two must only ever be synced one way at a time. `open()` in Rust
+ * emits `shelf://opened`; when the handler for that answered by asking Rust to
+ * show the window, it re-entered `open()` on every emit and the popover
+ * re-opened itself forever — which made Esc, the hide button and click-away
+ * all look broken while each was working perfectly. So the adopt* methods
+ * below change front-end state and nothing else.
+ */
+
+import { invoke } from "@tauri-apps/api/core";
+
+import type { Capture, Shelf } from "./shelf/index.ts";
+
+/** How long the shelf stays up after launch, so a running app looks like one. */
+const LAUNCH_MS = 4000;
+
+export interface PopoverOptions {
+  /**
+   * Whether something is mid-flight that must not be interrupted — an OS
+   * drag, an open editor or quick look, or the settings panel. Checked before
+   * the launch appearance puts itself away.
+   *
+   * The overlay is in that list because the launch timer discarded an editor
+   * opened inside its four seconds, marks and all.
+   */
+  busy(): boolean;
+  /**
+   * The window has gone. Put away anything that only makes sense on screen.
+   *
+   * A callback rather than an import, for the same reason `busy` is one: this
+   * class owns the window and knows nothing about panels.
+   */
+  onHidden(): void;
+}
+
+export class Popover {
+  readonly #root: HTMLElement;
+  readonly #shelf: Shelf;
+  readonly #options: PopoverOptions;
+
+  #launchTimer: number | undefined;
+  /**
+   * Whether the shelf is on screen because it just started, rather than because
+   * anyone asked.
+   *
+   * The launch appearance focuses itself and emits `shelf://opened`, and both of
+   * those used to be read as "the user asked for this" — so it cancelled its own
+   * four-second dismissal and stayed up indefinitely, an always-on-top window
+   * nobody had summoned. Cleared by any deliberate open, so a tray click during
+   * those four seconds still keeps the shelf where the user put it.
+   */
+  #launched = false;
+  /**
+   * Whether the popover is up because you asked for it.
+   *
+   * Distinct from the render mode: the shelf starts in the browse *shape* for
+   * its launch appearance, but nobody asked for it, so a capture arriving then
+   * should still pop the column. Conflating the two meant the very first
+   * capture never popped.
+   */
+  #opened = false;
+  /**
+   * Whether the window is on screen at all, by either shape.
+   *
+   * Distinct from `#opened`, which is only "up because you asked for it", and
+   * from `columnIsEmpty`, which was standing in for this and is not the same
+   * question: `adoptHidden` leaves `ColumnQueue` populated — `setMode("column")`
+   * is a no-op when the mode is already `"column"` — so a dismissed shelf holding
+   * cards satisfied neither of the old guards, and anything that asked for a
+   * resize put the window back on screen.
+   *
+   * Two ordinary routes reached it. The column's own expiry timer keeps ticking
+   * after a hide, so a card ageing out took the `else showColumn()` branch; and
+   * every `say()` and its twelve-second `hush()` call `resizeColumn`, so the
+   * app's own update notice re-showed a window the user had just dismissed from
+   * the tray.
+   *
+   * Set where the window's visibility actually changes, so the two cannot drift.
+   */
+  #showing = false;
+
+  constructor(root: HTMLElement, shelf: Shelf, options: PopoverOptions) {
+    this.#root = root;
+    this.#shelf = shelf;
+    this.#options = options;
+  }
+
+  /** Put the column on screen at whatever height its cards need right now. */
+  showColumn(): void {
+    this.#showing = true;
+    this.#root.dataset["mode"] = "column";
+    void invoke("show_shelf", { focus: false, height: this.#shelf.columnHeight() });
+  }
+
+  /**
+   * The column's contents changed height without a card arriving or leaving.
+   *
+   * Distinct from `onColumnChange`, and that distinction is the point: that
+   * method also owns "the column is empty, so put it away", which is right for
+   * a card ageing out and catastrophically wrong here. Routing the alert strip
+   * through it meant a message arriving while the column held nothing dismissed
+   * the shelf — including, in the editor, one raised *by* the thing the user
+   * was doing.
+   *
+   * Does nothing when the shelf is open or the column is not on screen: there
+   * is no column to resize in either case, and `showColumn` would put one there.
+   */
+  resizeColumn(): void {
+    if (!this.#showing || this.#opened || this.#shelf.columnIsEmpty) return;
+    this.showColumn();
+  }
+
+  /**
+   * A capture was lost on the way in. Put the window where it can be read.
+   *
+   * The one deliberate exception to "an alert never resurfaces the shelf", and
+   * the distinction is what makes both rules right. That rule was written for
+   * *unsolicited* notices — an update is available, a watch folder is missing —
+   * and a window that reappears on its own after you dismissed it is the single
+   * complaint people have about tray apps. None of that applies here: the user
+   * pressed Win+Shift+S a moment ago, the app's ordinary answer to a capture is
+   * to pop the column, and this is the same answer for a capture that did not
+   * survive. Staying silent is the anomaly.
+   *
+   * It matters because of *which* capture. `report_problem`'s only caller is a
+   * clipboard write that failed, and a clipboard capture has no file anywhere
+   * until Shotshelf writes one — so a full disk destroys the only copy that
+   * exists. Before this the shelf was hidden by construction at that moment
+   * (nothing emitted `capture://new`, so nothing called `showColumn`), `say`
+   * wrote into a hidden window, and `resizeColumn` returned at its first guard.
+   * The message was unreachable in the only state it could ever be raised in.
+   *
+   * Nothing to do when the browse view is already up: the strip is on screen
+   * there, and switching a deliberate open into the column shape would take the
+   * user's grid away to tell them something.
+   */
+  showProblem(): void {
+    if (this.#opened) return;
+    // Nor while anything is mid-flight. `showColumn` sets the column shape, and
+    // the stylesheet hides the settings panel and the title strip in it — so a
+    // failed clipboard write arriving while someone was typing a new hotkey
+    // took the panel off screen and left `settingsOpen()` true, which swallows
+    // every shelf key until Escape. Each of these states already has the window
+    // up with the strip readable, so there is nothing to raise.
+    // `#showing` as well as `busy()`: the guard is about not taking something
+    // off screen, and there is nothing on screen to take. Without it, any state
+    // that leaves `busy()` true while the window is down — which is every state
+    // it can be in, since a drag, an overlay and the panel all used to survive
+    // a hide — made this message unreachable again.
+    if (this.#showing && this.#options.busy()) return;
+    // The launch timer no longer owns this window, for the same reason `catch`
+    // stood it down: raised at t = 3.9 s, the four-second dismissal took the
+    // message away a tenth of a second later — and this is the one message the
+    // user cannot afford to miss.
+    this.#standDown();
+    // The shelf is told, not just the window. `showColumn` sets the column
+    // shape and resizes to it; every other route in — `catch` through `note`,
+    // and `adoptHidden` — also calls `setMode`, and this one did not. During
+    // the launch appearance the shape is browse, so a problem raised in those
+    // four seconds resized the window to a strip while `Shelf` went on
+    // rendering the full browse list into it: the "full-size content in a
+    // column-sized window" failure that `window::preview` and `Shelf.editPicked`
+    // both exist to prevent, on a new path.
+    this.#shelf.setMode("column");
+    this.showColumn();
+  }
+
+  /**
+   * The strip has gone, and it may have been the only thing on screen.
+   *
+   * `showProblem` can put up a column with no cards in it, so when the message
+   * times out there is a window left holding nothing. Cards ageing out reach
+   * `onColumnChange`, which owns "the column is empty, so put it away"; a
+   * message timing out reaches nothing, so this is that path.
+   *
+   * Deliberately narrow — showing, not opened, and no cards — so it can only
+   * ever close a window that has nothing left in it.
+   */
+  dismissIfEmpty(): void {
+    if (!this.#showing || this.#opened || !this.#shelf.columnIsEmpty) return;
+    // The same two conditions the rest of this file applies, and both were
+    // missing when this method was written.
+    //
+    // The mode, for the reason `onColumnChange` gives ten lines down: `#opened`
+    // is false for the whole launch appearance while the shape is *browse* and
+    // the column is legitimately empty. So without this, any message at all —
+    // the update notice, "no capture folders are being watched", a failed pin —
+    // dismissed the shelf twelve seconds later, on the *falling* edge of a
+    // strip that had nothing to do with the column.
+    //
+    // And `busy()`, because that dismissal took an open editor's unsaved marks
+    // with it through `adoptHidden`. That is verbatim the failure `resizeColumn`
+    // was extracted to prevent, reintroduced on the other edge of one signal.
+    if (this.#root.dataset["mode"] !== "column") return;
+    if (this.#options.busy()) return;
+    this.dismiss();
+  }
+
+  /** Ask Rust to put the window away, and drop our own state with it. */
+  dismiss(): void {
+    this.adoptHidden();
+    void invoke("hide_shelf");
+  }
+
+  /**
+   * Rust has already sized, placed, shown and focused the window by the time
+   * this runs — all that is left is to render the right shape. It must not
+   * call back into `show_shelf`.
+   */
+  adoptBrowse(deliberate: boolean): void {
+    // The launch timer stands down here too, and this was the one route that
+    // did not clear it.
+    //
+    // `onFocusChanged(true)` covers the usual case, because `window::open`
+    // focuses as well as emitting. It does not cover a focus that never
+    // *changes*: a window manager that refuses focus-stealing, or opening a
+    // window that already had focus. The timer then fired on a shelf the user
+    // had deliberately opened — and `dismiss` runs `setMode("column")` after
+    // `setMode("browse")` has already emptied the column queue, so every tile
+    // disappeared before the window went away.
+    //
+    // This also decides whether the browser suite is a gate. Five spec files
+    // install no clock, so before this they simply had to finish within four
+    // seconds of wall clock; the suite failed two runs in four on a reviewer's
+    // machine, and CI's single retry is exactly what would have hidden it.
+    // Only a *deliberate* open stands the launch dismissal down.
+    //
+    // `window::open` is the same function for the tray, the hotkey and the
+    // launch, and it emits this event and takes focus in every case — so
+    // treating either as "the user asked for this" meant the launch appearance
+    // cancelled its own timer and stayed up. Rust now says which it was.
+    if (deliberate) this.#standDown();
+    // `deliberate`, not `true`. `#opened` means "up because you asked for it",
+    // and its own docstring gives the consequence of conflating that with the
+    // browse *shape*: a capture arriving during the launch appearance is
+    // filed into the browse list instead of popping the column, so the very
+    // first capture never pops. The launch timer then dismisses the window,
+    // and `adoptHidden`'s `setMode("column")` finds an empty queue, so nothing
+    // pops afterwards either.
+    //
+    // Round 21 added the flag that answers this and spent it only on the
+    // dismissal timer one line above, leaving the rule stated in a docstring
+    // and enforced nowhere.
+    this.#opened = deliberate;
+    this.#showing = true;
+    this.#root.dataset["mode"] = "browse";
+    this.#shelf.setMode("browse");
+  }
+
+  /**
+   * Cancel the launch dismissal, whatever armed it.
+   *
+   * One method rather than three `clearTimeout` calls, because "which routes
+   * stand the timer down" is the rule that was wrong — and a rule spread
+   * across three call sites is one that can be fixed in two of them.
+   */
+  #standDown(): void {
+    window.clearTimeout(this.#launchTimer);
+    this.#launchTimer = undefined;
+    this.#launched = false;
+  }
+
+  /**
+   * The window is down, by whatever route — the tray icon, its menu, or the
+   * hotkey, none of which pass through here. Front-end state only.
+   */
+  adoptHidden(): void {
+    this.#standDown();
+    this.#opened = false;
+    this.#showing = false;
+    // The editor and the quick look mount outside the list so the list can
+    // rebuild under them; that also means nothing else ends their lifetime.
+    // Left standing, they survived the hide and the next capture popped a
+    // column with a stale canvas painted across it — and a peeked window never
+    // takes focus, so Escape could not reach it to clear it either.
+    this.#shelf.discardOverlay();
+    // A hidden window stops delivering pointer events, so a `pointerleave`
+    // that would have released the hover hold never arrives. Left armed, the
+    // column never ages again and the popover stops dismissing itself for the
+    // rest of the session. Releasing every hold here is the reconciliation
+    // that DOM enter/leave pairs cannot be relied on to provide.
+    this.#shelf.releaseColumn();
+    // The settings panel closes with the window, like the overlay above it.
+    //
+    // Nothing else did. `dismiss()` from the hide button, the tray, the hotkey
+    // and the column's own expiry all reach here, and only Escape had a rung
+    // that closed the panel — so "open the shelf, open settings, put the shelf
+    // away" left `settingsOpen()` true for the rest of the session, on a window
+    // that was not on screen.
+    //
+    // Two things read that flag and both then misbehaved: `main.ts`'s keydown
+    // guard swallowed every shelf key, and `busy()` stayed true, which is what
+    // made a lost-capture message unreachable through `showProblem` — the exact
+    // failure the last two rounds were spent fixing, reached through a
+    // different guard.
+    this.#options.onHidden();
+    // Whatever shape it was in, the next capture gets the column.
+    this.#shelf.setMode("column");
+  }
+
+  /** A capture landed. Either it joins what you are looking at, or it pops. */
+  catch(capture: Capture): void {
+    // Open on purpose? Then don't reshape the window under you — just add it.
+    if (this.#opened) {
+      this.#shelf.add(capture);
+      return;
+    }
+
+    // A capture is a reason for the window to be up in its own right, so the
+    // launch timer no longer owns it.
+    //
+    // Without this a capture landing at t = 3.9 s popped the column and the
+    // launch dismissal put it away at t = 4.0 s — a tenth of a second, against
+    // the minute both README.md and docs/USAGE.md promise. `#standDown` is
+    // reached by a deliberate open and by focus arriving; neither can happen
+    // here, because a peeked column is created without focus on purpose.
+    this.#standDown();
+    this.#shelf.note(capture);
+    this.showColumn();
+  }
+
+  /** A card aged out. Either the column needs to be shorter, or it is done. */
+  onColumnChange(): void {
+    // Nothing to reshape and nothing to put away if the window is already down.
+    // Without this the column's expiry timer — which keeps ticking after a hide,
+    // because the mode is still `"column"` — took the `else` branch and showed a
+    // window the user had dismissed.
+    if (!this.#showing || this.#opened) return;
+
+    // And nothing to put away unless the window is *showing the column*.
+    //
+    // `#opened` is false during the launch appearance — nobody asked for it —
+    // but the shape is browse and the column is legitimately empty. Without this
+    // check, anything that took a capture off the shelf in those four seconds
+    // hid the window: a × on a backfilled card, or choosing a retention window,
+    // whose sweep drops cards the user is looking at the settings panel about.
+    //
+    // The guard is the mode rather than `columnIsEmpty` because those are
+    // different questions, and answering the second in place of the first is
+    // what `resizeColumn` was extracted to avoid one method above.
+    if (this.#root.dataset["mode"] !== "column") return;
+
+    if (this.#shelf.columnIsEmpty) this.dismiss();
+    else this.showColumn();
+  }
+
+  /** Shown once at launch, then treated exactly like an empty column. */
+  scheduleLaunchDismissal(): void {
+    this.#launched = true;
+    this.#launchTimer = window.setTimeout(() => {
+      this.#launched = false;
+      if (!this.#options.busy()) this.dismiss();
+    }, LAUNCH_MS);
+  }
+
+  /**
+   * Focus arriving means you are using it — unless it arrived on its own.
+   *
+   * `window::open` calls `set_focus()`, so the launch appearance focuses itself
+   * and this fired for it. Standing the timer down there meant the four-second
+   * appearance never went away. `#launched` is cleared by any deliberate open,
+   * so a tray click two seconds after launch still cancels it properly.
+   */
+  onFocusChanged(focused: boolean): void {
+    this.#shelf.holdColumn("focus", focused);
+    if (focused && !this.#launched) this.#standDown();
+  }
+}

@@ -1,13 +1,26 @@
 /**
  * The settings surface.
  *
- * Deliberately small: where the shelf sits, how long captures stay, and the
- * shortcut that summons it. Everything lives in a local JSON file — no
+ * Deliberately small, and this is the whole list: how long captures stay, how
+ * many the shelf holds, whether copies are downscaled on the way out, and the
+ * shortcut that summons it.
+ *
+ * "Where the shelf sits" used to head that sentence. No field has held it
+ * since the shelf became a popover that parks itself in a corner —
+ * `settings.rs` retracted the identical phrase on the Rust side, and the
+ * correction did not reach the module that actually *is* the settings
+ * surface. Everything lives in a local JSON file — no
  * accounts, no sync, nothing leaves the device.
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import type { CaptureKind } from "./shelf";
+
+import { until, type Wait } from "./retry.ts";
+
+import { el } from "./dom.ts";
+// The neutral types module, not the shelf itself: the shelf imports this file
+// for `persistPinned`, and pointing back at it would be a cycle.
+import type { CaptureKind } from "./shelf/types.ts";
 
 export interface PinnedItem {
   path: string;
@@ -19,6 +32,24 @@ export interface Settings {
   retentionHours: number | null;
   maxItems: number;
   hotkey: string;
+  /**
+   * Hand over a smaller copy of a capture instead of the original.
+   *
+   * Declared here as well as in Rust because it is load-bearing on both
+   * sides: it was shipped typed only in Rust, and survived a settings save
+   * purely because the payload is spread from the raw response. The first
+   * caller to build a `Settings` from this interface would have silently
+   * reset it.
+   */
+  downscaleExports: boolean;
+  /**
+   * Ask the release feed whether a newer build exists, at launch.
+   *
+   * The only network call Shotshelf makes. Off means it opens no socket at
+   * all, which is the point of the setting existing at all — it is hand-edited, not a control in the panel to someone who chose this
+   * app for being local-only.
+   */
+  checkForUpdates: boolean;
   pinned: PinnedItem[];
 }
 
@@ -26,21 +57,17 @@ export interface Settings {
  * Mirrors the Rust defaults so the shelf has sane limits from its very first
  * frame — a capture can land before the settings file has been read.
  */
-const DEFAULTS: Settings = {
+export const DEFAULTS: Settings = {
   retentionHours: null,
   maxItems: 50,
   hotkey: "CommandOrControl+Shift+S",
+  downscaleExports: false,
+  checkForUpdates: true,
   pinned: [],
 };
 
 let current: Settings = DEFAULTS;
 let announce: (settings: Settings) => void = () => {};
-
-function el<T extends HTMLElement>(selector: string): T {
-  const node = document.querySelector<T>(selector);
-  if (!node) throw new Error(`Shotshelf: missing element ${selector}`);
-  return node;
-}
 
 const panel = () => el<HTMLElement>("#settings-panel");
 const note = () => el<HTMLElement>("#settings-note");
@@ -49,12 +76,62 @@ export function currentSettings(): Settings {
   return current;
 }
 
+/**
+ * Whether the stored settings were ever read.
+ *
+ * Load-bearing, because everything that *writes* settings replaces the whole
+ * list it is given. The webview starts running while Rust's `setup` hook is
+ * still going — Tauri builds config windows before it — so `get_settings` can
+ * land before the store is managed and come back an error. When it did, this
+ * module kept `DEFAULTS`, which has `pinned: []`, `restorePinned` never ran,
+ * and the shelf showed no pins. Pinning anything then sent a one-element list
+ * to `set_pinned`, which replaced the file. Every previous pin was gone, and
+ * the only thing the user had seen was "running on defaults".
+ */
+let loaded = false;
+
+/**
+ * How long to keep re-asking for the stored settings.
+ *
+ * `get_settings` cannot answer until `app.manage(stored)`, which comes after
+ * `settings::load` reads the preferences root — `%APPDATA%` under a roaming or
+ * redirected profile, where every read is an SMB round trip.
+ *
+ * Five seconds rather than the catch engine's minute, and the difference is
+ * the point: this waits only for a file read a few statements into `setup`,
+ * while the engine resolves and opens watches on possibly-remote folders. Both
+ * budgets now sit at their call sites in front of one shared loop, so the
+ * difference is a decision someone made rather than two loops that drifted.
+ *
+ * Giving up early is not merely a slow start: `persistPinned` refuses to write
+ * when settings were never loaded — that guard is what stops an empty list
+ * overwriting the user's pins — so an exhausted retry leaves the shelf unable
+ * to save a pin for the rest of the session.
+ */
+const SETTINGS_WAIT: Wait = {
+  attempts: 20,
+  everyMs: 250,
+  // Anything, deliberately. Unlike the catch engine, Rust has no distinct
+  // "not ready" answer here: an unmanaged store surfaces as Tauri's own
+  // "state not managed", which is not a contract this side should match on.
+  transient: () => true,
+};
+
+async function readStored(): Promise<Settings> {
+  return until(() => invoke<Settings>("get_settings"), SETTINGS_WAIT);
+}
+
 export async function initSettings(
   onChange: (settings: Settings) => void,
 ): Promise<Settings> {
   announce = onChange;
-  current = await invoke<Settings>("get_settings");
 
+  // Wired before the read, not after.
+  //
+  // Doing it afterwards meant a failed `get_settings` threw past all of this,
+  // so the Settings button had no listener and the panel could not be opened
+  // at all — a dead control with no explanation. Bound first, clicking it
+  // shows the panel and `save` refuses with a reason.
   el<HTMLButtonElement>("#shelf-settings").addEventListener("click", toggle);
 
   bind<HTMLSelectElement>("#setting-retention", (input) => ({
@@ -62,7 +139,12 @@ export async function initSettings(
   }));
   bind<HTMLInputElement>("#setting-max", (input) => ({ maxItems: Number(input.value) }));
   bind<HTMLInputElement>("#setting-hotkey", (input) => ({ hotkey: input.value.trim() }));
+  bind<HTMLInputElement>("#setting-downscale", (input) => ({
+    downscaleExports: input.checked,
+  }));
 
+  current = await readStored();
+  loaded = true;
   fill();
 
   return current;
@@ -74,12 +156,49 @@ export function settingsOpen(): boolean {
 
 /** Pins are edited from the tiles, not from this panel. */
 export async function persistPinned(pinned: PinnedItem[]): Promise<void> {
+  // Refuses to write a list built on defaults.
+  //
+  // `set_pinned` replaces the stored list outright, so writing while the real
+  // one was never read destroys it. Better to lose this session's pin than
+  // every pin the user has.
+  if (!loaded) {
+    console.error("[shotshelf] not saving pins: settings were never loaded");
+    return;
+  }
+
   current = { ...current, pinned };
+  // Rethrown, not only logged.
+  //
+  // `set_pinned` used to return `()` on the Rust side, so this could never
+  // reject and the `catch` was decoration: on a full disk or a read-only
+  // profile the star lit, nothing was said, and the pin was gone at the next
+  // launch — against the promise that pins are the one thing that survives a
+  // restart. The console line stays for the diagnosis; the caller decides what
+  // the user is told.
   try {
     await invoke("set_pinned", { pinned });
   } catch (error) {
     console.error("[shotshelf] could not save pinned captures", error);
+    throw error instanceof Error ? error : new Error(String(error));
   }
+}
+
+
+/**
+ * Put the panel away if it is up. `true` if it was.
+ *
+ * Exported so Escape has a rung for it. Without one, Escape in the settings
+ * panel fell straight through to `popover.dismiss()`: the window went away and
+ * `settingsOpen()` stayed true, because `toggle` is the only thing that
+ * restores the `hidden` attribute. From then on `main.ts`'s first guard
+ * swallowed every shelf key — arrows, space, Enter, Delete, `e` — and
+ * `popover.busy()` stayed true so the launch dismissal never fired, against a
+ * panel the column shape renders invisible anyway.
+ */
+export function closeSettings(): boolean {
+  if (!settingsOpen()) return false;
+  toggle();
+  return true;
 }
 
 function toggle(): void {
@@ -98,6 +217,14 @@ function bind<T extends HTMLElement & { value: string }>(
 }
 
 async function save(patch: Partial<Settings>): Promise<void> {
+  // Same rule as `persistPinned`: this sends the whole settings object,
+  // `pinned` included, so writing it before the stored one was read would
+  // replace the user's pins with an empty list.
+  if (!loaded) {
+    note().textContent = "Settings could not be loaded, so they cannot be saved.";
+    return;
+  }
+
   try {
     // The Rust side returns what it actually stored, so any clamping — or a
     // rejected shortcut — is reflected rather than assumed.
@@ -131,4 +258,5 @@ function fill(): void {
 
   el<HTMLInputElement>("#setting-max").value = String(current.maxItems);
   el<HTMLInputElement>("#setting-hotkey").value = current.hotkey;
+  el<HTMLInputElement>("#setting-downscale").checked = current.downscaleExports;
 }

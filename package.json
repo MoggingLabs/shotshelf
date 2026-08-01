@@ -8,8 +8,16 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "node --test \"src/**/*.test.ts\"",
-    "preview": "vite preview",
+    "preview": "vite preview --port 4173 --strictPort --host 127.0.0.1",
+    "lint": "eslint .",
+    "deadcode": "knip && node scripts/check-commands.mjs && node scripts/check-references.mjs && node scripts/check-dirs.mjs && node scripts/check-wire.mjs && node scripts/check-design.mjs",
+    "advisories": "node scripts/check-advisories.mjs",
+    "test:unit": "node --test \"src/**/*.test.ts\" \"scripts/**/*.test.mjs\"",
+    "test:e2e": "playwright test tests/e2e",
+    "test:visual": "playwright test tests/visual",
+    "test": "npm run test:unit && playwright test --fail-on-flaky-tests",
+    "gate:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml --lib --test ipc && cargo build --manifest-path src-tauri/Cargo.toml",
+    "gate": "npm run lint && npm run deadcode && npm run build && npm run test && npm run gate:rust",
     "sidecar": "node scripts/prepare-sidecar.mjs",
     "release": "node scripts/build-release.mjs",
     "postinstall": "node scripts/prepare-sidecar.mjs",
@@ -17,14 +25,20 @@
   },
   "dependencies": {
     "@crabnebula/tauri-plugin-drag": "^2.1.0",
-    "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-fs": "^2.5.1"
+    "@tauri-apps/api": "^2.11.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.0",
     "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^26.1.2",
-    "ffmpeg-static": "^5.3.0",
+    "eslint": "^10.8.0",
+    "knip": "^6.29.0",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0",
     "vite": "^8.1.5"
+  },
+  "optionalDependencies": {
+    "ffmpeg-static": "^5.3.0"
   }
 }
