@@ -40,9 +40,9 @@ in about five minutes.
 | Native drag-out | Pass | — | — | Full round-trip 2026-08-01, packaged build: dragged a capture into a real Explorer window; it arrived byte-identical and the original never moved |
 | Copy to clipboard | Pass | — | — | 1920×1080 image on the clipboard |
 | Show in folder | Pass | — | — | Clicked live 2026-08-01: Explorer opened on the capture's folder; also gated by e2e and the IPC scope-refusal test; now also on `o` and as the tray's Open captures folder (neither driven live yet) |
-| Copy recognised text (`t`) | — | — | — | Added 2026-08-01; e2e + IPC scope-refusal gated, not yet driven live |
-| Start at login | — | — | — | Added 2026-08-01; settings e2e + IPC tolerance gated; the OS registration itself needs a live toggle + registry check |
-| Corner / monitor choice | — | — | — | Added 2026-08-01; corner arithmetic unit-tested 4 ways, settings e2e gated; needs a live corner-hop smoke |
+| Copy recognised text (`t`) | — | — | — | Added 2026-08-01; e2e + IPC scope-refusal gated. A live keypress was attempted and could not be delivered: catch-shows open the shelf without focus or z-order, and the machine was in active use — needs a deliberate open (hotkey) first |
+| Start at login | Pass | — | — | Reconcile driven live 2026-08-01: `startAtLogin: true` in the roamed file put the `Run` entry in `HKCU` at the next launch, `false` removed it — the machine-follows-account path, not just the toggle |
+| Corner / monitor choice | Pass | — | — | Corner hop driven live 2026-08-01: all four corners, window rect read back exactly at the work-area edge minus the 12px margin each time. The cursor-monitor choice is untestable on this one-display machine and stays gates-only |
 | On-device text recognition | Pass | — | — | `Windows.Media.Ocr`; macOS uses Vision, Linux tesseract if present |
 | Credential warning | Pass | — | — | A capture containing an `AKIA…` placeholder showed the marker on its card |
 | Annotation editor | Pass | — | — | Five tools present; a box drawn and saved |
