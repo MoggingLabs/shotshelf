@@ -39,7 +39,10 @@ in about five minutes.
 | Duration and size badge | Pass | — | — | `0:06 · 14 kB` on the recording tile |
 | Native drag-out | Pass | — | — | Full round-trip 2026-08-01, packaged build: dragged a capture into a real Explorer window; it arrived byte-identical and the original never moved |
 | Copy to clipboard | Pass | — | — | 1920×1080 image on the clipboard |
-| Show in folder | Pass | — | — | Clicked live 2026-08-01: Explorer opened on the capture's folder; also gated by e2e and the IPC scope-refusal test |
+| Show in folder | Pass | — | — | Clicked live 2026-08-01: Explorer opened on the capture's folder; also gated by e2e and the IPC scope-refusal test; now also on `o` and as the tray's Open captures folder (neither driven live yet) |
+| Copy recognised text (`t`) | — | — | — | Added 2026-08-01; e2e + IPC scope-refusal gated, not yet driven live |
+| Start at login | — | — | — | Added 2026-08-01; settings e2e + IPC tolerance gated; the OS registration itself needs a live toggle + registry check |
+| Corner / monitor choice | — | — | — | Added 2026-08-01; corner arithmetic unit-tested 4 ways, settings e2e gated; needs a live corner-hop smoke |
 | On-device text recognition | Pass | — | — | `Windows.Media.Ocr`; macOS uses Vision, Linux tesseract if present |
 | Credential warning | Pass | — | — | A capture containing an `AKIA…` placeholder showed the marker on its card |
 | Annotation editor | Pass | — | — | Five tools present; a box drawn and saved |
@@ -50,7 +53,7 @@ in about five minutes.
 | Window chrome | Pass | — | — | DWM rounding and the dark backdrop rendered |
 | Global hotkey | Pass | — | — | `CommandOrControl+Shift+S` registered and toggled |
 | Tray icon | Partial | — | — | Present, in Windows 11's overflow flyout as `USAGE.md` says; the menu was never opened |
-| Update check | Pass | — | — | Failure path only: the internal feed does not resolve, so it logged one warning and carried on |
+| Update check | Pass | — | — | Failure path only, against the old placeholder host; the endpoint moved to GitHub Releases on 2026-08-01 and 404s identically until an updater key publishes a manifest |
 | Quick look, compare, multi-select, pin, remove, retention | — | — | — | Covered by the browser suite against the stubbed runtime; never driven against the real binary |
 | Single instance | — | — | — | |
 | Installer built | Pass | Pass — `.dmg` from the v0.1.0 run | Bundles built in CI (`.deb`/`.rpm`/`.AppImage`), deliberately unpublished | Windows: ffmpeg + licence verified inside the MSI; Linux publishing waits on one desktop smoke run |

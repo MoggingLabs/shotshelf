@@ -49,9 +49,9 @@ instead of fixing our filing habits.
 
 - **Catches** every new screenshot and screen recording while it is running (watches the OS
   capture locations + clipboard), and brings back up to twenty captures from the last 24
-  hours it was not running to see. Shotshelf does **not** add itself to startup — see
-  [Run it](#-run-it) — so after a reboot you launch it yourself, and the backfill is what stops
-  that costing you the morning's captures.
+  hours it was not running to see. Shotshelf never adds itself to startup *unasked* — "Start at
+  login" is a Settings toggle, off by default; see [Run it](#-run-it) — and the backfill is what
+  stops a reboot before you flip it costing you the morning's captures.
 - **Holds** them in a popover in the corner of your screen, newest first, as thumbnails.
 - **Drags out** — grab an item off the shelf and drop it straight into an email, editor, or chat. No
   Finder/Explorer spelunking, no 4-second window. Pick several and they go together, in order.
@@ -110,16 +110,18 @@ npm run tauri dev               # dev build, frontend hot-reloads
 npm run tauri build             # release bundle (.msi/.exe on Windows, .dmg/.app on macOS)
 ```
 
-**Starting it automatically is a manual step, and deliberately not automated here.** Shotshelf
-registers no login item and writes nothing to a startup folder — an app that adds itself to
-startup without being asked is a bad neighbour, and registering a login item is something that
-should be offered in Settings rather than assumed — which is work this branch has not done. Until then: on Windows put a shortcut
-in `shell:startup`, on macOS add it under System Settings → General → Login Items, on Linux drop
-a `.desktop` file in `~/.config/autostart`. A launch picks up up to twenty captures from the previous 24
-hours, so a late start is not a lost morning.
+**Starting automatically is a Settings toggle — "Start at login", off by default.** An app that
+adds itself to startup unasked is a bad neighbour, so Shotshelf never registers without being
+told; flip the toggle and it does, through the platform's own mechanism (a `Run` entry, a
+LaunchAgent, an autostart `.desktop` file). The choice follows your account: settings roam, and
+each machine reconciles its login item to the stored choice at launch. Prefer doing it by hand?
+The old routes still work — `shell:startup` on Windows, Login Items on macOS,
+`~/.config/autostart` on Linux. Either way a launch picks up up to twenty captures from the
+previous 24 hours, so a late start is not a lost morning.
 
-Identical commands on every OS. The shelf is a popover that rests in the bottom-right corner of
-the screen and has **no taskbar or Dock entry** by design — the tray icon (Windows, Linux) /
+Identical commands on every OS. The shelf is a popover that rests in a corner of the screen —
+bottom-right by default, any corner of any monitor via Settings — and has **no taskbar or Dock
+entry** by design — the tray icon (Windows, Linux) /
 menu-bar icon (macOS), its right-click menu, and the global hotkey are how you summon it. On
 Linux the tray protocol sends no click events to the app, so there the menu and the hotkey are
 the only ways in. Building the Rust side on its own
@@ -220,8 +222,8 @@ tell the two apart.
 
 ### The shelf
 
-The shelf is a **popover resting in the bottom-right corner of the screen**, 225×420, not a window that sits on your
-screen. It opens on a tray click or the hotkey — focused, so Esc dismisses it, and it stays put
+The shelf is a **popover resting in a corner of the screen** — bottom-right unless the Corner
+setting says otherwise — 225×420, not a window that sits on your screen. It opens on a tray click or the hotkey — focused, so Esc dismisses it, and it stays put
 while you work in other windows rather than vanishing on focus loss — and when a capture lands
 it **peeks** for about a minute without
 ever taking focus, then closes itself. Hovering it holds it open; dragging out of it will not
@@ -408,46 +410,33 @@ round-trip to Apple's notary service before Gatekeeper will open it.
 
 ### The update feed
 
+The feed is this repository's own Releases. `tauri.conf.json` points every installed app at
+
+```
+https://github.com/MoggingLabs/shotshelf/releases/latest/download/latest.json
+```
+
+and the release workflow's `publish` job composes and attaches that `latest.json` — Windows
+NSIS installer and the macOS `.app.tar.gz`, each with its `.sig` inlined, at their release-asset
+URLs. Nothing is hand-maintained: the manifest names exactly what that tag's run produced, and
+the macOS entry uses the real `<product name>.app.tar.gz` filename (a hand-written example here
+once invented a versioned name that nothing produces, and every macOS client 404'd).
+
 Update artifacts (and their `.sig` files) are produced **only when `TAURI_SIGNING_PRIVATE_KEY`
 is set** — `scripts/build-release.mjs` turns `createUpdaterArtifacts` on for exactly that case,
 and deliberately not in the committed config, because with a `pubkey` present and no private key
-Tauri refuses to build at all — an unsigned one is rejected by every installed app, and Tauri refuses to build one
-without the key. A build without it still produces perfectly good installers.
+Tauri refuses to build at all. Until the key exists, releases carry installers and no
+`latest.json`; the `releases/latest/download` fetch 404s and every installed app fails the
+check quietly. **Turning updates on is therefore two owner commands and one config line:**
+generate the pair with `npm run tauri signer generate -- -w <path outside the repo>`, set
+`TAURI_SIGNING_PRIVATE_KEY` (and its `…_PASSWORD` if given one) as repository secrets, and
+paste the public half into `plugins.updater.pubkey` in the same commit. The private half must
+never be committed — `*.key` is git-ignored — and losing it means no further updates can be
+signed for already-installed apps.
 
-The app asks the endpoint in `tauri.conf.json`, with `{{target}}`, `{{arch}}` and
-`{{current_version}}` substituted:
-
-```
-https://releases.mogginglabs.internal/shotshelf/{{target}}/{{arch}}/{{current_version}}
-```
-
-Serve either a static manifest or a dynamic endpoint that answers `204 No Content` when the
-caller is current. The manifest shape:
-
-```json
-{
-  "version": "0.2.0",
-  "notes": "What changed",
-  "pub_date": "2026-07-27T12:00:00Z",
-  "platforms": {
-    "windows-x86_64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf_0.2.0_x64-setup.exe" },
-    "darwin-aarch64": { "signature": "<contents of the .sig>", "url": "https://…/Shotshelf.app.tar.gz" }
-  }
-}
-```
-
-The macOS filename carries **no version and no architecture** — `tauri-bundler` builds it as
-`<product name>.app.tar.gz`, and that is what the workflow uploads. This example used to name
-`Shotshelf_0.2.0_aarch64.app.tar.gz`, which is not produced by anything, so an operator
-following it published a URL that 404s for every macOS client. Because the name never changes,
-each release overwrites the last one if you copy artifacts into a single directory — give the
-hosted copy a versioned name of your own and point the manifest at that.
-
-The **public** half of the updater key is in `tauri.conf.json`; the private half must never be
-committed — `*.key` is git-ignored. Regenerate the pair with
-`npm run tauri signer generate -- -w <path outside the repo>` and paste the new public key into
-`plugins.updater.pubkey`. Losing the private key means no further updates can be signed for
-already-installed apps.
+One consequence of the `releases/latest` redirect worth knowing: the *newest* release is the
+feed. A hotfix tag published after a bad one supersedes it immediately, and a pre-release
+marked as such on GitHub is skipped by the redirect.
 
 ## 🗺️ Roadmap
 
@@ -462,7 +451,7 @@ already-installed apps.
   - [x] settings + persistence — retention, item cap, pinning, export sizing, global hotkey
   - [ ] cross-platform parity pass — matrix and smoke checklist in [PARITY](./docs/PARITY.md);
     the Windows column is filled from a real run, macOS and Linux have never been launched
-  - [x] packaging — signed installers, bundled ffmpeg, internal updater, [USAGE](./docs/USAGE.md)
+  - [x] packaging — signed installers, bundled ffmpeg, GitHub-Releases updater, [USAGE](./docs/USAGE.md)
 
 ## 🔐 Privacy — captures never leave your machine
 

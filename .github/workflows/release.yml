@@ -319,6 +319,57 @@ jobs:
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # The update feed, when there is one to publish.
+      #
+      # `tauri.conf.json` points every installed app at the release feed URL
+      # (`https://github.com/MoggingLabs/shotshelf/releases/latest/download/latest.json`)
+      # — this is the step that puts that file there. It exists only when the bundles were signed for the
+      # updater: no `.sig` means no `TAURI_SIGNING_PRIVATE_KEY` is configured,
+      # every installed app would reject the payload anyway, and publishing a
+      # manifest for artifacts nothing can verify would turn the quiet 404
+      # today's apps see into a loud failure. Skipping is the honest state.
+      #
+      # The platform keys and the macOS artifact name follow the bundler, not
+      # taste: `<product>.app.tar.gz` carries no version and no arch — an
+      # earlier README example invented a versioned name and every macOS
+      # client got a 404. Release-asset URLs are stable per tag, so nothing
+      # here overwrites anything.
+      - name: Compose latest.json
+        working-directory: dist
+        run: |
+          if ! ls *.sig >/dev/null 2>&1; then
+            echo "no updater key configured — no latest.json (installers only)"
+            exit 0
+          fi
+          node -e '
+            const fs = require("fs");
+            const tag = process.env.GITHUB_REF_NAME;
+            const repo = process.env.GITHUB_REPOSITORY;
+            const url = (file) =>
+              `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(file)}`;
+            const sig = (file) => fs.readFileSync(`${file}.sig`, "utf8").trim();
+            const platforms = {};
+            const exe = fs.readdirSync(".").find((f) => f.endsWith("-setup.exe"));
+            if (exe && fs.existsSync(`${exe}.sig`)) {
+              platforms["windows-x86_64"] = { signature: sig(exe), url: url(exe) };
+            }
+            const mac = fs.readdirSync(".").find((f) => f.endsWith(".app.tar.gz"));
+            if (mac && fs.existsSync(`${mac}.sig`)) {
+              platforms["darwin-aarch64"] = { signature: sig(mac), url: url(mac) };
+            }
+            if (Object.keys(platforms).length === 0) {
+              console.log("signatures present but no recognised updater artifact — not publishing a manifest");
+              process.exit(0);
+            }
+            const manifest = {
+              version: tag.replace(/^v/, ""),
+              pub_date: new Date().toISOString(),
+              platforms,
+            };
+            fs.writeFileSync("latest.json", JSON.stringify(manifest, null, 2));
+            console.log(fs.readFileSync("latest.json", "utf8"));
+          '
+
       - name: Create the GitHub Release
         working-directory: dist
         env:
@@ -344,4 +395,5 @@ jobs:
             --title "Shotshelf $GITHUB_REF_NAME" \
             --notes-file notes.md \
             --verify-tag \
-            *.msi *.exe SHA256SUMS.txt $(ls *.dmg *.tar.gz *.sig 2>/dev/null || true)
+            *.msi *.exe SHA256SUMS.txt \
+            $(ls *.dmg *.tar.gz *.sig latest.json 2>/dev/null || true)

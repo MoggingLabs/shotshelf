@@ -1,9 +1,15 @@
-//! Asking the internal release feed whether a newer build exists.
+//! Asking the release feed whether a newer build exists.
 //!
 //! This is the *only* thing Shotshelf ever sends over the network, and it sends
 //! its version, OS and CPU architecture — SECURITY.md states exactly what the
 //! request discloses. No capture ever leaves the device, and there is
 //! no telemetry.
+//!
+//! The feed is the project's own GitHub Releases: the `publish` job attaches a
+//! `latest.json` to each release once an updater key is configured, and the
+//! endpoint in `tauri.conf.json` fetches it through the `releases/latest`
+//! redirect. Until that key exists no `latest.json` is published, the fetch
+//! 404s, and the check fails as quietly as the old internal placeholder did.
 //!
 //! **It asks, and stops there.** It used to call `download_and_install` at every
 //! launch — unattended, with no prompt and no way to decline — while this file,
@@ -48,9 +54,9 @@ pub fn check_on_launch<R: Runtime>(app: &AppHandle<R>, wanted: bool) {
     tauri::async_runtime::spawn(async move {
         // A deadline, because the plugin's default is none.
         //
-        // The feed is an internal hostname, so off the network the lookup
-        // fails fast — but a host that accepts a connection and then says
-        // nothing would leave this task alive for the life of the app.
+        // The feed is github.com, which is exactly the kind of host that can
+        // accept a connection and then dribble — a stalled fetch with no
+        // deadline would leave this task alive for the life of the app.
         let updater = app.updater_builder().timeout(CHECK_TIMEOUT).build();
         match updater {
             Ok(updater) => match updater.check().await {

@@ -15,22 +15,23 @@ Screenshots and screen recordings routinely contain sensitive material — clien
 tokens visible on screen, private messages. Shotshelf's core privacy guarantee:
 
 - **No cloud, no telemetry, no uploads.** Nothing a capture touches leaves the machine. Shotshelf
-  makes exactly one network request in its life: on launch it asks an internal release feed whether
-  a newer version exists. It does not download or install anything — it says an update is available
+  makes exactly one network request in its life: on launch it asks the project's GitHub Releases
+  whether a newer version exists. It does not download or install anything — it says an update is available
   and stops there.
 
   Precisely what that request discloses, because "nothing but its own version number" was written
   here and is not true. The endpoint is
-  `https://releases.mogginglabs.internal/shotshelf/{{target}}/{{arch}}/{{current_version}}`, and the
-  updater plugin substitutes the **operating system** and **CPU architecture** into the path
-  alongside the version. It also sends a `tauri-plugin-updater/<version>` User-Agent, and — as any
-  request does — reveals the machine's IP address to whatever serves that host. No capture, no
+  `https://github.com/MoggingLabs/shotshelf/releases/latest/download/latest.json` — a static
+  manifest the release pipeline publishes — so the request itself carries no version, OS or
+  architecture in the URL; the plugin compares the manifest against the running version locally. It also sends a `tauri-plugin-updater/<version>` User-Agent, and — as any request does —
+  reveals the machine's IP address to the host, which is now GitHub rather than an internal
+  server: a fact worth knowing for an internal tool, stated rather than rounded away. No capture, no
   filename, no path, no identifier of the machine or the person: those really are absent, and that
   is the guarantee worth stating. The rest is what an HTTP request costs, and this document is the
   wrong place to round it down.
 
   Turning the check off sends nothing at all and opens no socket. It is `checkForUpdates` in
-  `settings.json` — a hand-edit, not a control in the Settings panel, which has four and does not
+  `settings.json` — a hand-edit, not a control in the Settings panel, which has seven and does not
   include this one. Saying "in Settings" implied a switch that does not exist.
 - Nothing Shotshelf stores leaves the machine by any route Shotshelf controls, and no capture
   and no path to one is ever written somewhere that syncs.

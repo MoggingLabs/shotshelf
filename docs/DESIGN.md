@@ -128,16 +128,19 @@ that cannot say what job it does gets removed before it gets polished.
 | Peek column | Grab it *now*, without the shelf stealing focus | `tests/e2e/popover.spec.ts` |
 | Drag-out (multi-select, ordered) | The file lands where work happens; copy, never move | e2e drag specs; live drag on Windows |
 | Copy | Apps that paste but refuse drops | e2e + live |
-| Show in folder | The file itself is the product; this is the shortest path to it | e2e + the IPC scope-refusal test |
+| Show in folder | The file itself is the product; this is the shortest path to it (tile control, `o`, and the tray's Open captures folder) | e2e + the IPC scope-refusal test |
 | Pin / retention / item cap | The shelf stays a shelf, not an archive | unit + e2e sweeps |
+| Copy recognised text | The error text in a screenshot, into a chat, without retyping — the OCR the credential scan already runs, finally answering the keyboard | e2e + the IPC scope-refusal test; the text never crosses the wire |
+| Start at login | The product is being there when the capture lands; a reboot must not turn it off | settings e2e + IPC tolerance test; roams with the account |
+| Corner / monitor choice | A corner widget on the wrong corner is furniture in the way | `corner_origin` unit table + settings e2e + live re-place on save |
 | Poster frames, duration, size | A recording is a file until you can see into it | Rust poster tests, e2e |
 | OCR + credential warning | The last moment a token is only on your machine | Rust `secrets.rs` table, e2e, live OCR on Windows |
 | Editor (5 tools, real redaction) | Point at the thing without a second app; redaction that removes pixels | `tests/e2e/editor.spec.ts` |
 | Compare | The unit of iteration when working against a model | e2e compare specs |
 | Quick look | Read the capture without opening an app | e2e + window-resize specs |
-| Keyboard map | The shelf is summoned by key; acting on it should not need the mouse | `tests/e2e/keyboard.spec.ts` |
+| Keyboard map | The shelf is summoned by key; acting on it should not need the mouse — incl. `t` copy-text, `p` pin, `o` show-in-folder | `tests/e2e/keyboard.spec.ts` |
 | Backfill | A reboot must not cost the morning's captures | Rust + e2e |
-| Update check | The one network call; tells, never installs | Rust wiring + live failure path |
+| Update check | The one network call — a static manifest off this repo's Releases; tells, never installs | Rust wiring + live failure path |
 
 ## Evaluated and deliberately not built
 
@@ -155,12 +158,9 @@ with a reason — so the next person weighs the reason, not the absence:
   magnitude.
 - **Rename / delete on disk** — breaks the invariant the whole app is built
   on: the capture file is never modified, moved or deleted.
-- **Start at login** — an app that adds itself to startup unasked is a bad
-  neighbour. Belongs as an explicit setting someday; documented manual steps
-  until then.
-- **A keyboard shortcut for Show-in-folder** — the map already covers pick,
-  preview, copy, edit, remove; one more binding needs evidence it is reached
-  for. Candidate: `o`.
+- ~~Start at login~~ and ~~a keyboard key for Show-in-folder~~ — both were on
+  this list and both shipped on 2026-08-01 when the owner asked, which is
+  exactly the evidence the list said it was waiting for.
 
 ## Regenerating the appearance goldens
 

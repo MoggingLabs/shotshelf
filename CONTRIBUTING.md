@@ -15,9 +15,10 @@ Thanks for taking the time to contribute!
    signed — see [SECURITY.md](./SECURITY.md#what-has-not-been-verified) and
    [PARITY](./docs/PARITY.md).
 4. **Local-only, always.** No telemetry, no cloud, and exactly one network call: the launch-time
-   update *check*, which installs nothing. The feed URL is built from the running version, the OS
-   and the CPU architecture; the request also carries the updater's own `User-Agent` and, as any
-   HTTPS request does, your IP. "And nothing else" used to end that sentence, which `SECURITY.md`
+   update *check*, which installs nothing. It fetches a static `latest.json` from this repo's
+   GitHub Releases — the version comparison is local, so the URL carries nothing about the
+   machine; the request has the updater's own `User-Agent` and, as any HTTPS request does,
+   your IP. "And nothing else" used to end that sentence, which `SECURITY.md`
    had already retracted in the same words. See `SECURITY.md` for the exact wording; if you change what that request contains, change that section in the same commit.
    If a change would send a capture anywhere off the device, it doesn't belong here.
 5. **Be kind.** See the [Code of Conduct](./CODE_OF_CONDUCT.md).

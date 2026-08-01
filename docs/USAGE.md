@@ -4,12 +4,13 @@ Shotshelf catches every screenshot and screen recording you take and keeps it on
 an always-on-top shelf. This guide takes you from download to first drag-out.
 
 > **Your captures never leave your machine.** Shotshelf makes exactly one network request: on
-> launch it asks the internal release feed whether a newer version exists. That request carries the
-> running version, the operating system and the CPU architecture — they are part of the feed's URL —
-> plus the updater's User-Agent, and — as any HTTPS request does — your IP address to whatever
-> serves that host. No capture, no filename, no metadata, no telemetry, no analytics. Everything else it does happens
-> on local disk, and switching the check off — `checkForUpdates` in `settings.json`, a hand-edit rather than a
-> control in the panel — sends nothing at all.
+> launch it fetches a small version manifest from the project's GitHub Releases to see whether a
+> newer build exists. The request carries the updater's User-Agent and — as any HTTPS request
+> does — your IP address to the host, which is GitHub; the version comparison happens locally,
+> so not even your running version is in the URL. No capture, no filename, no metadata, no
+> telemetry, no analytics. Everything else it does happens on local disk, and switching the
+> check off — `checkForUpdates` in `settings.json`, a hand-edit rather than a control in the
+> panel — sends nothing at all.
 
 ---
 
@@ -89,8 +90,8 @@ hotkey** rather than by clicking the icon.
 ## First run
 
 Shotshelf lives in the tray (Windows, Linux) / menu bar (macOS). It has no taskbar or Dock entry by
-design — the shelf is a **popover that rests in the bottom-right corner of your screen**, just
-clear of the taskbar, not a window that sits open all day.
+design — the shelf is a **popover that rests in a corner of your screen** — bottom-right unless the Corner setting
+says otherwise — just clear of the taskbar, not a window that sits open all day.
 
 - **Click the icon**, or press the hotkey, to open it. Esc closes it, as does the − button. It
   deliberately does *not* close when you click away: an opened shelf is sticky, because the whole
@@ -169,6 +170,9 @@ shows rather defeats the point.
 | `Enter` | Copy it to the clipboard |
 | `Delete` or `Backspace` | Take it off the shelf — **the file stays on disk** |
 | `e` | Mark the picked capture up |
+| `t` | Copy the **text** in the picked image — recognised on your machine, straight onto the clipboard |
+| `p` | Pin or unpin the picked captures |
+| `o` | Show the picked capture's file in Explorer / Finder / your file manager |
 | `Ctrl+Z` | Undo the last mark, while marking up |
 | `Esc` | Close the editor, then the settings panel, then the preview, then the shelf |
 
@@ -242,7 +246,7 @@ never leaves Rust.
 
 ## Settings
 
-The gear in the title strip opens every control there is — four of them. One setting has no
+The gear in the title strip opens every control there is — seven of them. One setting has no
 control and is hand-edited only: `checkForUpdates`, covered further down.
 
 | Setting | What it does |
@@ -251,6 +255,9 @@ control and is hand-edited only: `checkForUpdates`, covered further down.
 | **Max items** | How many unpinned captures the shelf holds |
 | **Send smaller copies** | Hand over a copy no larger than 1568px on its long edge, instead of the original |
 | **Hotkey** | The global show/hide shortcut |
+| **Corner** | Which screen corner the popover docks to. A bottom corner grows the popped column upward; a top corner grows it downward |
+| **Monitor** | Which monitor carries that corner: the primary, or whichever one your cursor is on when the shelf appears |
+| **Start at login** | Registers Shotshelf as a login item so it is already watching at the day's first capture. Follows your account — turn it on once and each machine you log into registers itself at the next launch; turning it off unregisters the same way |
 
 **About "Send smaller copies".** Off by default. Every vision model resizes what it is given
 to roughly 1568px before it looks at it, so when you are feeding a chat those extra pixels are
@@ -333,11 +340,11 @@ yet. `clipboard` is the exception and the one to leave alone: Win+Shift+S and �
 Set `checkForUpdates` to `false` in the settings file and Shotshelf makes no network request at
 all — not even this one.
 
-
-On launch Shotshelf asks the internal feed whether a newer version exists. If one does, it says
-so once and does nothing else — nothing is downloaded and nothing is replaced. Installing is
-your decision, taken by fetching the installer yourself. If the feed is unreachable — you're
-offline, or off the VPN — it carries on silently.
+On launch Shotshelf asks the project's GitHub Releases whether a newer version exists — one
+fetch of a `latest.json` the release pipeline publishes. If one does, it says so once and does
+nothing else — nothing is downloaded and nothing is replaced. Installing is your decision,
+taken by fetching the installer yourself. If the feed is unreachable — you're offline, or no
+release has published a manifest yet — it carries on silently.
 
 It used to download and install the update in place, unattended, at every launch. That is not
 something an app should do without asking, and it is not what "asks whether a newer version

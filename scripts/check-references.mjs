@@ -393,6 +393,10 @@ for (const file of SOURCES) {
     const isPath = named.includes("/");
     const claimsOurFile =
       !token.includes(" ") &&
+      // A URL is a claim about the *network*, not about this repository —
+      // the update feed's `latest.json` lives on GitHub Releases and made
+      // this gate demand a file no clone will ever contain.
+      !named.includes("://") &&
       !NOT_OURS.test(named) &&
       !named.includes("\\") &&
       (SOURCE_FILE.test(named) || (DATA_FILE.test(named) && isPath));
