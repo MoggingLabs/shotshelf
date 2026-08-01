@@ -26,6 +26,15 @@ updates:
         dependency-type: development
       runtime:
         dependency-type: production
+    ignore:
+      # TypeScript 7 is exactly the pair-failure the group comment above
+      # predicts: typescript-eslint 8.65 peer-refuses it, so npm install dies
+      # before tsc gets a vote (PR #15, closed 2026-08-01). In config rather
+      # than a comment command because Dependabot does not honour those on
+      # grouped pull requests. Delete this entry when typescript-eslint
+      # supports 7 — the adoption is deliberate work, not a bot merge.
+      - dependency-name: typescript
+        versions: [">=7.0.0 <8.0.0"]
 
   - package-ecosystem: cargo
     directory: /src-tauri
@@ -43,6 +52,14 @@ updates:
           - "*"
         exclude-patterns:
           - "tauri*"
+    ignore:
+      # The windows crate follows whatever tao pins, never the newest — the
+      # constraint (and the .get()-to-Async::join() adaptation the next real
+      # bump needs) is written on the dependency in src-tauri/Cargo.toml
+      # (PR #17, closed 2026-08-01). 0.63 should be proposed normally: delete
+      # or widen this when the Tauri stack moves off 0.61.
+      - dependency-name: windows
+        versions: [">=0.62.0 <0.63.0"]
 
   - package-ecosystem: github-actions
     directory: /
