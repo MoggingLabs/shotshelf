@@ -8,9 +8,19 @@ metadata:
   modified: 2026-07-31T17:15:09.903Z
 ---
 
-The `/goal` for Shotshelf requires a council of Opus 5 seats (senior engineer,
+> **RETIRED, 2026-08-01, by owner decision: "Disregard the council unanimous
+> approval. We are not running councils."** Everything below is history, not
+> instruction. No session should launch seats, treat unanimous APPROVE as a
+> merge gate, or execute the "resumed session must" list. What survives:
+> `shotshelf-standing-constraints.md` (still binding) and the working habits
+> the cycle proved — run the gate rather than trusting prose about it, mutate
+> a guard before believing its test.
+
+The `/goal` for Shotshelf required a council of Opus 5 seats (senior engineer,
 architect, solutions architect) to reach **unanimous APPROVE with zero
-blockers**. As of 2026-07-30 that has **not** been reached.
+blockers**. As of 2026-07-30 that had **not** been reached, and it never was:
+the cycle ended at forty rounds with every blocker fixed and no APPROVE ever
+returned.
 
 **Current tip:** `6293d58` on `feat/enrich-and-edit`. Use this as `<TIP>`. The
 four commits on top of `20dd01a` are the 2026-07-31 provisioning session and are

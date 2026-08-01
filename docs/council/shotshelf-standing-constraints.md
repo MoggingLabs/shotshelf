@@ -15,12 +15,12 @@ council seat must not propose one as a fix.
   update check, and switching it off opens no socket at all.
 - Never commit captures, user data, signing keys, certs or notarization creds.
   Secrets come from env/CI only.
-- **`prompts/` is now tracked, deliberately** (2026-07-31). It was git-ignored
-  under a "never shipped" rule; the owner chose to commit it so the build
-  prompts and `RESEARCH.md` survive a move to another machine. This was safe
-  only because the repo was made **private** in the same change — it is no
-  longer public. A seat must not report tracked `prompts/` as a violation, and
-  must not propose making the repo public again.
+- **`prompts/` is tracked, deliberately** (2026-07-31), and **the repo is
+  public again, deliberately** (2026-08-01, owner decision, to restore free
+  CI). The owner accepted that `prompts/` and `docs/council/` are published:
+  they are methodology, not secrets, and the tracked tree was scanned for
+  credential-shaped strings before the flip. Neither tracked `prompts/` nor
+  public visibility is a violation to report.
 - **Drag-out is a copy, never a move.**
 - Remove / retention / expiry are **shelf-only** and must never delete, move or
   modify a capture file.

@@ -40,10 +40,14 @@ snapshots/
 recon/
 
 # ── Build prompts ───────────────────────────────────────────────────
-# `prompts/` was git-ignored under a "never shipped" rule. It is now tracked
-# deliberately (2026-07-31) so the build prompts and RESEARCH.md survive a move
-# to another machine. Safe only because this repo is now PRIVATE. Do not make
-# the repo public again without revisiting this.
+# `prompts/` was git-ignored under a "never shipped" rule, then tracked
+# (2026-07-31) so the build prompts and RESEARCH.md survive machine moves — at
+# the time, safe only because the repo was made private in the same change. On
+# 2026-08-01 the owner chose to make the repo PUBLIC again to restore free CI,
+# keeping prompts/ and docs/council/ tracked: they are methodology, not
+# secrets, and the tracked tree was scanned for credential-shaped strings
+# before the flip. The gates still forbid what must never ship — captures,
+# keys, real user paths.
 
 # ── Third-party reference repos (unlicensed; consult, don't ship) ────
 reference/
