@@ -122,6 +122,14 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 # Rounded window corners, which CSS cannot deliver on its own — see
 # `window::round_corners`. Same version Tauri already depends on, so this only
 # turns on an extra feature rather than pulling a second copy of the crate.
+#
+# That sameness is a constraint, not a coincidence: the version follows
+# whatever `tao` pins, never the newest release. Bumping only this line (as
+# Dependabot proposed in PR #17, declined 2026-08-01) compiles a second copy
+# of the crate into every build for no gain — and 0.62 is also a source break
+# here: the async types moved to `windows-future`, whose blocking wait is
+# `Async::join()` where `src/enrich/ocr.rs` calls `.get()`. Re-take the bump when
+# the Tauri stack moves, and adapt those call sites in the same commit.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
