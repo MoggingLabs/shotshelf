@@ -82,8 +82,8 @@ real capture.
 Stated plainly, because a security document that overstates its evidence is worse than one that
 admits a gap.
 
-Every claim above is established by reading and testing the code: 170 Rust unit tests plus four
-that cross the real IPC boundary, 140 Node tests, a front-end suite of 171 specs that drives the
+Every claim above is established by reading and testing the code: 170 Rust unit tests plus nine
+that cross the real IPC boundary, 140 Node tests, a front-end suite of 173 specs that drives the
 real UI in a real browser, and static analysis.
 
 **On 2026-07-31 the application was run, for the first time, on Windows 11.** Every version of
@@ -110,9 +110,10 @@ the real webview and the real OS, with synthetic captures:
   halves matter: the test writes a genuine PNG rather than naming a path that was never created,
   because a refusal for "no such file" would have looked identical and proved nothing. Deleting
   the scope check from any one of those three commands turns it red, verified by doing it.
-- **Native drag-out.** A press-and-move on a tile started a real OS drag with the drag preview
-  under the cursor outside the window. The drag was cancelled rather than dropped, so the drop
-  half — what the receiving application gets — remains unexercised.
+- **Native drag-out, the full round trip.** First verified as a started-and-cancelled drag;
+  on 2026-08-01 the drop half was driven too, against the packaged build: a capture dragged
+  from the shelf into a real Explorer window arrived as a byte-identical copy and the original
+  stayed exactly where the OS put it — the copy-never-move constraint observed end to end.
 - **On-device text recognition and the credential warning.** A capture containing
   `AKIAIOSFODNN7EXAMPLE` (Amazon's own documentation placeholder) was read by `Windows.Media.Ocr`
   and the card showed the warning marker. This is the FFI path and the feature that depends on it.
@@ -169,7 +170,6 @@ the real webview and the real OS, with synthetic captures:
   commands refuse an out-of-scope file, which is the rule. What no one has watched is the scope
   denying something in the running app, where the grant is built from the resolved watch list
   rather than absent entirely.
-- The **drop** half of drag-out, and what a receiving application actually gets.
 - **Reading the foreground window**, which is a Win32 `unsafe` block.
 - The **tray icon and menu**, and **single-instance** behaviour. Windows 11 puts a new tray icon
   in the overflow flyout, which `docs/USAGE.md` documents and which this run confirmed; the icon

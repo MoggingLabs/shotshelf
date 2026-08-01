@@ -365,6 +365,24 @@ second form);
 Installing and using Shotshelf is [docs/USAGE.md](./docs/USAGE.md). This is how the installers
 get made.
 
+**The whole release path runs today, unsigned.** Pushing a `v*` tag runs the full gate on both
+bundling platforms, builds the installers, and publishes a GitHub Release carrying them plus
+`SHA256SUMS.txt` — with no signature, the checksums are the only integrity statement, and the
+release notes say so. Everything below the tag is automated; nothing about it changes when
+signing arrives.
+
+**To turn on signing, set repository secrets and change nothing else.** The workflow already
+passes every one of these through, checks that a configured key really produced signatures, and
+fails the release if it did not:
+
+| Secret | Turns on |
+| :-- | :-- |
+| `WINDOWS_CERT_THUMBPRINT` | Authenticode on the `.msi`/`.exe` (cert must be in the runner's store — for GitHub-hosted runners, import it in a step from a base64 secret first) |
+| `APPLE_CERTIFICATE` + `APPLE_CERTIFICATE_PASSWORD` | The Developer ID certificate itself, base64, for a keychain-less runner |
+| `APPLE_SIGNING_IDENTITY` | Which identity signs the `.app` |
+| `APPLE_ID` + `APPLE_PASSWORD` + `APPLE_TEAM_ID` | Notarization |
+| `TAURI_SIGNING_PRIVATE_KEY` (+ `…_PASSWORD`) | Updater artifacts and their `.sig`s — without it none are produced, deliberately |
+
 ```bash
 npm run release              # signs if the environment can, otherwise unsigned
 npm run release -- --unsigned  # never sign; for a local smoke test

@@ -229,3 +229,67 @@ jobs:
           name: shotshelf-${{ matrix.os }}-${{ github.ref_name }}
           path: ${{ matrix.artifacts }}
           if-no-files-found: error
+
+  # A tag becomes a GitHub Release people can actually download from.
+  #
+  # Workflow artifacts require a signed-in GitHub account and expire; handing a
+  # teammate an installer means handing them a URL that works. Only on tags —
+  # the weekly schedule and hand dispatches stay smoke tests whose output lives
+  # and dies as artifacts — and with `contents: write` scoped to this one job,
+  # not the workflow: the bundle job runs `npm ci` and the whole gate, and none
+  # of that code needs a token that can write to the repository.
+  publish:
+    name: Publish the release
+    needs: bundle
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: shotshelf-*
+          merge-multiple: true
+          path: dist
+
+      # The artifacts keep their `src-tauri/target/…` directory shape; a
+      # Release wants flat files with a checksum list alongside. Checksums are
+      # what let an unsigned internal build be verified at all — no signature
+      # means the SHA256 is the only integrity statement there is.
+      - name: Flatten and checksum
+        working-directory: dist
+        run: |
+          find . -type f \( -name '*.msi' -o -name '*.exe' -o -name '*.dmg' \
+            -o -name '*.tar.gz' -o -name '*.sig' \) -exec mv {} . \;
+          find . -mindepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create the GitHub Release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md << 'EOF'
+          Built by the release workflow from this tag, with the full gate run
+          on both bundling platforms first.
+
+          **Signing status is stated per artifact era, not assumed.** If no
+          `.sig` files are attached, this build is **unsigned**: Windows will
+          show SmartScreen warnings (and machines enforcing Smart App Control
+          will refuse it entirely), and macOS requires right-click → Open the
+          first time. `SHA256SUMS.txt` is the integrity statement — verify a
+          download against it before installing.
+
+          What has and has not been verified on each OS is `docs/PARITY.md`,
+          and what the app does and never does is `SECURITY.md` — local-only,
+          one update-check request, captures never leave the machine.
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Shotshelf $GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            --verify-tag \
+            *.msi *.exe SHA256SUMS.txt $(ls *.dmg *.tar.gz *.sig 2>/dev/null || true)

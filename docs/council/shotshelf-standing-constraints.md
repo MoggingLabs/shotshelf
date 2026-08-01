@@ -35,10 +35,13 @@ Smart App Control blocks the unsigned dev binary; Linux drag `text/uri-list` is
 not percent-encoded (upstream `drag` crate); Linux global shortcuts can report
 success without the OS taking them, and `tray-icon`'s GTK constructor cannot
 fail; Wayland ignores window positioning; Linux watches `~/Pictures` and
-`~/Videos` broadly; the macOS clipboard URI is `file://` + raw path; the release
-workflow uploads artifacts rather than creating a Release; Windows Authenticode
-needs a cert already in the machine store; no browser spec executes a real
-`#[tauri::command]`; the IPC tier has no executable gate.
+`~/Videos` broadly; the macOS clipboard URI is `file://` + raw path; Windows Authenticode
+needs a cert already in the machine store. Two entries this list used to carry
+are no longer true and are struck rather than silently dropped: the release
+workflow now publishes a GitHub Release on tags (2026-08-01), and the IPC tier
+has an executable gate — `src-tauri/tests/ipc.rs` drives the real
+`invoke_handler`, so "no browser spec executes a real `#[tauri::command]`"
+remains true but no longer describes a coverage hole.
 
 **A disclosed limit is not a finding — but a *false* disclosure is a blocker.**
 Two disclosures have already been proved false and closed: `show_shelf`'s

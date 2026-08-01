@@ -37,7 +37,7 @@ in about five minutes.
 | Image thumbnail | Pass | — | — | Rendered from disk over the asset protocol, so the runtime scope grant works |
 | Video poster frame | Pass | — | — | Bundled ffmpeg extracted a frame; tile showed it |
 | Duration and size badge | Pass | — | — | `0:06 · 14 kB` on the recording tile |
-| Native drag-out | Partial | — | — | The OS drag started with its preview under the cursor; the drag was **cancelled, not dropped**, so what a receiving app gets is unverified |
+| Native drag-out | Pass | — | — | Full round-trip 2026-08-01, packaged build: dragged a capture into a real Explorer window; it arrived byte-identical and the original never moved |
 | Copy to clipboard | Pass | — | — | 1920×1080 image on the clipboard |
 | Show in folder | Pass | — | — | Clicked live 2026-08-01: Explorer opened on the capture's folder; also gated by e2e and the IPC scope-refusal test |
 | On-device text recognition | Pass | — | — | `Windows.Media.Ocr`; macOS uses Vision, Linux tesseract if present |
