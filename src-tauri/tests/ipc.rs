@@ -72,19 +72,33 @@ fn app() -> (
     (app, window)
 }
 
-/// Send a real IPC request through the real handler.
+/// Send a real IPC request through the real handler, from the app's origin.
 fn invoke(
     window: &tauri::WebviewWindow<tauri::test::MockRuntime>,
     command: &str,
     body: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    // The app's own origin, which differs by OS exactly as the asset protocol
+    // does: Windows serves the page from `http://tauri.localhost`, macOS and
+    // Linux from `tauri://localhost`. The ACL classes anything else as a
+    // *remote* origin and answers "not allowed. Plugin not found" for every
+    // command — which is how this suite was green on Windows and red on the
+    // other two the first time CI ever ran it there. The wrong-origin case is
+    // real coverage in its own right, but it belongs in a test that says so,
+    // not in the plumbing under every other one.
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+
     get_ipc_response(
         window,
         InvokeRequest {
             cmd: command.into(),
             callback: tauri::ipc::CallbackFn(0),
             error: tauri::ipc::CallbackFn(1),
-            url: "http://tauri.localhost".parse().expect("a valid url"),
+            url: origin.parse().expect("a valid url"),
             body: body.into(),
             headers: Default::default(),
             invoke_key: INVOKE_KEY.to_string(),
@@ -343,5 +357,34 @@ fn asking_whether_text_can_be_recognised_answers_rather_than_failing() {
     assert!(
         answer.is_boolean(),
         "expected a bool on the wire, got {answer}",
+    );
+}
+
+#[test]
+fn a_command_asked_for_from_a_foreign_origin_is_refused() {
+    // The discovery that produced this test was an accident: the harness used
+    // the Windows local origin on every OS, and macOS refused all eighteen
+    // commands with "not allowed" — the ACL classing the caller as remote.
+    // That refusal is not a nuisance, it is the security model working: a
+    // webview navigated to remote content must lose the command surface. So
+    // the accident becomes coverage, on purpose and on every platform.
+    let (_app, window) = app();
+
+    let refused = get_ipc_response(
+        &window,
+        InvokeRequest {
+            cmd: "get_settings".into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "https://example.com".parse().expect("a valid url"),
+            body: serde_json::json!({}).into(),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.to_string(),
+        },
+    );
+
+    assert!(
+        refused.is_err(),
+        "a foreign origin was allowed to call get_settings",
     );
 }
