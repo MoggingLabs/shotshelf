@@ -19,7 +19,7 @@ in about five minutes.
 | :-- | :-- | :-- | :-- |
 | Compiles, lints, tests | Pass (CI, 2026-08-01) | Pass (CI, 2026-08-01) | Pass (CI, 2026-08-01, goldens included) |
 | Ever launched | **Yes** — 2026-07-31, dev build | No | No |
-| Ever packaged | **Yes** — `.msi` + NSIS `.exe`, unsigned | No | n/a — no installer is produced |
+| Ever packaged | **Yes** — `.msi` + NSIS `.exe`, unsigned | **Yes** — `.dmg` (aarch64), built by the v0.1.0 release run, unsigned, never launched by a human | n/a — no installer is produced |
 | Packaged build ever run | **Yes** — from the MSI's contents | No | n/a |
 
 ## Capabilities
