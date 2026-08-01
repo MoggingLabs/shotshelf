@@ -6,11 +6,21 @@ name: Appearance goldens
 # reference images get made: run it, download the artifact, look at the images,
 # and commit them.
 #
-# Deliberately manual. Regenerating goldens automatically would mean a visual
-# regression could sign off on itself.
-
+# Deliberately manual *in effect*: this only ever uploads an artifact for a
+# person to look at — it never commits. The push trigger below exists because
+# `workflow_dispatch` can only start a workflow that exists on the default
+# branch, which this one did not when the design system landed on a feature
+# branch and invalidated every golden at once. A visual regression still
+# cannot sign off on itself: the human inspecting and committing the images
+# is the approval, and that step has no automation.
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - src/styles.css
+      - index.html
+      - "tests/visual/**"
+      - .github/workflows/goldens.yml
 
 permissions:
   contents: read
