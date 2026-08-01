@@ -77,6 +77,11 @@ export async function copyCapture(path: string, kind: CaptureKind): Promise<void
   await invoke("copy_capture", { path, kind });
 }
 
+/** Show the capture's file in the OS file manager, selected where the OS can. */
+export async function revealCapture(path: string): Promise<void> {
+  await invoke("reveal_capture", { path });
+}
+
 /** Stage a capture for a native drag. Rejects — a failed drag must be visible. */
 export function prepareDrag(path: string, kind: CaptureKind): Promise<DragSource> {
   return invoke<DragSource>("prepare_drag", { path, kind });

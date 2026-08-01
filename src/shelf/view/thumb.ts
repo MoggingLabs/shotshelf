@@ -40,7 +40,7 @@ export function imageThumb(path: string, name: string): HTMLImageElement {
 export function glyphThumb(kind: GlyphKind, modifier?: string): HTMLElement {
   const el = document.createElement("div");
   el.className = `tile__thumb tile__thumb--glyph${modifier ? ` tile__thumb--${modifier}` : ""}`;
-  el.append(icon(kind, 22));
+  el.append(icon(kind, 24));
   return el;
 }
 

@@ -170,6 +170,7 @@ export function installTauriMock(EVENTS: WindowEvents): void {
     "hide_shelf": null,
     "forget_video": null,
     "copy_capture": null,
+    "reveal_capture": null,
     // Read, and nothing found — the ordinary case.
     "describe_capture": { secrets: [], scanned: true },
     ...(window.__shotshelfStubs__ ?? {}),

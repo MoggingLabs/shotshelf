@@ -241,7 +241,8 @@ capture to the middle 46%, throwing that away and rendering dark captures as emp
 The shelf holds **50 unpinned** captures by default and scrolls; the 51st pushes the oldest
 unpinned one off the end. Pinned captures do not count towards it and are capped separately at
 500, and the 50 is `maxItems` in `settings.json`, adjustable between 1 and 200. Hovering
-a tile reveals pin, copy and remove controls — removing takes it off the shelf, and the file
+a tile reveals pin, copy, show-in-folder and remove controls — show-in-folder opens the real
+file selected in Explorer or Finder, and removing takes it off the shelf while the file
 itself is never touched, moved or deleted. Recordings keep a badge — whenever the card is not hovered — with their length
 and size, because that is identity rather than chrome.
 

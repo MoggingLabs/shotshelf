@@ -126,6 +126,10 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
   Explorer, Finder, an email, a chat box or an editor. It's a copy: the original stays put.
 - **Copy** — for apps that take a paste but refuse a file drop. Images go on the clipboard as
   pixels, recordings as a file reference.
+- **Show in folder** (the folder icon) — opens the capture's real file in Explorer / Finder /
+  your file manager, selected where the OS supports it. The shelf holds a pointer to a real
+  file, and this is the shortest path to that file when you need the thing itself — to attach
+  it, rename a copy, or check what else landed beside it.
 - **Pin** (the star) — pinned captures ignore the retention window and the item limit, and are
   the only ones kept **indefinitely** across a restart. A relaunch also brings back up to twenty
   *unpinned* captures from the previous 24 hours, which is a different thing — see
@@ -144,8 +148,9 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
   **older** capture is the "before", whichever order you picked them in — ctrl-clicking and
   shift-selecting produce different pick orders, so pick order is not one rule but two.
 
-Pin, remove and copy appear on a tile when you hover it; edit and compare live in the title
-strip, because they act on what you have picked rather than on the tile under the pointer.
+Pin, copy, show-in-folder and remove appear on a tile when you hover it; edit and compare live
+in the title strip, because they act on what you have picked rather than on the tile under the
+pointer.
 - **Show/hide** — the tray icon, its right-click menu, or the global hotkey
   (`Ctrl+Shift+S` on Windows, `⌘⇧S` on macOS by default).
 

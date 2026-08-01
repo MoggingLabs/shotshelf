@@ -113,6 +113,32 @@ pub async fn prepare_drag<R: Runtime>(
     })
 }
 
+/// Show a capture's file in the OS file manager, selected where the OS can.
+///
+/// The shelf's whole model is "the file is the product", and this is the
+/// shortest path from a card to that file — Explorer's `/select`, Finder's
+/// Reveal, the FileManager1 portal on Linux. Through the `opener` crate rather
+/// than three hand-rolled process spawns, per the reuse rule; `opener` is the
+/// crate `tauri-plugin-opener` itself wraps, used directly from Rust so the
+/// webview gains **no** new permission — the command boundary is the only door,
+/// and `existing_file` keeps it scoped exactly like `copy_capture`'s.
+///
+/// On a blocking worker: `opener::reveal` spawns and, on some platforms, waits
+/// on a process, which does not belong on the runtime serving every command.
+#[tauri::command]
+pub async fn reveal_capture<R: Runtime>(app: AppHandle<R>, path: String) -> Result<(), String> {
+    let source = existing_file(&app, &path)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        opener::reveal(&source).map_err(|err| {
+            crate::diag::warn(&format!("could not reveal {}: {err}", source.display()));
+            "the file manager could not be opened".to_owned()
+        })
+    })
+    .await
+    .map_err(|err| format!("the reveal worker died: {err}"))?
+}
+
 /// Clipboard fallback, for the apps that will take a paste but not a drop.
 ///
 /// Same shape as `prepare_drag`: the decode/resize/encode runs on a blocking

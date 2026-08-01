@@ -57,7 +57,7 @@ function marker(findings: readonly SecretFinding[]): HTMLElement {
   el.className = "tile__secret";
   el.dataset["kind"] = findings[0]?.kind ?? "";
   el.title = summarise(findings);
-  el.append(icon("alert", 11));
+  el.append(icon("alert", 12));
 
   // The count only earns its space when there is more than one thing to say.
   if (findings.length > 1) {

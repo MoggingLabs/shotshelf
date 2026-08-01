@@ -13,6 +13,12 @@
     // .ts extension. Vite is happy with them either way.
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
+    // The gate scripts are plain Node .mjs. In the project so the type-aware
+    // lint sees them as project files — typescript-eslint caps its default-
+    // project escape hatch at eight files and the ninth script hit it. Without
+    // `checkJs` they are parsed, not type-checked, which is what they were
+    // getting under the escape hatch anyway.
+    "allowJs": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
@@ -28,6 +34,7 @@
   },
   // Tests and build config are type-checked too. A harness that has drifted
   // from the app it drives is a gate that has quietly stopped biting, and the
-  // compiler is the cheapest place to notice.
-  "include": ["src", "tests", "vite.config.ts", "playwright.config.ts"]
+  // compiler is the cheapest place to notice. The scripts ride along parsed
+  // but unchecked — see `allowJs` above.
+  "include": ["src", "tests", "scripts", "vite.config.ts", "playwright.config.ts"]
 }

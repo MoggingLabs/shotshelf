@@ -77,6 +77,14 @@ regex = "1"
 # engines. Tauri already runs on tokio, so this is the runtime already present.
 tokio = { version = "1", default-features = false, features = ["sync", "time"] }
 
+# "Show in folder": Explorer `/select`, Finder reveal, FileManager1 on Linux.
+# The crate `tauri-plugin-opener` itself wraps, used from the Rust side only,
+# so the webview gains no new permission — `share::reveal_capture` is the one
+# door and it goes through the same scope check as every other capture read.
+# The `reveal` feature's Linux half rides the `dbus` crate this tree already
+# carried; `cargo add` locked only `opener`, `bstr` and `normpath`.
+opener = { version = "0.8.5", features = ["reveal"] }
+
 # The frontmost application's name, which needs no permission at all — unlike
 # its window title, which on macOS needs Screen Recording. See enrich/foreground.
 [target.'cfg(target_os = "macos")'.dependencies]

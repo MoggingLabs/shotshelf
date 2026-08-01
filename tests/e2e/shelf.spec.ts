@@ -58,12 +58,14 @@ test("the column is sized to exactly the cards it holds", async ({ page }) => {
 
   await land(page, FIXTURE.wide, { ts: 1 });
   await expect(page.locator(".tile")).toHaveCount(1);
-  // 112 for the card + 24 of padding and border. Measured against the shipping app.
-  expect(await cardHeight(page)).toBe(136);
+  // 112 for the card + 26 of padding and border, written as numbers rather
+  // than re-derived from `geometry.ts` — an independent second statement, so a
+  // constant edited by mistake fails here instead of moving both sides.
+  expect(await cardHeight(page)).toBe(138);
 
   await land(page, FIXTURE.tall, { ts: 2 });
   await expect(page.locator(".tile")).toHaveCount(2);
-  expect(await cardHeight(page)).toBe(257);
+  expect(await cardHeight(page)).toBe(258);
 
   await land(page, FIXTURE.square, { ts: 3 });
   await expect(page.locator(".tile")).toHaveCount(3);
@@ -75,7 +77,7 @@ test("the column never grows past what fits on screen", async ({ page }) => {
   for (let index = 0; index < 9; index += 1) await land(page, FIXTURE.wide, { ts: index });
 
   // Five cards' worth, and it scrolls beyond that rather than growing off the top.
-  expect(await cardHeight(page)).toBe(5 * 112 + 4 * 9 + 24);
+  expect(await cardHeight(page)).toBe(5 * 112 + 4 * 8 + 26);
 });
 
 test("a card leaves the column after its minute but stays on the shelf", async ({ page }) => {
@@ -199,7 +201,8 @@ test("the pin control shows its own state, not whichever button came first", asy
   const pin = page.locator(".tile__action--pin");
   const others = page.locator(".tile__action:not(.tile__action--pin)");
   await expect(pin).toHaveCount(1);
-  await expect(others).toHaveCount(2);
+  // Copy, show-in-folder, remove.
+  await expect(others).toHaveCount(3);
   await expect(pin).not.toHaveClass(/tile__action--on/);
 
   await page.locator(".tile").hover();
@@ -240,6 +243,42 @@ test("copying a capture asks Rust for the clipboard, not the DOM", async ({ page
   await expect
     .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("copy_capture").length))
     .toBe(1);
+});
+
+test("showing a capture in its folder asks Rust, with the capture's own path", async ({
+  page,
+}) => {
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+
+  await page.locator(".tile").hover();
+  await page.locator(".tile__action--reveal").click();
+
+  // The path matters as much as the call: reveal hands a string to the OS
+  // shell, so the one thing this control may ever send is the capture's own
+  // path — `src-tauri/tests/ipc.rs` holds the other half, that Rust refuses
+  // any path the asset scope never admitted.
+  const calls = await page.evaluate(() => window.__shotshelf__.callsTo("reveal_capture"));
+  expect(calls).toHaveLength(1);
+  expect(calls[0]?.args["path"]).toBe(FIXTURE.wide);
+});
+
+test("a reveal that fails is said in the strip, not swallowed", async ({ page }) => {
+  await bootShelf(page);
+  await page.evaluate(() =>
+    window.__shotshelf__.reject("reveal_capture", "the file manager could not be opened"),
+  );
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+
+  await page.locator(".tile").hover();
+  await page.locator(".tile__action--reveal").click();
+
+  // Same contract as copy: the shelf reports through the strip, the button
+  // only flashes. A control that fails silently teaches people it is broken.
+  await expect(page.locator("#shelf-alert")).toBeVisible();
+  await expect(page.locator("#shelf-alert")).toContainText("folder");
 });
 
 test("the item cap drops the oldest unpinned capture", async ({ page }) => {

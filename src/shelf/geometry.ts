@@ -12,10 +12,11 @@
 
 /** Rendered height of one card, in CSS pixels. */
 export const CARD_HEIGHT = 112;
-/** Vertical space between cards. */
-export const CARD_GAP = 9;
-/** The column's padding plus the panel border, top and bottom together. */
-export const COLUMN_PADDING = 24;
+/** Vertical space between cards — the grid gap, on the 4px spacing grid. */
+export const CARD_GAP = 8;
+/** The column's padding plus the panel border, top and bottom together:
+ *  12px of padding each way plus the 1px border each way. */
+export const COLUMN_PADDING = 26;
 /** Beyond this the column scrolls rather than growing off the screen. */
 export const COLUMN_MAX_CARDS = 5;
 

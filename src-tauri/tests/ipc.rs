@@ -235,9 +235,16 @@ fn the_scope_refuses_a_path_it_was_never_given() {
     // runtime". Its logic was verified by reading, and by unit tests of the
     // *shape* rules in `webview_path.rs` — never by a command being told no.
     //
-    // All three commands that read a capture are asked for the same
+    // Every command that touches a capture's file is asked for the same
     // out-of-scope path. Each must refuse. If `existing_file` were deleted from
     // any one of them, that command would answer instead, and this goes red.
+    //
+    // For `reveal_capture` this is also the *only* test it can have in a
+    // harness: its success path opens a real file-manager window on whatever
+    // machine runs the suite, which is a side effect no test should have. The
+    // refusal is the property that matters — reveal hands a path to the OS
+    // shell, so it is the last command that may take one the scope never
+    // admitted.
     let (_app, window) = app();
     let path = a_real_file_outside_the_scope();
 
@@ -253,6 +260,10 @@ fn the_scope_refuses_a_path_it_was_never_given() {
         (
             "copy_capture",
             serde_json::json!({ "path": path.clone(), "kind": "image" }),
+        ),
+        (
+            "reveal_capture",
+            serde_json::json!({ "path": path.clone() }),
         ),
     ] {
         assert!(

@@ -40,6 +40,7 @@ import {
   compareCaptures,
   copyCapture,
   forgetVideo,
+  revealCapture,
   setCaptureCount,
 } from "./bridge.ts";
 import { ColumnQueue, type HoldReason } from "./column.ts";
@@ -133,6 +134,7 @@ export class Shelf {
       togglePin: (id) => this.#togglePin(id),
       remove: (id) => this.remove(id),
       copy: (id) => this.copy(id),
+      reveal: (id) => this.reveal(id),
       armDrag: (node, item, event) => this.#armDrag(node, item, event),
       pick: (id, event) => this.#pick(id, event),
     });
@@ -680,6 +682,26 @@ export class Shelf {
     } catch (error) {
       console.error("[shotshelf] could not copy that capture", error);
       this.#options.onProblem("That capture could not be copied.");
+      throw error;
+    }
+  }
+
+  /**
+   * Show one capture's file in the OS file manager.
+   *
+   * Shaped exactly like `copy` above, and for the same reason: report through
+   * `onProblem` so every route reads one way, and rethrow so the pressed
+   * button can flash. Rust refuses anything outside the asset scope.
+   */
+  async reveal(id: string): Promise<void> {
+    const item = this.#store.find(id);
+    if (!item) return;
+
+    try {
+      await revealCapture(item.path);
+    } catch (error) {
+      console.error("[shotshelf] could not reveal that capture", error);
+      this.#options.onProblem("That capture's folder could not be opened.");
       throw error;
     }
   }

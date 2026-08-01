@@ -308,12 +308,19 @@ function toolbar(session: EditSession, callbacks: EditorHost): HTMLElement {
     bar.append(button);
   }
 
-  bar.append(
-    action("Undo", "editor-undo", () => void undoEdit()),
-    action("Save", "editor-save", () => {
-      void saveEditedCapture(callbacks);
-    }),
-  );
+  const undo = action("Undo", "editor-undo", () => void undoEdit());
+  undo.title = "Undo the last mark (Ctrl+Z)";
+
+  const save = action("Save", "editor-save", () => {
+    void saveEditedCapture(callbacks);
+  });
+  // The one control that leaves with something saved reads as the primary
+  // action. A styling class, not the id: `styles.css` explains why an
+  // id-strength rule was the wrong tool, and the id stays for lookups.
+  save.classList.add("editor__action--primary");
+  save.title = "Save as a new capture — the original is untouched";
+
+  bar.append(undo, save);
   return bar;
 }
 

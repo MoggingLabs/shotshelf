@@ -1,20 +1,98 @@
 /* Shotshelf — frameless edge widget.
    The Tauri window is transparent, so anything not painted here shows the
-   desktop through: that is what gives the shelf its rounded, floating edge. */
+   desktop through: that is what gives the shelf its rounded, floating edge.
+
+   Every value in this file comes off the scales in `docs/DESIGN.md`: a
+   four-step type scale, a 4px spacing grid (2px half-steps below 8), three
+   control radii, two motion durations, and a semantic palette. A value that
+   is not on a scale is a bug or a documented exception — the file used to
+   carry six font sizes with quarter-pixel steps and thirteen distinct
+   spacing values, which is how "consistent" quietly stops being true. */
 
 :root {
+  /* ── Surfaces and strokes ── */
   --panel: rgba(20, 22, 30, 0.94);
   --raised: rgba(255, 255, 255, 0.07);
   --raised-hover: rgba(255, 255, 255, 0.12);
   --stroke: rgba(255, 255, 255, 0.09);
   --stroke-strong: rgba(255, 255, 255, 0.16);
+  --stroke-heavy: rgba(255, 255, 255, 0.26);
+  /* The editor and quick look float on this; the canvas sits on the opaque
+     twin so a transparent capture cannot show the desktop through the app. */
+  --overlay: rgba(5, 6, 10, 0.96);
+  --surface-deep: #05060a;
+  /* Scrims sit between a photograph and text, where a translucent panel
+     colour would tint unpredictably. Neutral black, three strengths. */
+  --scrim-panel: rgba(0, 0, 0, 0.22);
+  --scrim-ctl: rgba(0, 0, 0, 0.64);
+  --scrim-label: rgba(0, 0, 0, 0.88);
+  --shadow-1: 0 4px 14px rgba(0, 0, 0, 0.45);
+
+  /* ── Text ── */
   --text: #e9ebf0;
   --muted: #8b91a1;
+  /* Over scrims and photographs, never over the panel. */
+  --text-on-media: #fff;
+
+  /* ── Roles ── */
   --accent: #6366f1;
+  --accent-hover: #7275f4;
   --live: #34d399;
+  --live-halo: rgba(52, 211, 153, 0.14);
   --danger: #ef4444;
+  /* Readable danger: #ef4444 on the panel is 3.9:1, below AA for text, so
+     text and glyphs use this and pure --danger is kept for fills. */
+  --danger-soft: #fca5a5;
+  --danger-wash: rgba(239, 68, 68, 0.12);
+  --warning: #f59e0b;
+  --warn-rim: rgba(217, 119, 6, 0.85);
+  --warn-rim-hover: rgba(245, 158, 11, 0.95);
+  --warn-text: #fff7ed;
+  /* The credential badges, by kind. Three deliberate colours: service tokens
+     and their kin in amber, a private key in crimson (the one kind whose
+     exposure is not recoverable by rotation alone in a hurry), personal data
+     in stone — information, not alarm. */
+  --badge-token: rgba(180, 83, 9, 0.92);
+  --badge-key: rgba(190, 18, 60, 0.94);
+  --badge-personal: rgba(120, 113, 108, 0.92);
+  /* "Could not look" is a state, not a kind — related to stone but dimmer. */
+  --badge-unscanned: rgba(87, 83, 78, 0.9);
+  --text-unscanned: #d6d3d1;
+
+  /* ── Type scale ──
+     Whole pixels only: 9.5px and 10.5px rasterise differently at different
+     DPI scale factors, and this UI runs at 100%–200% on three OSes. Roles,
+     not sizes, pick the step: xs = micro badges, sm = captions and controls,
+     md = the title strip and forms, lg = body and the empty state. */
+  --font-xs: 10px;
+  --font-sm: 11px;
+  --font-md: 12px;
+  --font-lg: 13px;
+  --leading: 1.45;
+
+  /* ── Radii ──
+     Panel radius is per-OS (below). Cards one step in from the panel, controls
+     one step in from cards, pills for count-shaped things. */
   --radius: 14px;
-  --tile-radius: 9px;
+  --radius-lg: 12px;
+  --radius-card: 8px;
+  --radius-ctl: 6px;
+  --radius-pill: 999px;
+
+  /* ── Control sizes ──
+     24px is the WCAG 2.5.8 minimum target size; nothing interactive goes
+     below it. Bar controls get 28 because the 40px strip can afford it. */
+  --ctl-tile: 24px;
+  --ctl-bar: 28px;
+  --bar-h: 40px;
+
+  /* ── Motion ──
+     Two durations: feedback (hover, press, reveal-on-hover) and state (the
+     watching dot). Everything eases out — UI that eases in feels like it is
+     ignoring you. The reduced-motion rule below flattens both. */
+  --motion-fast: 100ms;
+  --motion-state: 160ms;
+
   color-scheme: dark;
 }
 
@@ -44,6 +122,28 @@
   user-select: none;
 }
 
+/* Every control shows where the keyboard is.
+   The app ships a whole keyboard map, and the settings inputs were the only
+   things with a visible focus ring — tabbing across the title strip or the
+   editor toolbar moved focus nobody could see. `:focus-visible`, not
+   `:focus`, so a pointer click does not leave a ring behind. */
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Motion is feedback here, never meaning: nothing communicates *only* by
+   animating. So under reduced motion everything can flatten wholesale —
+   states still change, they just change at once. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
 html,
 body {
   height: 100%;
@@ -53,8 +153,11 @@ body {
   color: var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI Variable Text",
     "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  font-size: 13px;
+  font-size: var(--font-lg);
   -webkit-font-smoothing: antialiased;
+  /* Arrow cursor on controls throughout, deliberately: this is a desktop
+     utility imitating native chrome, and native buttons do not grow a pointer
+     hand. The hand is a web convention for links. */
   cursor: default;
 }
 
@@ -107,9 +210,11 @@ body {
    second hole would have been a third. */
 
 /* Horizontal padding matches the browse view exactly, so a card comes out the
-   same width in both shapes — which is the whole point of the column. */
+   same width in both shapes — which is the whole point of the column. The
+   vertical 12px is `COLUMN_PADDING`'s per-edge half in `geometry.ts`, and the
+   mirror is load-bearing: the column window is sized from those constants. */
 .shelf[data-mode="column"] .shelf__items {
-  padding: 11px 12px;
+  padding: 12px;
 }
 
 /* ── Title strip (the drag handle) ─────────────────────────────────────── */
@@ -118,9 +223,9 @@ body {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 9px;
-  height: 40px;
-  padding: 0 8px 0 13px;
+  gap: 8px;
+  height: var(--bar-h);
+  padding: 0 8px 0 12px;
 }
 
 /* Doubles as the catch-engine indicator: it goes green once watching. */
@@ -130,17 +235,18 @@ body {
   flex: none;
   border-radius: 50%;
   background: var(--muted);
-  transition: background 160ms ease-out, box-shadow 160ms ease-out;
+  transition: background var(--motion-state) ease-out,
+    box-shadow var(--motion-state) ease-out;
 }
 
 .shelf__mark--live {
   background: var(--live);
-  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.14);
+  box-shadow: 0 0 0 3px var(--live-halo);
 }
 
 .shelf__title {
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-weight: 600;
   letter-spacing: 0.01em;
   text-overflow: ellipsis;
@@ -155,15 +261,16 @@ body {
   flex: none;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: var(--ctl-bar);
+  height: var(--ctl-bar);
   padding: 0;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-ctl);
   background: transparent;
   color: var(--muted);
   cursor: default;
-  transition: background 90ms ease-out, color 90ms ease-out;
+  transition: background var(--motion-fast) ease-out,
+    color var(--motion-fast) ease-out;
 }
 
 .shelf__btn:hover {
@@ -173,7 +280,7 @@ body {
 
 .shelf__btn--on {
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-media);
 }
 
 /* ── Shelf body ────────────────────────────────────────────────────────── */
@@ -192,26 +299,26 @@ body {
 }
 
 .shelf__items::-webkit-scrollbar {
-  width: 9px;
+  width: 8px;
 }
 
 .shelf__items::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--stroke-strong);
   background-clip: content-box;
 }
 
 .shelf__items::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.26);
+  background: var(--stroke-heavy);
   background-clip: content-box;
 }
 
 /* A wall of identical tiles is hard to read; dates give the eye a foothold. */
 .group__label {
-  margin: 10px 0 7px;
+  margin: 12px 0 8px;
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: var(--font-xs);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -223,12 +330,13 @@ body {
 
 /* One column, in both shapes. Two columns at this width would leave a card too
    small to recognise a screenshot in, which is the only job a thumbnail has.
-   The 9px gap and the card's aspect are what `columnHeight()` measures the
-   window against, so those numbers move together. */
+   The 8px gap and the card's aspect are what `columnHeight()` measures the
+   window against, so those numbers move together — the gap is `CARD_GAP` in
+   `geometry.ts`. */
 .group__grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 9px;
+  gap: 8px;
 }
 
 /* ── Capture tiles ─────────────────────────────────────────────────────── */
@@ -238,17 +346,18 @@ body {
   /* A screen's own shape: a full-screen capture fills this exactly, with
      nothing cropped and nothing letterboxed. */
   aspect-ratio: 16 / 9;
-  border-radius: var(--tile-radius);
+  border-radius: var(--radius-card);
   /* Lighter than the panel, so a dark capture still reads as a tile and not
      as a hole in the shelf. */
   background: var(--raised);
   box-shadow: inset 0 0 0 1px var(--stroke);
   overflow: hidden;
-  transition: box-shadow 110ms ease-out, transform 110ms ease-out;
+  transition: box-shadow var(--motion-fast) ease-out,
+    transform var(--motion-fast) ease-out;
 }
 
 .tile:hover {
-  box-shadow: inset 0 0 0 1px var(--stroke-strong), 0 4px 14px rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 0 0 1px var(--stroke-strong), var(--shadow-1);
 }
 
 /* The bars either side of a fitted thumbnail, filled with a blurred blow-up of
@@ -294,7 +403,7 @@ body {
 }
 
 .tile__thumb--missing {
-  color: #f0a5a5;
+  color: var(--danger-soft);
 }
 
 /* The picture is the identity — the filename only earns space on hover. */
@@ -304,14 +413,14 @@ body {
   bottom: 0;
   left: 0;
   padding: 16px 8px 6px;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0));
-  color: #fff;
-  font-size: 10.5px;
+  background: linear-gradient(to top, var(--scrim-label), rgba(0, 0, 0, 0));
+  color: var(--text-on-media);
+  font-size: var(--font-sm);
   opacity: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: opacity 110ms ease-out;
+  transition: opacity var(--motion-fast) ease-out;
 }
 
 .tile:hover .tile__label {
@@ -332,16 +441,16 @@ body {
   align-items: center;
   gap: 4px;
   max-width: calc(100% - 12px);
-  padding: 2px 6px 2px 5px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.66);
-  color: #fff;
-  font-size: 9.5px;
+  padding: 2px 6px 2px 4px;
+  border-radius: var(--radius-pill);
+  background: var(--scrim-ctl);
+  color: var(--text-on-media);
+  font-size: var(--font-xs);
   font-variant-numeric: tabular-nums;
   /* Matched to `.tile__label`, which fades *in* over this same corner as this
      fades out. Without it the badge snapped away a tenth of a second before the
      label arrived, under a comment two lines up saying it fades. */
-  transition: opacity 110ms ease-out;
+  transition: opacity var(--motion-fast) ease-out;
 }
 
 .tile__badge-text {
@@ -356,12 +465,12 @@ body {
 
 .tile__actions {
   position: absolute;
-  top: 5px;
-  right: 5px;
+  top: 6px;
+  right: 6px;
   display: flex;
-  gap: 3px;
+  gap: 4px;
   opacity: 0;
-  transition: opacity 90ms ease-out;
+  transition: opacity var(--motion-fast) ease-out;
 }
 
 .tile:hover .tile__actions,
@@ -372,15 +481,15 @@ body {
 .tile__action {
   display: grid;
   place-items: center;
-  width: 21px;
-  height: 21px;
+  width: var(--ctl-tile);
+  height: var(--ctl-tile);
   padding: 0;
   border: none;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.62);
-  color: #fff;
+  border-radius: var(--radius-ctl);
+  background: var(--scrim-ctl);
+  color: var(--text-on-media);
   cursor: default;
-  transition: background 90ms ease-out;
+  transition: background var(--motion-fast) ease-out;
 }
 
 .tile__action:hover {
@@ -392,7 +501,7 @@ body {
 }
 
 .tile__action--on {
-  background: #f59e0b;
+  background: var(--warning);
 }
 
 .tile__action--ok {
@@ -410,7 +519,7 @@ body {
 
 .tile--pinned .tile__action:not(.tile__action--on) {
   opacity: 0;
-  transition: opacity 90ms ease-out;
+  transition: opacity var(--motion-fast) ease-out;
 }
 
 /* Keyboard focus counts as reaching for it, exactly as hover does.
@@ -428,12 +537,6 @@ body {
   transform: scale(0.97);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .tile--dragging {
-    transition: none;
-  }
-}
-
 /* ── Empty state ───────────────────────────────────────────────────────── */
 
 .empty {
@@ -442,50 +545,50 @@ body {
 }
 
 .empty__frame {
-  width: 62px;
-  height: 62px;
-  margin: 0 auto 14px;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 12px;
   display: grid;
   place-items: center;
   border: 1.5px dashed var(--stroke-strong);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   color: var(--muted);
 }
 
 .empty__title {
   margin: 0 0 6px;
-  font-size: 13px;
+  font-size: var(--font-lg);
   font-weight: 600;
 }
 
 .empty__hint {
   margin: 0;
   color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.55;
+  font-size: var(--font-sm);
+  line-height: var(--leading);
 }
 
 /* ── Settings ──────────────────────────────────────────────────────────── */
 
 .settings {
   flex: none;
-  padding: 10px 13px 13px;
+  padding: 12px;
   border-top: 1px solid var(--stroke);
   border-bottom: 1px solid var(--stroke);
-  background: rgba(0, 0, 0, 0.22);
-  font-size: 11.5px;
+  background: var(--scrim-panel);
+  font-size: var(--font-md);
 }
 
 .settings__row {
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin-bottom: 7px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .settings__row > span {
   flex: none;
-  width: 66px;
+  width: 72px;
   color: var(--muted);
 }
 
@@ -493,9 +596,10 @@ body {
 .settings__row input {
   flex: 1;
   min-width: 0;
-  padding: 4px 7px;
+  min-height: var(--ctl-tile);
+  padding: 4px 8px;
   border: 1px solid var(--stroke);
-  border-radius: 7px;
+  border-radius: var(--radius-ctl);
   background: var(--raised);
   color: var(--text);
   font: inherit;
@@ -506,6 +610,8 @@ body {
   background: var(--raised-hover);
 }
 
+/* Inset rather than offset outward: these sit flush in a 225px panel, and an
+   outward ring on the hotkey field would clip against the panel edge. */
 .settings__row input:focus-visible,
 .settings__row select:focus-visible {
   outline: 2px solid var(--accent);
@@ -517,16 +623,16 @@ body {
 }
 
 .settings__note {
-  margin: 9px 0 0;
-  color: #fca5a5;
-  line-height: 1.45;
+  margin: 8px 0 0;
+  color: var(--danger-soft);
+  line-height: var(--leading);
 }
 
 .settings__hint {
-  margin: 9px 0 0;
+  margin: 8px 0 0;
   color: var(--muted);
-  font-size: 10.5px;
-  line-height: 1.45;
+  font-size: var(--font-sm);
+  line-height: var(--leading);
 }
 
 /* ── Alerts ────────────────────────────────────────────────────────────── */
@@ -536,12 +642,12 @@ body {
 .shelf__alert {
   flex: none;
   margin: 0;
-  padding: 8px 13px;
+  padding: 8px 12px;
   border-top: 1px solid var(--stroke);
-  background: rgba(239, 68, 68, 0.12);
-  color: #fca5a5;
-  font-size: 10.5px;
-  line-height: 1.45;
+  background: var(--danger-wash);
+  color: var(--danger-soft);
+  font-size: var(--font-sm);
+  line-height: var(--leading);
 }
 
 .sr-only {
@@ -560,16 +666,16 @@ body {
 
 .tile__secret {
   position: absolute;
-  top: 5px;
-  left: 5px;
+  top: 6px;
+  left: 6px;
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 5px;
-  border-radius: 6px;
-  background: rgba(180, 83, 9, 0.92);
-  color: #fff7ed;
-  font-size: 9.5px;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: var(--radius-ctl);
+  background: var(--badge-token);
+  color: var(--warn-text);
+  font-size: var(--font-xs);
   font-weight: 600;
   line-height: 1;
   /* Above the wash and the picture, below nothing — this is the one thing on
@@ -580,13 +686,13 @@ body {
 /* The card itself, when it is carrying something. A warm rim rather than a
    red one: this is a check-this-before-you-send-it, not a broken tile. */
 .tile--secret {
-  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.85);
+  box-shadow: inset 0 0 0 1px var(--warn-rim);
 }
 
 .tile--secret:hover {
   box-shadow:
-    inset 0 0 0 1px rgba(245, 158, 11, 0.95),
-    0 4px 14px rgba(0, 0, 0, 0.45);
+    inset 0 0 0 1px var(--warn-rim-hover),
+    var(--shadow-1);
 }
 
 .tile__secret-count {
@@ -595,11 +701,11 @@ body {
 
 /* A private key is not the same as an email address in a signature. */
 .tile__secret[data-kind="personalData"] {
-  background: rgba(120, 113, 108, 0.92);
+  background: var(--badge-personal);
 }
 
 .tile__secret[data-kind="privateKey"] {
-  background: rgba(190, 18, 60, 0.94);
+  background: var(--badge-key);
 }
 
 /* A picked card. Deliberately quiet — several can be picked at once, and an
@@ -608,7 +714,7 @@ body {
 .tile--picked {
   box-shadow:
     inset 0 0 0 2px var(--accent),
-    0 4px 14px rgba(0, 0, 0, 0.45);
+    var(--shadow-1);
 }
 
 /* The compare control. Text rather than an icon: it appears and disappears
@@ -616,7 +722,7 @@ body {
 .shelf__btn--compare {
   width: auto;
   padding: 0 8px;
-  font-size: 10.5px;
+  font-size: var(--font-sm);
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -630,7 +736,7 @@ body {
   place-items: center;
   width: 100%;
   height: 100%;
-  background: rgba(8, 9, 14, 0.96);
+  background: var(--overlay);
 }
 
 .preview__picture {
@@ -654,7 +760,7 @@ body {
   inset: 0;
   display: flex;
   flex-direction: column;
-  background: rgba(8, 9, 14, 0.96);
+  background: var(--overlay);
 }
 
 .editor__bar {
@@ -663,21 +769,23 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  padding: 6px;
+  padding: 8px;
   border-bottom: 1px solid var(--stroke);
 }
 
 .editor__tool,
 .editor__action {
-  padding: 3px 7px;
+  min-height: var(--ctl-tile);
+  padding: 2px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-ctl);
   background: var(--raised);
   color: var(--text);
   font: inherit;
-  font-size: 10.5px;
+  font-size: var(--font-sm);
   font-weight: 600;
   cursor: default;
+  transition: background var(--motion-fast) ease-out;
 }
 
 .editor__tool:hover,
@@ -687,19 +795,22 @@ body {
 
 .editor__tool--on {
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-media);
 }
 
-#editor-save {
+/* The one control in the toolbar that leaves the editor with something saved.
+   A class rather than the `#editor-save` id it used to be: an id outranks
+   every class, which is exactly how the primary action became the one control
+   that did not respond to hover — its `:hover` had to be restated at id
+   strength, and the second copy is the kind that drifts. The id itself stays
+   in the DOM for the tests and scripts that look controls up by it. */
+.editor__action--primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--text-on-media);
 }
 
-/* Its own, because an id outranks `.editor__action:hover` — so the primary
-   action in the editor was the one control in the app that did not respond to
-   the pointer at all. */
-#editor-save:hover {
-  background: #7275f4;
+.editor__action--primary:hover {
+  background: var(--accent-hover);
 }
 
 /* The picture area: whatever is left once the toolbar has taken its height.
@@ -724,7 +835,7 @@ body {
   max-width: 100%;
   max-height: 100%;
   /* A checkerboard would imply transparency the capture may not have. */
-  background: #05060a;
+  background: var(--surface-deep);
 }
 
 /* A capture that could not be read.
@@ -733,16 +844,16 @@ body {
    checked, and "could not look" is not "looked and found nothing". */
 .tile__unscanned {
   position: absolute;
-  top: 5px;
-  left: 5px;
+  top: 6px;
+  left: 6px;
   display: grid;
   place-items: center;
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: rgba(87, 83, 78, 0.9);
-  color: #d6d3d1;
-  font-size: 10px;
+  background: var(--badge-unscanned);
+  color: var(--text-unscanned);
+  font-size: var(--font-xs);
   font-weight: 700;
   line-height: 1;
   z-index: 1;

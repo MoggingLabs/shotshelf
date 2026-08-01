@@ -49,8 +49,8 @@ const compareButton = el<HTMLButtonElement>("#shelf-compare");
 const editButton = el<HTMLButtonElement>("#shelf-edit");
 const settingsButton = el<HTMLButtonElement>("#shelf-settings");
 const hideButton = el<HTMLButtonElement>("#shelf-hide");
-settingsButton.prepend(icon("settings", 14));
-hideButton.prepend(icon("minus", 14));
+settingsButton.prepend(icon("settings", 16));
+hideButton.prepend(icon("minus", 16));
 
 const shelf = new Shelf(
   el<HTMLElement>("#shelf-items"),

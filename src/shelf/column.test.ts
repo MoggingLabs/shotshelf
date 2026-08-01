@@ -122,8 +122,16 @@ test("column height is clamped at both ends", () => {
 });
 
 test("the measured window sizes the shelf actually ships", () => {
-  // Verified against the running app: 225x136 for one card, 225x378 for three.
-  assert.equal(columnHeight(1), 136);
+  // Written out as numbers, not re-derived from the constants — this is the
+  // second, independent statement of what the window should measure. 138 for
+  // one card (112 + 12px padding and 1px border each way), 378 for three
+  // (3×112 + 2×8 gap + 26). The previous figures, 136 and 378, were the
+  // pre-design-system 11px padding and 9px gap, verified against the running
+  // app; these follow the 4px grid `docs/DESIGN.md` sets — and three cards
+  // land on 378 both ways, because the 2px the padding gained is exactly the
+  // 2px the two gaps lost. The first draft of this comment said 382, which is
+  // the kind of hand arithmetic this second statement exists to catch.
+  assert.equal(columnHeight(1), 138);
   assert.equal(columnHeight(3), 378);
 });
 

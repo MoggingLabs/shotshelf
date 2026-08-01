@@ -47,7 +47,7 @@ ${fileName(item.path)}` : fileName(item.path);
 function badge(): HTMLElement {
   const el = document.createElement("span");
   el.className = "tile__badge";
-  el.append(solidIcon("play", 9));
+  el.append(solidIcon("play", 10));
   const text = document.createElement("span");
   text.className = "tile__badge-text";
   el.append(text);
@@ -154,7 +154,7 @@ export function emptyState(): HTMLElement {
 
   const frame = document.createElement("div");
   frame.className = "empty__frame";
-  frame.append(icon("camera", 26));
+  frame.append(icon("camera", 24));
 
   const title = document.createElement("p");
   title.className = "empty__title";

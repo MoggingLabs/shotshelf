@@ -38,17 +38,11 @@ export default defineConfig(
     languageOptions: {
       parserOptions: {
         // `eslint.config.js` is not in the TS project and does not need to be.
+        // The gate scripts used to be listed here one by one, until the ninth
+        // hit typescript-eslint's hard cap of eight default-project files —
+        // they are project files now, via `allowJs` in `tsconfig.json`.
         projectService: {
-          allowDefaultProject: [
-            "eslint.config.js",
-            "scripts/check-advisories.mjs",
-            "scripts/check-commands.mjs",
-            "scripts/check-references.mjs",
-            "scripts/check-dirs.mjs",
-            "scripts/check-wire.mjs",
-            "scripts/rust-source.mjs",
-            "scripts/rust-source.test.mjs",
-          ],
+          allowDefaultProject: ["eslint.config.js"],
         },
         tsconfigRootDir: import.meta.dirname,
       },

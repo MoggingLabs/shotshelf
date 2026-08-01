@@ -40,6 +40,7 @@ in about five minutes.
 | Duration and size badge | Pass | — | — | `0:06 · 14 kB` on the recording tile |
 | Native drag-out | Partial | — | — | The OS drag started with its preview under the cursor; the drag was **cancelled, not dropped**, so what a receiving app gets is unverified |
 | Copy to clipboard | Pass | — | — | 1920×1080 image on the clipboard |
+| Show in folder | Pass | — | — | Clicked live 2026-08-01: Explorer opened on the capture's folder; also gated by e2e and the IPC scope-refusal test |
 | On-device text recognition | Pass | — | — | `Windows.Media.Ocr`; macOS uses Vision, Linux tesseract if present |
 | Credential warning | Pass | — | — | A capture containing an `AKIA…` placeholder showed the marker on its card |
 | Annotation editor | Pass | — | — | Five tools present; a box drawn and saved |

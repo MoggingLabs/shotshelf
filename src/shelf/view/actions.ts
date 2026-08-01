@@ -27,6 +27,8 @@ export interface TileHandlers {
   togglePin(id: string): void;
   remove(id: string): void;
   copy(id: string): Promise<void>;
+  /** Show the capture's real file in the OS file manager. */
+  reveal(id: string): Promise<void>;
 }
 
 function pinLabel(pinned: boolean): string {
@@ -44,7 +46,11 @@ function action(name: Parameters<typeof icon>[0], title: string): HTMLButtonElem
   button.className = "tile__action";
   button.type = "button";
   button.title = title;
-  button.append(icon(name, 13));
+  // The name a screen reader announces. The icon is `aria-hidden` and a
+  // `title` alone is a tooltip first and an accessible name only by fallback,
+  // which some screen reader and browser pairings do not apply.
+  button.setAttribute("aria-label", title);
+  button.append(icon(name, 14));
   return button;
 }
 
@@ -86,6 +92,9 @@ function pinButton(id: string, pinned: boolean, handlers: TileHandlers): HTMLBut
 function setPinned(button: HTMLElement, pinned: boolean): void {
   button.classList.toggle("tile__action--on", pinned);
   button.title = pinLabel(pinned);
+  // The announced name follows the state exactly as the tooltip does.
+  button.setAttribute("aria-label", pinLabel(pinned));
+  button.setAttribute("aria-pressed", String(pinned));
 }
 
 /** For the apps that take a paste but refuse a file drop. */
@@ -106,6 +115,24 @@ function copyButton(id: string, name: string, handlers: TileHandlers): HTMLButto
   return button;
 }
 
+/**
+ * The shelf holds a pointer to a real file, and this is the shortest path to
+ * it — every shelf app's most-reached-for control after drag itself. The flash
+ * mirrors the copy button's: the shelf reports the failure, the button only
+ * says which control it was.
+ */
+function revealButton(id: string, name: string, handlers: TileHandlers): HTMLButtonElement {
+  const button = action("folder", `Show ${name} in its folder`);
+  button.classList.add("tile__action--reveal");
+  button.addEventListener("click", () => {
+    void handlers
+      .reveal(id)
+      .then(() => flash(button, true))
+      .catch(() => flash(button, false));
+  });
+  return button;
+}
+
 function removeButton(id: string, name: string, handlers: TileHandlers): HTMLButtonElement {
   const button = action("close", `Remove ${name} from the shelf (the file stays on disk)`);
   button.classList.add("tile__action--remove");
@@ -121,9 +148,12 @@ export function actions(
 ): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "tile__actions";
+  // Pin first (state), then the two hand-it-elsewhere controls, destructive
+  // last — the order every platform convention agrees on.
   wrap.append(
     pinButton(id, pinned, handlers),
     copyButton(id, name, handlers),
+    revealButton(id, name, handlers),
     removeButton(id, name, handlers),
   );
   return wrap;
