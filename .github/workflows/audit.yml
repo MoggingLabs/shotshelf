@@ -64,7 +64,7 @@ jobs:
       # several minutes for a tool that changes far less often than this fires.
       - name: Cache cargo-audit
         id: audit-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/cargo-audit
           key: cargo-audit-${{ runner.os }}
