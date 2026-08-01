@@ -7,18 +7,17 @@ in about five minutes.
 > means someone ran the app on that OS and watched the thing happen — not that the code compiles
 > for it, and not that a test covering the same rule passes.
 >
-> **CI is not green on all three.** The last run that actually executed — 2026-07-30 — had
-> Windows and macOS passing every step and **Linux failing** on pixel goldens: `column-one.png`
-> and `column-three.png` differ by 979 pixels against stale snapshots. Every run since is
-> stopped by GitHub Actions billing before a job starts, so nothing has been checked on any
-> platform since. Regenerating those goldens needs the **Appearance goldens** workflow, which is
-> Linux-only and blocked by the same billing stop.
+> **CI is green on all three** as of 2026-08-01, run 30675649873 — the first fully green
+> three-OS run in this repository's history. That run includes the design-scale gate, the
+> nine-test IPC suite with per-OS local origins, and the Linux Appearance step against goldens
+> regenerated for the design system (closing a red that predated it). The Actions billing stop
+> that blocked everything for a day cleared on the account side the same day.
 
 ## Status
 
 | | Windows 11 | macOS | Linux |
 | :-- | :-- | :-- | :-- |
-| Compiles, lints, tests | Pass (CI, 2026-07-30) | Pass (CI, 2026-07-30) | **Red** — stale pixel goldens |
+| Compiles, lints, tests | Pass (CI, 2026-08-01) | Pass (CI, 2026-08-01) | Pass (CI, 2026-08-01, goldens included) |
 | Ever launched | **Yes** — 2026-07-31, dev build | No | No |
 | Ever packaged | **Yes** — `.msi` + NSIS `.exe`, unsigned | No | n/a — no installer is produced |
 | Packaged build ever run | **Yes** — from the MSI's contents | No | n/a |
