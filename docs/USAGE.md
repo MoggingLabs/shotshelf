@@ -128,6 +128,8 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
 
 - **Drag out** — press a tile and move. The capture leaves as a real file you can drop into
   Explorer, Finder, an email, a chat box or an editor. It's a copy: the original stays put.
+  The ghost under the cursor is card-sized — for a recording it shows the recording's own
+  poster frame — never the capture at its full dimensions.
 - **Copy** — for apps that take a paste but refuse a file drop. Images go on the clipboard as
   pixels, recordings as a file reference.
 - **Show in folder** (the folder icon) — opens the capture's real file in Explorer / Finder /

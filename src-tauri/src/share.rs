@@ -81,36 +81,108 @@ pub async fn prepare_drag<R: Runtime>(
 ) -> Result<DragSource, String> {
     let source = existing_file(&app, &path)?;
 
-    // The preview under the cursor is always the original: it is shown at
-    // thumbnail size, so a sized copy would buy nothing and cost a re-encode
-    // before the drag can even start.
-    let icon = match kind {
-        // A screenshot is its own best preview.
-        CaptureKind::Image => source.clone(),
-        CaptureKind::Video => video_preview(&app)?,
-    };
-
     // Read before the worker starts: `State` does not cross into it.
     let downscale = settings.get().downscale_exports;
 
-    // Only stills are sized; there is no version of this that re-encodes a
-    // recording to save a model some pixels.
-    let handed_over = match kind {
+    // The icon is a card-sized ghost, never the original. This handed the
+    // original file over under a comment claiming the plugin shows it "at
+    // thumbnail size" — a claim about the world nobody had watched. The owner
+    // watched: `drag-rs` renders the icon at its native dimensions, so a
+    // 1080p screenshot became a ghost covering half the screen. `ghost_for`
+    // bounds it to `imaging::export::GHOST_EDGE` and caches the result; a
+    // recording's ghost is its own poster frame when one is already cached,
+    // and the app-icon fallback when not — a drag must not wait on ffmpeg.
+    //
+    // Only stills are re-encoded for hand-over; there is no version of this
+    // that re-encodes a recording to save a model some pixels.
+    let (handed_over, icon) = match kind {
         CaptureKind::Image => {
             let worker_app = app.clone();
             let for_worker = source.clone();
             crate::limits::under_sizing_limit("that capture for the drag", move || {
-                handoff::file_for(&worker_app, &for_worker, downscale)
+                let handed = handoff::file_for(&worker_app, &for_worker, downscale);
+                let icon = ghost_for(&worker_app, &for_worker);
+                (handed, icon)
             })
             .await?
         }
-        CaptureKind::Video => source,
+        CaptureKind::Video => {
+            let worker_app = app.clone();
+            let for_worker = source.clone();
+            let icon =
+                crate::limits::under_sizing_limit("that recording's drag ghost", move || {
+                    match crate::poster::cached_poster(&worker_app, &for_worker) {
+                        Some(poster) => ghost_for(&worker_app, &poster),
+                        None => video_preview(&worker_app).unwrap_or_else(|_| for_worker.clone()),
+                    }
+                })
+                .await?;
+            (source, icon)
+        }
     };
 
     Ok(DragSource {
         path: handed_over.to_string_lossy().into_owned(),
         icon: icon.to_string_lossy().into_owned(),
     })
+}
+
+/// Where the drag ghosts live: derived data, keyed like every other cache.
+const GHOST_DIR: &str = "drag-previews";
+
+/// A card-sized ghost for `picture`, cached by content version.
+///
+/// Falls back to the original path on any failure — a full-size ghost is a
+/// cosmetic defect, a failed drag is a broken feature — and says so in the
+/// log rather than to the user, because the drag itself still works.
+fn ghost_for<R: Runtime>(app: &AppHandle<R>, picture: &Path) -> PathBuf {
+    match try_ghost(app, picture) {
+        Ok(ghost) => ghost,
+        Err(err) => {
+            crate::diag::warn(&format!("no drag ghost for {}: {err}", picture.display()));
+            picture.to_path_buf()
+        }
+    }
+}
+
+fn try_ghost<R: Runtime>(app: &AppHandle<R>, picture: &Path) -> Result<PathBuf, String> {
+    let dir = crate::dirs::local(app, GHOST_DIR)?;
+    // Path + mtime, like the poster and hand-off caches: a re-captured file
+    // gets a fresh ghost, a relaunch reuses what is already there.
+    let target = dir.join(format!("{}.png", crate::cache::Version::of(picture).key()));
+    if target.is_file() {
+        return Ok(target);
+    }
+
+    let image = crate::imaging::load(picture).map_err(|err| err.to_string())?;
+    let ghost = crate::imaging::export::ghost(image);
+    let png = crate::imaging::to_png(&ghost).map_err(|err| err.to_string())?;
+
+    // Staged under a nonce and renamed, the race `handoff.rs` and `poster.rs`
+    // both document: two drags of the same capture can prepare concurrently,
+    // and a shared staging name lets one truncate what the other is renaming.
+    static NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let ticket = NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let staged = dir.join(format!(
+        "{}.{ticket}.staging.png",
+        crate::cache::Version::of(picture).key()
+    ));
+    std::fs::write(&staged, png).map_err(|err| err.to_string())?;
+    std::fs::rename(&staged, &target).map_err(|err| err.to_string())?;
+    Ok(target)
+}
+
+/// Drop the oldest cached ghosts. Called on `lib.rs`'s cache timer, beside
+/// the poster and hand-off sweeps and under the same shelf-wide limit.
+pub fn prune_ghosts<R: Runtime>(app: &AppHandle<R>) {
+    let Ok(dir) = crate::dirs::local(app, GHOST_DIR) else {
+        return;
+    };
+    crate::cache::prune(
+        &dir,
+        crate::cache::shelf_wide_limit(),
+        crate::cache::Entry::File,
+    );
 }
 
 /// Show a capture's file in the OS file manager, selected where the OS can.

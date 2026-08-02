@@ -346,6 +346,19 @@ fn parse_duration(stderr: &str) -> Option<u64> {
     Some((whole + extra) * 1000)
 }
 
+/// The cached frame for a recording, if one has been extracted this version.
+///
+/// For `share.rs`'s drag ghost: a ghost that shows the actual recording beats
+/// the app icon, but only when the frame already exists — a drag must not
+/// wait on ffmpeg. Through this module's own naming rather than a copy of the
+/// prefix logic in the caller; three copies of that layout was already a bug
+/// once (see `cache_prefix`).
+pub(crate) fn cached_poster<R: Runtime>(app: &AppHandle<R>, source: &Path) -> Option<PathBuf> {
+    let meta = std::fs::metadata(source).ok()?;
+    let dir = poster_dir(app).ok()?;
+    cached(&dir, &cache_key(source, &meta)).map(|(poster, _)| poster)
+}
+
 fn cached(dir: &Path, key: &str) -> Option<(PathBuf, Option<u64>)> {
     let prefix = cache_prefix(key);
 

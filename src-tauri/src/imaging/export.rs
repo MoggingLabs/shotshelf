@@ -110,6 +110,27 @@ fn scale_edge(edge: u32, scale: f64) -> u32 {
     edge
 }
 
+/// The long edge of the drag ghost — the image under the cursor mid-drag.
+///
+/// Roughly the 199px card at a HiDPI factor, and the scale Explorer's and
+/// Finder's own drag previews live at. Distinct from `LONG_EDGE`, which sizes
+/// what is *handed over*; this sizes what is *shown*, and the two must never
+/// be conflated — a 1568px ghost is most of a laptop screen.
+pub const GHOST_EDGE: u32 = 256;
+
+/// Shrink a capture to drag-ghost size, if it is over it.
+///
+/// `thumbnail`'s fast filter rather than Lanczos3, deliberately: this runs
+/// between mouse-down and the drag starting, nobody reads small text in a
+/// ghost, and the result is on screen for a second. Never enlarges — a small
+/// capture already ghosts at its own size.
+pub fn ghost(image: DynamicImage) -> DynamicImage {
+    if image.width().max(image.height()) <= GHOST_EDGE {
+        return image;
+    }
+    image.thumbnail(GHOST_EDGE, GHOST_EDGE)
+}
+
 /// Read a capture, size it for hand-off, and return PNG bytes.
 ///
 /// Returns `Ok(None)` when the capture is already within the ceiling, so the
@@ -195,6 +216,24 @@ mod tests {
         let sized = for_handoff(image(200, 100));
         assert!(!sized.resized);
         assert_eq!(sized.image.width(), 200);
+    }
+
+    #[test]
+    fn the_ghost_is_bounded_to_its_edge_with_the_aspect_kept() {
+        // The drag ghost was the original file — a 1080p screenshot made a
+        // ghost covering half the screen, found by the owner dragging one.
+        let bounded = ghost(image(1920, 1080));
+        assert_eq!(bounded.width(), GHOST_EDGE);
+        assert_eq!(bounded.height(), 144, "16:9 stays 16:9");
+
+        let portrait = ghost(image(1080, 3840));
+        assert_eq!(portrait.height(), GHOST_EDGE, "the LONG edge is the bound");
+    }
+
+    #[test]
+    fn a_small_capture_ghosts_at_its_own_size() {
+        let small = ghost(image(200, 100));
+        assert_eq!((small.width(), small.height()), (200, 100));
     }
 
     #[test]

@@ -178,7 +178,7 @@ that cannot say what job it does gets removed before it gets polished.
 | :-- | :-- | :-- |
 | Catch (folders + clipboard) | The product: a capture is on the shelf before the folder opens | Rust watchers' tests; run live on Windows (`docs/PARITY.md`) |
 | Peek column | Grab it *now*, without the shelf stealing focus | `tests/e2e/popover.spec.ts` |
-| Drag-out (multi-select, ordered) | The file lands where work happens; copy, never move | e2e drag specs; live drag on Windows |
+| Drag-out (multi-select, ordered) | The file lands where work happens; copy, never move. The ghost under the cursor is bounded to `GHOST_EDGE` and shows the capture (a recording's poster when cached) — the original-file ghost covered half the screen | e2e drag specs; live drag on Windows; the ghost bound is unit-tested in `src-tauri/src/imaging/export.rs` |
 | Copy | Apps that paste but refuse drops | e2e + live |
 | Show in folder | The file itself is the product; this is the shortest path to it (tile control, `o`, and the tray's Open the screenshots folder) | e2e + the IPC scope-refusal test |
 | Pin / retention / item cap | The shelf stays a shelf, not an archive | unit + e2e sweeps |

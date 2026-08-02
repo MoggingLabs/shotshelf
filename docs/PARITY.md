@@ -40,7 +40,7 @@ in about five minutes.
 | Image thumbnail | Pass | Pass — the capture's content visible on the card | Pass — same | Rendered from disk over the asset protocol, so the runtime scope grant works |
 | Video poster frame | Pass | — | — | Bundled ffmpeg extracted a frame; tile showed it |
 | Duration and size badge | Pass | — | — | `0:06 · 14 kB` on the recording tile |
-| Native drag-out | Pass | — | — | Full round-trip 2026-08-01, packaged build: dragged a capture into a real Explorer window; it arrived byte-identical and the original never moved |
+| Native drag-out | Pass | — | — | Full round-trip 2026-08-01, packaged build: dragged a capture into a real Explorer window; it arrived byte-identical and the original never moved. Owner dogfooding 2026-08-02 found the drag **ghost** rendered at the capture's full dimensions — the icon was the original file under a comment claiming the plugin thumbnails it. Fixed to a bounded, cached, card-sized ghost (a recording shows its poster); the fix awaits its own live look |
 | Copy to clipboard | Pass | — | — | 1920×1080 image on the clipboard |
 | Show in folder | Pass | — | — | Clicked live 2026-08-01: Explorer opened on the capture's folder; also gated by e2e and the IPC scope-refusal test; now also on `o` and as the tray's Open the screenshots folder (neither driven live yet) |
 | Copy recognised text (`t`) | Pass | — | — | Driven live 2026-08-02: `t` on a text-bearing capture put its exact recognised text — three lines, credential included — on the clipboard, with the "Text copied to the clipboard." receipt in the strip |

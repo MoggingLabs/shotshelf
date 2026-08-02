@@ -59,6 +59,7 @@ fn prune_caches<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             let _ = tauri::async_runtime::spawn_blocking(move || {
                 poster::prune_cache(&sweeping);
                 handoff::prune(&sweeping);
+                share::prune_ghosts(&sweeping);
             })
             .await;
             tokio::time::sleep(PRUNE_EVERY).await;
