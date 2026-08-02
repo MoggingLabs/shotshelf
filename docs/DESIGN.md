@@ -145,6 +145,29 @@ The groups:
   stone for personal data, dim stone for "could not check". The distinction is
   severity communicated without words.
 
+## The settings window
+
+The one place the app asks the user for anything, and the only decorated
+window. Its grid, all on the spacing scale: a 168px sidebar of 32px
+min-height tabs; a content pane padded 24 with one section on screen;
+rows of `label + control` separated by hairline `--stroke` borders, the
+label a `--font-md` 600 line with an optional `--font-sm` muted hint under
+it. Section titles are the type scale's `--font-xl` (the step that exists
+for this window alone); group subtitles are uppercase `--font-xs`. Controls
+right-align at 168px wide × 28px high (`--ctl-bar`), the number field
+narrowed to 80.
+
+The control vocabulary, chosen per setting rather than defaulted: a
+segmented control for the theme (three named states, all visible), a 2×2
+corner picker because the setting *is* spatial, a press-to-record button
+for the hotkey (shown in the OS's spelling; the wire keeps
+`CommandOrControl`), and the themed dropdown (`src/ui/select.ts`) for real
+enumerations. No native `<select>` and no native `title` tooltip appears
+anywhere in the app — `src/ui/tooltip.ts` answers `data-tip` with a themed
+bubble (500ms hover delay, instant on focus, Escape dismisses without being
+consumed), and the accessible name always lives on `aria-label`, never on
+the tip.
+
 ## Hierarchy of a card
 
 Bottom to top: wash (blurred self, 0.5 opacity) → picture → label gradient

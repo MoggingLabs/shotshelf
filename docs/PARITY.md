@@ -58,6 +58,9 @@ in about five minutes.
 | Global hotkey | Pass | Pass — osascript ⌘⇧S opened the browse view (the empty state showed the ⌘ spelling) | Pass — xdotool Ctrl+Shift+S toggled it both ways, the XGrabKey path | `CommandOrControl+Shift+S` registered and toggled |
 | Tray icon | Partial | — | — | A tray-region click toggled the shelf open live 2026-08-02 — the left-click behaviour, observed. The right-click **menu** still has never been opened: it refused two synthetic-click attempts, and which taskbar-corner icon is Shotshelf's was not pinned down |
 | Update check | Pass | Pass — quiet warn against the keyless GitHub feed | Pass — same | Failure path only, against the old placeholder host; the endpoint moved to GitHub Releases on 2026-08-01 and 404s identically until an updater key publishes a manifest |
+| Settings window | — | — | — | Landed 2026-08-02, gates-only on every OS: ~20 e2e drive each control through the real page, Rust's `settings://changed` is fixture-joined, and five dark + one light goldens picture the sections. No human has opened the window live yet — the gear, the hidden-not-closed close button, and a cross-window save are the things to watch first |
+| Themes (System / Light / Dark) | — | — | — | The light palette is golden-gated (seven light images) and system-follow is pinned under *emulated* `prefers-color-scheme`; whether WebView2/WKWebView/WebKitGTK actually deliver the OS setting live has been observed nowhere |
+| Themed tooltips and dropdowns | — | — | — | A census e2e holds `title=` at zero and the select-only combobox is keyboard-gated; how the bubble sits on a real 225px always-on-top window is unobserved |
 | Quick look, compare, multi-select, pin, remove, retention | — | — | — | Covered by the browser suite against the stubbed runtime; never driven against the real binary |
 | Single instance | — | — | — | |
 | Installer built | Pass | Pass — `.dmg` from the v0.1.0 run | Bundles built in CI (`.deb`/`.rpm`/`.AppImage`), deliberately unpublished | Windows: ffmpeg + licence verified inside the MSI; Linux publishing waits on one desktop smoke run |
@@ -104,6 +107,10 @@ fixtures — take real captures, or synthesise them as below.
    **not** gain a second copy of it.
 8. **Mark one up.** Select an image, press `e`, draw a box, Save. A new capture appears carrying
    the annotation, and the original is untouched.
+8b. **Open the settings window** with the gear. Walk the five sections; change Max items and
+   watch the shelf obey without a restart; switch the theme to Light and both windows should
+   repaint; click the hotkey control, press a new combination, and summon the shelf with it.
+   Close the window — the gear must bring it back.
 9. **Check a credential is flagged.** Capture a terminal showing a token-shaped string — the
    documentation placeholder `AKIAIOSFODNN7EXAMPLE` works — and the card should show the warning
    marker.

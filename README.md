@@ -271,9 +271,13 @@ and size, because that is identity rather than chrome.
 
 ### Settings
 
-The gear in the title strip opens the whole surface: how long captures **stay**, how many the
-shelf **holds**, whether to **send smaller copies**, and the **hotkey**. That's the entire list of *controls*,
-and it's meant to stay short.
+The gear in the title strip opens the settings window — five sections
+(General, Capturing, Appearance, Shortcuts, About) in a real resizable
+window. How long captures **stay**, how many the shelf **holds**, whether to
+**send smaller copies**, the **hotkey** (recorded from your keys), the
+**theme** (System, Light or Dark), where the shelf **parks**, and the
+update check. Changes apply the moment you make them, in every window at
+once; there is no Save button because there is nothing it would do.
 
 Two hand-editable JSON files, and they are two on purpose — one of them *does* sync, which is
 exactly why the other one exists:
