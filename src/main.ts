@@ -65,6 +65,7 @@ const shelf = new Shelf(
   el<HTMLElement>("#shelf-overlay"),
   {
     onColumnChange: () => popover.onColumnChange(),
+    onBrowseChange: () => popover.resizeBrowse(),
     // A comparison of one capture, or of five, is not a thing.
     onSelectionChange: (_picked, editable, comparable) => {
       // Hidden while an overlay is up.
@@ -277,6 +278,9 @@ function subscribe(registration: Promise<unknown>, lost: string): void {
 // nothing dismiss the shelf.
 onAlertChange((showing) => {
   popover.resizeColumn();
+  // The browse shape wears the strip too, and a fitted window has no spare
+  // band for it — the height has to follow the message in and out.
+  popover.resizeBrowse();
   // A message can be the only thing on screen — see `Popover.showProblem` — so
   // when it goes, the window it was holding up has to go too.
   if (!showing) popover.dismissIfEmpty();

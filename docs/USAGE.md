@@ -157,7 +157,10 @@ Pin, copy, show-in-folder and remove appear on a tile when you hover it; edit an
 in the title strip, because they act on what you have picked rather than on the tile under the
 pointer.
 - **Show/hide** — the tray icon, its right-click menu, or the global hotkey
-  (`Ctrl+Shift+S` on Windows, `⌘⇧S` on macOS by default).
+  (`Ctrl+Shift+S` on Windows, `⌘⇧S` on macOS by default). The summoned view
+  fits what it holds: one capture gets a one-capture window, two get two,
+  and three at a time is the ceiling — past that the list scrolls. An empty
+  shelf keeps the full window, because that is where it explains itself.
 
 ### From the keyboard
 

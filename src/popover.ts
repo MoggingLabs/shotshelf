@@ -20,6 +20,37 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+import { alertHeight } from "./status.ts";
+
+/**
+ * The height the browse shape needs for what it holds, or `null` for "your
+ * ceiling" on the empty state.
+ *
+ * The span of the first-to-last child, not `scrollHeight`: the items box
+ * flexes to fill the window, so `scrollHeight` can never report less than the
+ * box it is measuring the content *for* — one card read as a full window and
+ * the fit was a no-op. The child span carries the day headings and the gaps
+ * between groups by construction, and the box's own padding is added back.
+ */
+function browseContent(bar: HTMLElement, items: HTMLElement): number | null {
+  if (items.dataset["empty"] === "true") return null;
+  const first = items.firstElementChild;
+  const last = items.lastElementChild;
+  if (first === null || last === null) return null;
+  const style = getComputedStyle(items);
+  const padding = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
+  // Three cards at a time is the rule, so past three the measurement cuts at
+  // the third card's bottom edge — whatever day headings fall among them —
+  // and the scroll fade takes it from there. (Today's fixed window never
+  // actually fit three whole cards; "three at a time" was the intent, and
+  // now it is the measurement.)
+  const tiles = items.querySelectorAll(".tile");
+  const third = tiles.length > 3 ? tiles[2] : null;
+  const bottom = (third ?? last).getBoundingClientRect().bottom;
+  const span = bottom - first.getBoundingClientRect().top;
+  return Math.ceil(bar.offsetHeight + span + padding + alertHeight());
+}
+
 import type { Capture, Shelf } from "./shelf/index.ts";
 
 /** How long the shelf stays up after launch, so a running app looks like one. */
@@ -112,6 +143,30 @@ export class Popover {
   resizeColumn(): void {
     if (!this.#showing || this.#opened || this.#shelf.columnIsEmpty) return;
     this.showColumn();
+  }
+
+  /**
+   * Ask Rust to fit the browse window to what it is showing.
+   *
+   * The browse view fits its content now — one card gets one card's height,
+   * two get two — up to the ceiling `tauri.conf.json` declares, past which
+   * the list scrolls as it always has. Measured, not derived from card
+   * arithmetic: day headings and a wrapped alert line are part of the height,
+   * and `alertHeight`'s own docstring is the argument against a constant.
+   *
+   * `null` is the front end asking for the ceiling: the empty state is the
+   * app's teaching surface and keeps the full window on purpose.
+   *
+   * Does nothing unless the browse shape is actually on screen — a report
+   * measured off the column would poison the cache Rust keeps for the next
+   * deliberate open.
+   */
+  resizeBrowse(): void {
+    if (!this.#showing || this.#root.dataset["mode"] !== "browse") return;
+    const items = this.#root.querySelector<HTMLElement>("#shelf-items");
+    const bar = this.#root.querySelector<HTMLElement>(".shelf__bar");
+    if (!items || !bar) return;
+    void invoke("size_browse", { content: browseContent(bar, items) });
   }
 
   /**
@@ -254,6 +309,11 @@ export class Popover {
     this.#showing = true;
     this.#root.dataset["mode"] = "browse";
     this.#shelf.setMode("browse");
+    // Explicitly, not only through the render hook: the shelf boots in the
+    // browse mode, so the `setMode` above can be a no-op on the very first
+    // open — and that open is exactly the one Rust sized from a cache no
+    // report has warmed yet.
+    this.resizeBrowse();
   }
 
   /**

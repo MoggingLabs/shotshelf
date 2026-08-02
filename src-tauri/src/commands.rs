@@ -43,5 +43,6 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         crate::update::check_for_updates,
         crate::links::open_link,
         crate::pick::choose_watch_folder,
+        crate::window::size_browse,
     ]
 }

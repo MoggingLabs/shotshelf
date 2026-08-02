@@ -399,6 +399,52 @@ fn monitor_under_cursor<R: Runtime>(shelf: &WebviewWindow<R>) -> Option<tauri::M
 /// is a fixed, scrollable box with a title strip, the column is sized to
 /// exactly the cards it holds and carries no furniture at all.
 pub const BROWSE_SIZE: (f64, f64) = (225.0, 420.0);
+
+/// The shortest browse window: the title strip plus one card with its day
+/// heading and the box's own padding. A report below this is a measurement
+/// bug, not a wish — one card must always be recognisable.
+const MIN_BROWSE_HEIGHT: f64 = 160.0;
+
+/// The tallest a fitted browse may ask for: three cards with their strip,
+/// headings and paddings, plus a wrapped alert line of slack. The *fit* is
+/// the front end's — it cuts its measurement at the third card's bottom —
+/// so this is the sanity guard on a value that crosses the IPC boundary,
+/// not the rule itself.
+const MAX_BROWSE_HEIGHT: f64 = 560.0;
+
+/// The browse height the front end last measured, remembered between opens.
+///
+/// The browse window fits its content now — one card gets one card's height,
+/// capped at [`BROWSE_SIZE`]'s — but a deliberate open originates here
+/// (hotkey, tray), where no DOM can be measured. So the front end reports
+/// after every browse render, this remembers bitwise (the same shape as
+/// [`OPENED`]), the next open shows at the last known height, and the first
+/// render's own report corrects it if captures moved while the window was
+/// down.
+static BROWSE_HEIGHT: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(f64::to_bits(BROWSE_SIZE.1));
+
+fn set_browse_height(height: f64) {
+    BROWSE_HEIGHT.store(height.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+fn browse_height() -> f64 {
+    f64::from_bits(BROWSE_HEIGHT.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Clamp a front-end browse measurement into the window's honest range.
+///
+/// `None` is the front end asking for the ceiling — the empty state keeps
+/// the full window, because it is the app's teaching surface. Non-finite
+/// numbers get the same answer for the same reason `peek` rejects them:
+/// the value arrives from the front end, and a window sized to NaN is not
+/// a state.
+pub(crate) fn fitted_browse_height(content: Option<f64>) -> f64 {
+    match content {
+        Some(content) if content.is_finite() => content.clamp(MIN_BROWSE_HEIGHT, MAX_BROWSE_HEIGHT),
+        _ => BROWSE_SIZE.1,
+    }
+}
 /// The tallest the popped column may be asked to grow. Generous — a tall
 /// screen holds a lot of cards — and it exists so the number cannot be absurd.
 const MAX_COLUMN_HEIGHT: f64 = 4000.0;
@@ -435,11 +481,15 @@ fn open<R: Runtime>(app: &AppHandle<R>, appearance: Appearance) {
         return;
     };
 
+    // The cached fitted height, not the ceiling: the browse window takes the
+    // height its content needed last time it was measured, so an open with
+    // one card on the shelf does not flash the full grid first.
+    let size = (BROWSE_SIZE.0, browse_height());
     attempt(
         "resize the shelf to the browse grid",
-        shelf.set_size(tauri::LogicalSize::new(BROWSE_SIZE.0, BROWSE_SIZE.1)),
+        shelf.set_size(tauri::LogicalSize::new(size.0, size.1)),
     );
-    place(&shelf, BROWSE_SIZE);
+    place(&shelf, size);
     attempt("show the shelf", shelf.show());
     attempt("focus the shelf", shelf.set_focus());
     mark_opened(&shelf, appearance);
@@ -788,6 +838,36 @@ pub fn hide_shelf<R: Runtime>(app: AppHandle<R>) {
     hide(&app);
 }
 
+/// Fit the browse window to the content the front end just measured.
+///
+/// Always a cache write — the next deliberate open shows at this height —
+/// and a live resize only while the browse shape is actually up: a report
+/// arriving with the window down (or mid-column, which `popover.ts` already
+/// refuses to send) must not put anything on screen. The same
+/// re-place-on-resize rule as `peek`: the window is pinned by its corner, so
+/// a shorter one moves to keep that corner where it was.
+#[tauri::command]
+pub fn size_browse<R: Runtime>(app: AppHandle<R>, content: Option<f64>) {
+    let height = fitted_browse_height(content);
+    set_browse_height(height);
+
+    if !is_opened() {
+        return;
+    }
+    let Some(shelf) = app.get_webview_window(SHELF) else {
+        return;
+    };
+    if !shelf.is_visible().unwrap_or(false) {
+        return;
+    }
+    let size = (BROWSE_SIZE.0, height);
+    attempt(
+        "fit the browse window to its cards",
+        shelf.set_size(tauri::LogicalSize::new(size.0, size.1)),
+    );
+    place(&shelf, size);
+}
+
 /// Grow the popover to show one capture large.
 ///
 /// Only Rust knows the work area, so only Rust can choose the size.
@@ -821,7 +901,29 @@ pub fn open_settings<R: Runtime>(app: AppHandle<R>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{wanted, Wanted};
+    use super::{fitted_browse_height, wanted, Wanted, BROWSE_SIZE};
+
+    #[test]
+    fn a_browse_measurement_is_clamped_into_the_honest_range() {
+        // A mid-range measurement passes through untouched — that is the
+        // whole feature: one card's height for one card.
+        assert_eq!(fitted_browse_height(Some(300.0)), 300.0);
+        assert_eq!(
+            fitted_browse_height(Some(10.0)),
+            160.0,
+            "one card must stay recognisable, whatever was measured"
+        );
+        assert_eq!(
+            fitted_browse_height(Some(9000.0)),
+            560.0,
+            "past the three-card fit the list scrolls; the window stops growing"
+        );
+        // `None` is the empty state asking for the ceiling on purpose; a NaN
+        // is the front end having a bug, not a wish. Same answer, different
+        // reasons, both stated.
+        assert_eq!(fitted_browse_height(None), BROWSE_SIZE.1);
+        assert_eq!(fitted_browse_height(Some(f64::NAN)), BROWSE_SIZE.1);
+    }
 
     #[test]
     fn the_two_things_show_shelf_can_be_asked_for_are_told_apart() {

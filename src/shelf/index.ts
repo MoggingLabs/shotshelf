@@ -89,6 +89,13 @@ export interface ShelfOptions {
    */
   onColumnChange(): void;
   /**
+   * The browse view re-rendered, so its window may need a different height —
+   * it fits its content now, one card getting one card's height. The same
+   * shape as [`ShelfCallbacks::onColumnChange`]: the shelf reports, and the
+   * thing that owns the window decides.
+   */
+  onBrowseChange(): void;
+  /**
    * How many captures are picked out.
    *
    * Reported rather than exposed, so the control that acts on a selection can
@@ -1042,6 +1049,10 @@ export class Shelf {
     this.#reflectSelection();
     this.#view.setCount(this.#store.size);
     void setCaptureCount(this.#store.size);
+    // After the render, so the browse window can be measured at what it now
+    // holds: the window fits its cards (up to the ceiling), and every route
+    // that changes what browse shows funnels through this method.
+    if (this.#mode === "browse") this.#options.onBrowseChange();
   }
 
   /**

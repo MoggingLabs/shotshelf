@@ -162,7 +162,15 @@ test("removing a capture takes it off the shelf and never touches the file", asy
   // appear: the previous version listed two names that have never existed in
   // this codebase, so it could not have failed. This one fails the moment
   // removal invokes anything new, whatever it is called.
-  const allowed = new Set(["set_pinned", "set_capture_count", "forget_video", "describe_capture"]);
+  // `size_browse` is here because removal legitimately refits the browse
+  // window to what remains — a report, not a touch on any file.
+  const allowed = new Set([
+    "set_pinned",
+    "set_capture_count",
+    "forget_video",
+    "describe_capture",
+    "size_browse",
+  ]);
   const commands = await page.evaluate(() => window.__shotshelf__.calls().map((call) => call.cmd));
   expect([...new Set(commands)].filter((cmd) => !allowed.has(cmd))).toEqual([]);
 });
@@ -1104,4 +1112,65 @@ test("the list says when more captures lie below the fold", async ({ page }) => 
     list.scrollTop = list.scrollHeight;
   });
   await expect(page.locator("#shelf-items")).toHaveAttribute("data-more", "false");
+});
+
+test("the browse window asks for exactly the height its cards need", async ({ page }) => {
+  // The browse shape fits its content now: one card gets one card's height,
+  // two get two, and three is the viewport — past that the scroll fade takes
+  // over. The numbers are an independent second statement of strip + day
+  // heading + cards + paddings + the boot warning's two lines (the clock is
+  // frozen so that message cannot expire mid-test) — the same trick as the
+  // column's 138: a constant edited by mistake fails here instead of moving
+  // both sides.
+  await page.clock.install();
+  await bootShelf(page);
+  await openBrowse(page);
+  const asked = () =>
+    page.evaluate(() => window.__shotshelf__.callsTo("size_browse").at(-1)?.args["content"]);
+
+  // The empty state keeps the full window — null is "your ceiling".
+  await expect.poll(asked).toBe(null);
+
+  await land(page, FIXTURE.wide, { ts: 1 });
+  await expect.poll(asked).toBe(239);
+  await land(page, FIXTURE.tall, { ts: 2 });
+  await expect.poll(asked).toBe(359);
+  await land(page, FIXTURE.square, { ts: 3 });
+  await expect.poll(asked).toBe(479);
+
+  // A fourth card does not grow the ask: three at a time is the rule, and
+  // the measurement cuts at the third card's bottom edge.
+  await land(page, FIXTURE.wide, { ts: 4 });
+  await expect.poll(asked).toBe(479);
+});
+
+test("a message in the strip is part of the fitted height while it shows", async ({ page }) => {
+  // A window fitted to one card has no spare band for the alert strip, so
+  // the height follows the message in and back out. The boot's own two-line
+  // "no capture folders" warning is the first message — it is inside the 239
+  // the sibling test pins — and this walks the strip through expiry, a
+  // shorter one-line notice, and expiry again, with the fit tracking each.
+  await page.clock.install();
+  await bootShelf(page);
+  await land(page, FIXTURE.wide, { ts: 1 });
+  await openBrowse(page);
+  const asked = () =>
+    page.evaluate(() => window.__shotshelf__.callsTo("size_browse").at(-1)?.args["content"]);
+  // The harness's two-line boot warning is on screen: 190 of card and
+  // furniture, 49 of message.
+  await expect.poll(asked).toBe(239);
+
+  // The message expires; the window lets its band go.
+  await page.clock.runFor(13_000);
+  await expect.poll(asked).toBe(190);
+
+  // A one-line notice takes less than the two-line warning did.
+  await page.evaluate(
+    ([event, version]) => window.__shotshelf__.emit(event, version),
+    [UPDATE_EVENT, "9.9.9"] as const,
+  );
+  await expect.poll(asked).toBe(223);
+
+  await page.clock.runFor(13_000);
+  await expect.poll(asked).toBe(190);
 });

@@ -184,6 +184,9 @@ export function installTauriMock(EVENTS: WindowEvents): void {
     // The folder picker with the user closing it — the ordinary changed-my-
     // mind answer; a spec that wants a folder chosen stubs the path.
     "choose_watch_folder": null,
+    // The browse window taking the height it was asked for — nothing to
+    // return; the specs assert on the measurements that arrive.
+    "size_browse": null,
     // Read, and nothing found — the ordinary case.
     "describe_capture": { secrets: [], scanned: true },
     ...(window.__shotshelfStubs__ ?? {}),

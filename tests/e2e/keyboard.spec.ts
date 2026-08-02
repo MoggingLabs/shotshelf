@@ -207,7 +207,15 @@ test("delete takes it off the shelf without touching the file", async ({ page })
   await page.keyboard.press("Delete");
 
   await expect(page.locator(".tile")).toHaveCount(2);
-  const allowed = new Set(["set_pinned", "set_capture_count", "forget_video", "describe_capture"]);
+  // `size_browse` is here because removal legitimately refits the browse
+  // window to what remains — a report, not a touch on any file.
+  const allowed = new Set([
+    "set_pinned",
+    "set_capture_count",
+    "forget_video",
+    "describe_capture",
+    "size_browse",
+  ]);
   const commands = await page.evaluate(() => window.__shotshelf__.calls().map((call) => call.cmd));
   expect([...new Set(commands)].filter((cmd) => !allowed.has(cmd))).toEqual([]);
 });
