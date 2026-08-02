@@ -1,6 +1,6 @@
 [package]
 name = "shotshelf"
-version = "0.2.0"
+version = "0.2.1"
 description = "The shelf that catches every capture."
 authors = ["MoggingLabs"]
 license = "MIT"
