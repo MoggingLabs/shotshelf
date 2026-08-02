@@ -62,10 +62,20 @@ export interface Settings {
    */
   startAtLogin: boolean;
   /**
-   * Which palette the UI wears. `"system"` follows the OS; the spellings are
-   * pinned to Rust's `THEMES` and an unknown value comes back normalised.
+   * Which palette the UI wears. `"system"` follows the OS; every other
+   * spelling names a `:root[data-theme="…"]` block in the stylesheet. Pinned
+   * to Rust's `THEMES`; an unknown value comes back normalised.
    */
-  theme: "system" | "light" | "dark";
+  theme:
+    | "system"
+    | "light"
+    | "dark"
+    | "solarized-light"
+    | "solarized-dark"
+    | "nord"
+    | "dracula"
+    | "gruvbox-dark"
+    | "catppuccin-mocha";
   /**
    * Folders the user chose to watch beyond the per-OS defaults. Absolute
    * paths, exactly as the picker returned them.

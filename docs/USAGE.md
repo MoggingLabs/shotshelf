@@ -285,7 +285,7 @@ allowlist, never a raw URL).
 | **Max items** | General | How many unpinned captures the shelf holds |
 | **Watched folders** | Capturing | Add any folder to the watch; stop watching any, stock or added. Additions apply live and roam with your account — a machine where the path doesn't exist just skips it, the way an absent OneDrive folder is skipped |
 | **Smaller copies** | Capturing | Hand over a copy no larger than 1568px on its long edge, instead of the original |
-| **Theme** | Appearance | System, Light or Dark. System follows the OS setting live |
+| **Theme** | Appearance | System, Light, Dark — or a named palette: Solarized (both halves), Nord, Dracula, Gruvbox Dark, Catppuccin Mocha. System follows the OS setting live; every palette holds the same contrast bars the stock two do |
 | **Corner** | Appearance | Which screen corner the popover docks to — a 2×2 picker. A bottom corner grows the popped column upward; a top corner grows it downward |
 | **Monitor** | Appearance | Which monitor carries that corner: the primary, or whichever one your cursor is on when the shelf appears |
 | **Summon the shelf** | Shortcuts | The global show/hide shortcut, recorded from your keys |

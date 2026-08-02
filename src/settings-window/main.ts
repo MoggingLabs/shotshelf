@@ -116,11 +116,11 @@ function fill(): void {
   const monitor = el<HTMLSelectElement>("#setting-monitor");
   monitor.value = current.dockMonitor;
   refreshSelect(monitor);
+  const theme = el<HTMLSelectElement>("#setting-theme");
+  theme.value = current.theme;
+  refreshSelect(theme);
   el<HTMLButtonElement>("#setting-hotkey").textContent = prettyHotkey(current.hotkey);
 
-  for (const segment of document.querySelectorAll<HTMLButtonElement>("[data-theme-choice]")) {
-    segment.setAttribute("aria-checked", String(segment.dataset["themeChoice"] === current.theme));
-  }
   for (const corner of document.querySelectorAll<HTMLButtonElement>("[data-corner]")) {
     corner.setAttribute("aria-checked", String(corner.dataset["corner"] === current.dockCorner));
   }
@@ -155,11 +155,9 @@ function bindControls(): void {
     });
   });
 
-  for (const segment of document.querySelectorAll<HTMLButtonElement>("[data-theme-choice]")) {
-    segment.addEventListener("click", () => {
-      void save({ theme: segment.dataset["themeChoice"] as Settings["theme"] });
-    });
-  }
+  el<HTMLSelectElement>("#setting-theme").addEventListener("change", (event) => {
+    void save({ theme: (event.currentTarget as HTMLSelectElement).value as Settings["theme"] });
+  });
   for (const corner of document.querySelectorAll<HTMLButtonElement>("[data-corner]")) {
     corner.addEventListener("click", () => {
       void save({ dockCorner: corner.dataset["corner"] as Settings["dockCorner"] });
@@ -413,6 +411,7 @@ initWatchControls();
 // selects, so the save handlers must already be listening.
 enhanceSelect(el<HTMLSelectElement>("#setting-retention"));
 enhanceSelect(el<HTMLSelectElement>("#setting-monitor"));
+enhanceSelect(el<HTMLSelectElement>("#setting-theme"));
 
 // A save from any window — including this one — refreshes the form with what
 // was actually stored. The registration promise is watched: a window that

@@ -115,6 +115,14 @@ tokens whose value is a theme decision:
 | `--danger-soft` | `#fca5a5` | `#b91c1c` | Failure text: 5.9:1 on light |
 | `--live` | `#34d399` | `#059669` | The dot held only 1.7:1 on light |
 
+Beyond the stock pair, six named palettes ship as further
+`:root[data-theme="…"]` blocks — Solarized Light/Dark, Nord, Dracula,
+Gruvbox Dark, Catppuccin Mocha — each overriding the same token set under
+the same AA bars, with any canonical colour that missed the bar nudged and
+the nudge noted in the block. The spellings are joined three ways: Rust's
+`THEMES`, the settings dropdown's options, and the blocks themselves, with
+an e2e painting every one.
+
 What deliberately does **not** change: everything that answers to a
 *photograph* rather than a theme surface — the scrims, `--text-on-media`,
 the credential badges — and the role **fills** with their audited

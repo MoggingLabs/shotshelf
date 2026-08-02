@@ -104,8 +104,13 @@ test("each settings control writes the field it is labelled for", async ({ page 
     await page.getByRole("option", { name: label }).click();
     expect((await saved(page))["dockMonitor"]).toBe(monitor);
   }
-  for (const theme of ["dark", "light", "system"]) {
-    await page.locator(`[data-theme-choice="${theme}"]`).click();
+  for (const [label, theme] of [
+    ["Dark", "dark"],
+    ["Nord", "nord"],
+    ["System", "system"],
+  ] as const) {
+    await page.locator("#setting-theme-button").click();
+    await page.getByRole("option", { name: label, exact: true }).click();
     expect((await saved(page))["theme"]).toBe(theme);
   }
 });
@@ -152,12 +157,44 @@ test("choosing a theme stamps the window at once", async ({ page }) => {
   await echoSaves(page);
   await page.locator('button[data-section="appearance"]').click();
 
-  await page.locator('[data-theme-choice="dark"]').click();
+  await page.locator("#setting-theme-button").click();
+  await page.getByRole("option", { name: "Dark", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(page.locator('[data-theme-choice="dark"]')).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator("#setting-theme-button")).toHaveText("Dark");
 
-  await page.locator('[data-theme-choice="light"]').click();
+  await page.locator("#setting-theme-button").click();
+  await page.getByRole("option", { name: "Light", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+});
+
+test("every named theme changes the paint it names", async ({ page }) => {
+  // The dropdown's option values, Rust's THEMES and the stylesheet's palette
+  // blocks are three statements of one list. Driving each choice through the
+  // real control and probing --window — the token every block overrides — is
+  // what keeps the three from drifting: a block whose selector is misspelled
+  // stamps the attribute and paints nothing, which a data-theme assertion
+  // alone cannot see.
+  const themes = [
+    ["Solarized Light", "solarized-light", "#fdf6e3"],
+    ["Solarized Dark", "solarized-dark", "#002b36"],
+    ["Nord", "nord", "#2e3440"],
+    ["Dracula", "dracula", "#282a36"],
+    ["Gruvbox Dark", "gruvbox-dark", "#282828"],
+    ["Catppuccin Mocha", "catppuccin-mocha", "#1e1e2e"],
+  ] as const;
+  await bootSettings(page);
+  await echoSaves(page);
+  await page.locator('button[data-section="appearance"]').click();
+
+  for (const [label, theme, paint] of themes) {
+    await page.locator("#setting-theme-button").click();
+    await page.getByRole("option", { name: label, exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    const painted = await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue("--window").trim(),
+    );
+    expect(painted).toBe(paint);
+  }
 });
 
 test("the stored theme is stamped at boot", async ({ page }) => {

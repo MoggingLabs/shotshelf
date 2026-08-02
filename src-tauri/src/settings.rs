@@ -121,8 +121,21 @@ pub struct Settings {
 pub const DOCK_CORNERS: [&str; 4] = ["bottom-right", "bottom-left", "top-right", "top-left"];
 /// Which monitor carries the corner. First entry is the default.
 pub const DOCK_MONITORS: [&str; 2] = ["primary", "cursor"];
-/// The palettes the UI can wear. First entry is the default.
-pub const THEMES: [&str; 3] = ["system", "light", "dark"];
+/// The palettes the UI can wear. First entry is the default; the named ones
+/// each have a `:root[data-theme="…"]` block in `src/styles.css`, and the
+/// spellings here are the join between that stylesheet, the settings window's
+/// dropdown and this sanitiser.
+pub const THEMES: [&str; 9] = [
+    "system",
+    "light",
+    "dark",
+    "solarized-light",
+    "solarized-dark",
+    "nord",
+    "dracula",
+    "gruvbox-dark",
+    "catppuccin-mocha",
+];
 
 impl Default for Settings {
     fn default() -> Self {

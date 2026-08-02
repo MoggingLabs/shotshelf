@@ -92,12 +92,23 @@
           <div class="stg__row">
             <div class="stg__label">
               <span>Theme</span>
+              <p class="stg__hint">System follows the OS, live.</p>
             </div>
-            <div class="stg__segments" role="radiogroup" aria-label="Theme" id="setting-theme">
-              <button type="button" class="stg__segment" data-theme-choice="system" role="radio" aria-checked="false">System</button>
-              <button type="button" class="stg__segment" data-theme-choice="light" role="radio" aria-checked="false">Light</button>
-              <button type="button" class="stg__segment" data-theme-choice="dark" role="radio" aria-checked="false">Dark</button>
-            </div>
+            <!-- The option values are the exact strings Rust's THEMES accepts,
+                 and each names a palette block in the stylesheet. A dropdown
+                 rather than the old three-way segments: nine palettes do not
+                 fit on a segmented control. -->
+            <select id="setting-theme" class="stg__control" aria-label="Theme">
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+              <option value="solarized-light">Solarized Light</option>
+              <option value="solarized-dark">Solarized Dark</option>
+              <option value="nord">Nord</option>
+              <option value="dracula">Dracula</option>
+              <option value="gruvbox-dark">Gruvbox Dark</option>
+              <option value="catppuccin-mocha">Catppuccin Mocha</option>
+            </select>
           </div>
 
           <div class="stg__row">
