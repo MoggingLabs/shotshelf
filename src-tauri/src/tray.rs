@@ -13,10 +13,14 @@ use crate::window;
 
 pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let toggle = MenuItem::with_id(app, "toggle", "Show / Hide shelf", true, None::<&str>)?;
+    // "The screenshots folder", not "captures folder": the tile control
+    // "Show … in its folder" opens the folder of ONE capture, and two menu
+    // entries whose names differ only in an article read as the same feature.
+    // This one opens the first watched directory wholesale.
     let folder = MenuItem::with_id(
         app,
         "open-folder",
-        "Open captures folder",
+        "Open the screenshots folder",
         true,
         None::<&str>,
     )?;

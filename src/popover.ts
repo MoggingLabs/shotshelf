@@ -291,6 +291,12 @@ export class Popover {
     // rest of the session. Releasing every hold here is the reconciliation
     // that DOM enter/leave pairs cannot be relied on to provide.
     this.#shelf.releaseColumn();
+    // The pick goes with the window. It used to survive — `Selection.clear`
+    // had exactly one caller, in `compare` — so a card picked days ago held
+    // its ring across every hide, walked down the list as newer captures
+    // landed on top, and kept Edit lit for a capture nobody remembered
+    // choosing. A popover's selection is as transient as the popover.
+    this.#shelf.clearSelection();
     // The settings panel closes with the window, like the overlay above it.
     //
     // Nothing else did. `dismiss()` from the hide button, the tray, the hotkey

@@ -139,10 +139,18 @@ fn spawn_worker<R: Runtime>(app: AppHandle<R>, rx: mpsc::Receiver<()>, sink: Arc
                 // On screen, not only in the log. This is the one capture with
                 // no other copy: the bytes are in the clipboard and nowhere
                 // else, so failing to write them loses the screenshot outright.
-                Err(err) => super::report_problem(
-                    &app,
-                    &format!("That screenshot could not be saved: {err}"),
-                ),
+                //
+                // "Capture", because that is the word every other user-facing
+                // sentence uses, and the raw io::Error goes to the log rather
+                // than the strip — a person who has just lost a screenshot is
+                // not the audience for "os error 112".
+                Err(err) => {
+                    crate::diag::warn(&format!("a clipboard capture could not be written: {err}"));
+                    super::report_problem(
+                        &app,
+                        "That capture could not be saved — it existed only in the clipboard.",
+                    );
+                }
             }
         }
     });

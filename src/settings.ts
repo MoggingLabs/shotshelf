@@ -227,10 +227,29 @@ export function closeSettings(): boolean {
   return true;
 }
 
+/**
+ * True while the panel is being put away, so the blur that hiding causes
+ * cannot save. Escape is the universal cancel, and it was the one key that
+ * *committed*: `hidden` → `display: none` → the focused hotkey field blurred
+ * → native `change` fired → a half-typed shortcut was saved. Fields already
+ * changed before the close were saved by their own `change` events and stay
+ * saved; only the in-flight edit is discarded.
+ */
+let closing = false;
+
 function toggle(): void {
   const open = panel().hasAttribute("hidden");
-  if (open) panel().removeAttribute("hidden");
-  else panel().setAttribute("hidden", "");
+  if (open) {
+    panel().removeAttribute("hidden");
+  } else {
+    closing = true;
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && panel().contains(focused)) focused.blur();
+    closing = false;
+    panel().setAttribute("hidden", "");
+    // Whatever the abandoned edit left on screen, the fields show the store.
+    fill();
+  }
   el<HTMLElement>("#shelf-settings").classList.toggle("shelf__btn--on", open);
 }
 
@@ -239,7 +258,10 @@ function bind<T extends HTMLElement & { value: string }>(
   read: (input: T) => Partial<Settings>,
 ): void {
   const input = el<T>(selector);
-  input.addEventListener("change", () => void save(read(input)));
+  input.addEventListener("change", () => {
+    if (closing) return;
+    void save(read(input));
+  });
 }
 
 async function save(patch: Partial<Settings>): Promise<void> {
@@ -254,13 +276,24 @@ async function save(patch: Partial<Settings>): Promise<void> {
   try {
     // The Rust side returns what it actually stored, so any clamping — or a
     // rejected shortcut — is reflected rather than assumed.
+    const asked = patch.maxItems;
     current = await invoke<Settings>("set_settings", {
       settings: { ...current, ...patch },
     });
-    note().textContent = "";
+    // A clamp is applied out loud. `fill()` below snaps the field to what was
+    // stored, and with no sentence beside it a 500 that became 200 read as
+    // the app ignoring the user.
+    note().textContent =
+      asked !== undefined && asked !== current.maxItems
+        ? `Max items was limited to ${current.maxItems}.`
+        : "";
     announce(current);
   } catch (error) {
-    note().textContent = String(error);
+    // `String(error)` shipped an "Error: " prefix to the user whenever the
+    // rejection was a real Error. Rust's refusals arrive as plain sentences;
+    // anything else gets its message extracted and the detail logged.
+    console.error("[shotshelf] settings could not be saved", error);
+    note().textContent = error instanceof Error ? error.message : String(error);
   }
   fill();
 }
@@ -283,7 +316,12 @@ function fill(): void {
   retention.value = held;
 
   el<HTMLInputElement>("#setting-max").value = String(current.maxItems);
-  el<HTMLInputElement>("#setting-hotkey").value = current.hotkey;
+  const hotkey = el<HTMLInputElement>("#setting-hotkey");
+  hotkey.value = current.hotkey;
+  // The field is ~120px and the default value is 24 characters — an <input>
+  // clips without an ellipsis, so the tooltip is the only place the user can
+  // read the shortcut they are looking at.
+  hotkey.title = current.hotkey;
   el<HTMLInputElement>("#setting-downscale").checked = current.downscaleExports;
   // These two can trust their options: Rust's `sanitise` normalises an unknown
   // spelling to the default before it ever comes back here, so unlike the

@@ -165,19 +165,25 @@ shows rather defeats the point.
 
 | Key | What it does |
 | :-- | :-- |
-| `↑` `↓` | Move between captures, in the order they are shown |
-| `Space` | Open the picked **image** at readable size, and close it again — recordings have no preview |
-| `Enter` | Copy it to the clipboard |
-| `Delete` or `Backspace` | Take it off the shelf — **the file stays on disk** |
+| `↑` `↓` | Move between captures, in the order they are shown — an open preview follows along |
+| `Space` | Open the picked **image** at readable size, and close it again — a recording answers that it has no preview |
+| `Enter` | Copy it to the clipboard, with a receipt in the strip |
+| `Delete` or `Backspace` | Take the picked captures off the shelf — **the files stay on disk**, and `Ctrl+Z` brings the batch back |
 | `e` | Mark the picked capture up |
 | `t` | Copy the **text** in the picked image — recognised on your machine, straight onto the clipboard |
 | `p` | Pin or unpin the picked captures |
 | `o` | Show the picked capture's file in Explorer / Finder / your file manager |
-| `Ctrl+Z` | Undo the last mark, while marking up |
-| `Esc` | Close the editor, then the settings panel, then the preview, then the shelf |
+| `Ctrl+Z` | Undo the last mark while marking up; bring back the last removal otherwise |
+| `Esc` | Close the editor (twice if you have unsaved marks — the first press warns), then the settings panel, then the preview, then the shelf |
 
 Escape backs out one level at a time on purpose: one key that closes two things
-at once is one key that loses your place.
+at once is one key that loses your place. Every key that needs a pick says
+"Pick a capture first" rather than doing nothing, clicking the space between
+cards clears the pick, and a click on one card of a multi-pick collapses to
+just that card. The title strip counts a live selection ("2 of 7 picked"), and
+in a multi-pick the card the arrows move from carries an extra outer ring. The
+same map is listed at the bottom of the settings panel, and each control's
+tooltip names its key.
 
 Recordings show a frame from themselves plus a badge with their length and size. If a recording
 can't be decoded the tile keeps a film icon and still drags out fine.
@@ -238,6 +244,9 @@ Three things worth knowing:
 - **No marker does not mean "safe".** It means nothing matched. Text recognition on a
   screenshot is imperfect, and the patterns only cover credentials with recognisable shapes.
   A **?** is different again: that capture could not be read at all, so nothing was checked.
+- **Recordings are never scanned**, and their cards say so with the same **?** — a screen
+  recording of a terminal can carry exactly what the scanner looks for, and a card with no
+  marker would be claiming a check that never ran.
 
 Nothing about this leaves your machine — the checking happens locally, and the recognised text
 never leaves Rust.
@@ -247,7 +256,12 @@ never leaves Rust.
 ## Settings
 
 The gear in the title strip opens every control there is — seven of them. One setting has no
-control and is hand-edited only: `checkForUpdates`, covered further down.
+control and is hand-edited only: `checkForUpdates`, covered further down. Changes apply the
+moment you make them, and the panel says so when one is adjusted — pick a Max items past 200
+and the note reads "Max items was limited to 200" rather than snapping back in silence. A
+shorter "Keep for" announces how many captures it swept, with the reminder that the files stay
+on disk. Escape closes the panel and discards whatever was half-typed in the focused field; the
+panel's footer carries the keyboard map.
 
 | Setting | What it does |
 | :-- | :-- |
@@ -394,7 +408,7 @@ it creates there is an empty capture folder that was missing, and those are left
 | Symptom | Likely cause |
 | :-- | :-- |
 | Nothing appears when you take a screenshot | The folder isn't being watched — check the status line, which now reports the folders actually being watched rather than the ones Shotshelf meant to watch. On macOS, the folder permission prompt may have been declined. `shotshelf.log` says which folder failed and why |
-| A message says a screenshot could not be saved | The capture was in the clipboard only — Win+Shift+S and ⌘⌃⇧4 write no file of their own — and Shotshelf could not write it. That copy is gone; the usual causes are a full disk or a profile it cannot write to. `shotshelf.log` records the same sentence with the underlying error. |
+| A message says a capture could not be saved | The capture was in the clipboard only — Win+Shift+S and ⌘⌃⇧4 write no file of their own — and Shotshelf could not write it. That copy is gone; the usual causes are a full disk or a profile it cannot write to. `shotshelf.log` records the underlying error. |
 | The hotkey does nothing | Another app already owns that combination; change it in settings |
 | Nothing appeared after a reboot | Shotshelf does not start itself — add it to your startup items. A launch brings back **up to 20** captures from the previous 24 hours, newest first, so the recent ones are still there |
 | A recording shows a film glyph, not a frame | ffmpeg couldn't decode that file. The tile still drags out |

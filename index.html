@@ -11,7 +11,11 @@
          `data-tauri-drag-region` is what makes it draggable without decorations. -->
     <div class="shelf">
       <header class="shelf__bar" data-tauri-drag-region>
-        <span class="shelf__mark" id="shelf-mark" data-tauri-drag-region></span>
+        <!-- A button, not a span: its tooltip is the app's primary diagnostic
+             (the watch list, the clipboard state, the credential note), and an
+             8px mouse-only dot made that unreachable by keyboard entirely.
+             `status.ts` keeps the aria-label in step with the tooltip. -->
+        <button class="shelf__mark" id="shelf-mark" type="button" aria-label="Watch status"></button>
         <span class="shelf__title" id="shelf-count" data-tauri-drag-region>Shelf</span>
         <span class="shelf__grow" data-tauri-drag-region></span>
         <!-- Marking up needs exactly one capture to mark up. -->
@@ -19,7 +23,7 @@
           class="shelf__btn shelf__btn--compare"
           id="shelf-edit"
           type="button"
-          title="Mark up this capture"
+          title="Mark up this capture (E)"
           hidden
         >
           Edit
@@ -35,12 +39,24 @@
         >
           Compare
         </button>
-        <button class="shelf__btn" id="shelf-settings" type="button" title="Settings">
-          <span class="sr-only">Settings</span>
-        </button>
-        <button class="shelf__btn" id="shelf-hide" type="button" title="Hide the shelf — the tray icon brings it back">
-          <span class="sr-only">Hide shelf</span>
-        </button>
+        <button
+          class="shelf__btn"
+          id="shelf-settings"
+          type="button"
+          title="Settings"
+          aria-label="Settings"
+        ></button>
+        <!-- The hairline keeps Settings and Hide from reading as twins: two
+             identical muted icon buttons 8px apart, with the dismissive one
+             outermost, was a measured mis-click. -->
+        <span class="shelf__sep" aria-hidden="true"></span>
+        <button
+          class="shelf__btn"
+          id="shelf-hide"
+          type="button"
+          title="Hide the shelf — the tray icon brings it back (Esc)"
+          aria-label="Hide the shelf — the tray icon brings it back (Esc)"
+        ></button>
       </header>
 
       <section class="settings" id="settings-panel" hidden>
@@ -57,11 +73,12 @@
           <span>Max items</span>
           <input id="setting-max" type="number" min="1" max="200" step="1" />
         </label>
+        <!-- No hidden tooltip help on any row: two rows carried long
+             explanations only a hover could find, five carried none, and
+             nothing marked which was which. What needs saying is said in the
+             visible hints below the form. -->
         <label class="settings__row">
-          <span
-            title="Vision models resize what they are given to about 1568px anyway, so this costs nothing when you are feeding a chat. Off by default because a drag-out also feeds design tools and bug reports."
-            >Send smaller copies</span
-          >
+          <span>Send smaller copies</span>
           <input id="setting-downscale" type="checkbox" />
         </label>
         <label class="settings__row">
@@ -89,14 +106,24 @@
           </select>
         </label>
         <label class="settings__row">
-          <span
-            title="Registers Shotshelf as a login item so it is already watching when you take the day's first capture. The choice follows your account; turning it off unregisters this machine."
-            >Start at login</span
-          >
+          <span>Start at login</span>
           <input id="setting-autostart" type="checkbox" />
         </label>
-        <p class="settings__note" id="settings-note"></p>
-        <p class="settings__hint">Pinned captures ignore “Keep for” and come back after a restart.</p>
+        <p class="settings__note" id="settings-note" role="alert"></p>
+        <!-- Straight quotes: the note above renders Rust-composed text with
+             straight quotes 8px away, and one panel gets one quoting style. -->
+        <p class="settings__hint">
+          Changes apply at once. Captures leave the shelf when "Keep for" or "Max items"
+          says so — the files always stay on disk. Pinned captures ignore both and come
+          back after a restart. Smaller copies suit chats; originals suit design tools.
+          Start at login follows your account.
+        </p>
+        <p class="settings__keys">
+          <kbd>↑↓</kbd> pick · <kbd>Space</kbd> look · <kbd>Enter</kbd> copy ·
+          <kbd>E</kbd> mark up · <kbd>T</kbd> copy text · <kbd>P</kbd> pin ·
+          <kbd>O</kbd> show in folder · <kbd>Del</kbd> remove · <kbd>Ctrl+Z</kbd>
+          bring back · <kbd>Esc</kbd> close
+        </p>
       </section>
 
       <!-- The list and the overlay share one box, and that box is what the
@@ -117,8 +144,10 @@
         <div class="shelf__overlay" id="shelf-overlay"></div>
       </div>
 
-      <!-- Only appears when something actually needs saying. -->
-      <p class="shelf__alert" id="shelf-alert" hidden></p>
+      <!-- Only appears when something actually needs saying. `role="status"`
+           because this is the single channel every failure in the app reports
+           through, and without a live region none of it was ever announced. -->
+      <p class="shelf__alert" id="shelf-alert" role="status" hidden></p>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

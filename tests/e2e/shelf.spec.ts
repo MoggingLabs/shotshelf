@@ -455,8 +455,12 @@ test("captures taken while the app was closed come back on the next launch", asy
   await expect(page.locator(".tile")).toHaveCount(2);
   // Newest at the top, from the time each was *taken* — not the launch time,
   // which would put yesterday's screenshots under "Today" and restart their
-  // retention clock on every launch.
-  await expect(page.locator(".tile").first()).toHaveAttribute("title", /wide\.png/);
+  // retention clock on every launch. The label's tooltip identifies the card;
+  // the card itself no longer carries a title.
+  await expect(page.locator(".tile").first().locator(".tile__label")).toHaveAttribute(
+    "title",
+    /wide\.png/,
+  );
 });
 
 test("a launch with nothing missed does not pop the column", async ({ page }) => {
@@ -705,7 +709,10 @@ test("captures older than the retention window are let go, and the setting is th
   await page.clock.runFor(15_000);
 
   await expect(page.locator(".tile")).toHaveCount(1);
-  await expect(page.locator(".tile")).toHaveAttribute("title", /just-now\.png/);
+  await expect(page.locator(".tile__label")).toHaveAttribute("title", /just-now\.png/);
+  // And the eviction is said out loud — the one destructive-looking act in
+  // the app used to be silent.
+  await expect(page.locator("#shelf-alert")).toHaveText(/left the shelf.*untouched/);
 });
 
 test("a longer retention window keeps what a shorter one would drop", async ({ page }) => {
@@ -841,13 +848,16 @@ test("a capture the engine could not save is reported on screen", async ({ page 
 
   await page.evaluate(
     ([event, message]) => window.__shotshelf__.emit(event, message),
-    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+    [PROBLEM_EVENT, "That capture could not be saved — it existed only in the clipboard."] as const,
   );
 
   await expect(page.locator("#shelf-alert")).toBeVisible();
   await expect(page.locator("#shelf-alert")).toContainText(/could not be saved/i);
-  // Rust composes the sentence — the reason has to survive the trip.
-  await expect(page.locator("#shelf-alert")).toContainText(/no space left/i);
+  // Rust composes the sentence. The raw io::Error goes to the log now, not
+  // the strip — a person who just lost a screenshot is not the audience for
+  // "os error 112" — so what must survive the trip is the fact that the only
+  // copy existed in the clipboard.
+  await expect(page.locator("#shelf-alert")).toContainText(/only in the clipboard/i);
 
   // And the window is actually put back on screen, which is the whole point:
   // a strip inside a hidden window is not a message.
@@ -876,7 +886,7 @@ test("the window a lost-capture message put up goes away with the message", asyn
 
   await page.evaluate(
     ([event, message]) => window.__shotshelf__.emit(event, message),
-    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+    [PROBLEM_EVENT, "That capture could not be saved — it existed only in the clipboard."] as const,
   );
   await expect(page.locator("#shelf-alert")).toBeVisible();
 
@@ -939,7 +949,7 @@ test("a lost-capture message does not take the settings panel off screen", async
 
   await page.evaluate(
     ([event, message]) => window.__shotshelf__.emit(event, message),
-    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+    [PROBLEM_EVENT, "That capture could not be saved — it existed only in the clipboard."] as const,
   );
 
   // The message still lands — the window is already on screen, strip and all.
@@ -983,7 +993,7 @@ test("a lost-capture message is raised even when the shelf was put away with set
 
   await page.evaluate(
     ([event, message]) => window.__shotshelf__.emit(event, message),
-    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+    [PROBLEM_EVENT, "That capture could not be saved — it existed only in the clipboard."] as const,
   );
 
   await expect(page.locator("#shelf-alert")).toContainText(/could not be saved/i);
@@ -1003,7 +1013,7 @@ test("a lost-capture message survives the launch dismissal", async ({ page }) =>
 
   await page.evaluate(
     ([event, message]) => window.__shotshelf__.emit(event, message),
-    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+    [PROBLEM_EVENT, "That capture could not be saved — it existed only in the clipboard."] as const,
   );
   await expect(page.locator("#shelf-alert")).toBeVisible();
 
@@ -1030,7 +1040,7 @@ test("a lost-capture message raised during the launch appearance reshapes the sh
 
   await page.evaluate(
     ([event, message]) => window.__shotshelf__.emit(event, message),
-    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+    [PROBLEM_EVENT, "That capture could not be saved — it existed only in the clipboard."] as const,
   );
 
   await expect(page.locator("#shelf-alert")).toContainText(/could not be saved/i);
@@ -1081,11 +1091,11 @@ test("a lost capture is reported even with a drag still in flight", async ({ pag
 
   await page.evaluate(
     ([event, message]) => window.__shotshelf__.emit(event, message),
-    [PROBLEM_EVENT, "That screenshot could not be saved: no space left on device"] as const,
+    [PROBLEM_EVENT, "That capture could not be saved — it existed only in the clipboard."] as const,
   );
 
   // The window comes back, which is the `#showing` half.
-  await expect(page.locator("#shelf-alert")).toContainText(/no space left on device/);
+  await expect(page.locator("#shelf-alert")).toContainText(/only in the clipboard/);
   expect(
     await page.evaluate(() => window.__shotshelf__.callsTo("show_shelf").length),
     "the message was raised into a window nobody put back on screen",

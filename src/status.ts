@@ -257,10 +257,15 @@ function paint(): void {
   if (!mark) return;
 
   mark.classList.toggle("shelf__mark--live", watch?.live === true);
-  mark.title = [
+  const said = [
     watch?.said,
     scanned === false ? "Captures are not being checked for credentials here." : undefined,
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n\n");
+  mark.title = said;
+  // The mark is a button now, and the announced name is the diagnostic
+  // itself — the policy is aria-label equal to the tooltip, and this tooltip
+  // is the one that matters most.
+  mark.setAttribute("aria-label", said === "" ? "Watch status" : said);
 }

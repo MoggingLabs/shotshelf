@@ -17,7 +17,11 @@ on purpose — that is the entire process.
    never block.
 3. **Native, not webby.** Arrow cursor on controls, no pointer hands, panel
    radius agreeing with the OS (DWM's fixed 8px on Windows, 14px under macOS
-   vibrancy), system font stack, tray-first lifecycle.
+   vibrancy), system font stack, tray-first lifecycle. The one cursor that is
+   not an arrow is `grab`/`grabbing` on a card: the hand-that-grabs is the
+   native drag affordance, not the web's link hand, and drag-out is the thing
+   the shelf exists for — the affordance rule suppresses decoration, never
+   the product.
 4. **One owner per decision.** Whether a message shows is `status.ts`'s
    decision, expressed once; the stylesheet never restates it. The same rule
    produced the design gate: consistency owned by a script, not by memory.
@@ -65,6 +69,14 @@ the two sides move apart.
 **Nothing interactive is smaller than 24×24px** — the WCAG 2.5.8 minimum. The
 tile actions were 21px and are now `--ctl-tile` (24); title-strip buttons are
 `--ctl-bar` (28) inside the 40px bar; settings inputs carry `min-height: 24px`.
+The watching dot stays an 8px dot visually but sits inside a 24px focusable
+button, so its tooltip — the app's primary diagnostic — is reachable by
+keyboard and by imprecise pointing alike.
+
+**Documented exception: the scrollbar.** A 24px scrollbar inside a 225px panel
+would spend a tenth of the window on chrome. The gutter is 12px with an 8px
+visible thumb — under the minimum, deliberately, because the wheel, the arrow
+keys and PageUp/Down all scroll the same list.
 
 ## Icons
 
@@ -90,12 +102,19 @@ Semantic tokens only; `check-design.mjs` refuses a colour literal outside
   (controls), `--overlay` (editor, quick look), `--surface-deep` (canvas),
   three neutral **scrims** for text over photographs.
 - **Strokes**: three strengths of white alpha (0.09 / 0.16 / 0.26).
-- **Text**: `--text`, `--muted` (5.6:1 on the panel — AA for its 11px+ uses),
-  `--text-on-media` over scrims only.
+- **Text**: `--text`, `--muted` (5.6:1 on the panel — AA at every size it is
+  used at, including the 10px day labels at 5.7:1), `--text-on-media` over
+  scrims only, and `--ink-on-fill` — near-black ink for glyphs and labels
+  sitting **on** a role-coloured fill. White on the amber pin was 2.15:1 and
+  on the green copy receipt 1.92:1; the ink is ≥4.5:1 on every role fill, so
+  a state colour never erases the glyph that names it.
 - **Roles**: `--accent` (selection, primary action, focus ring), `--live`
   (watching), `--warning` (pinned state, credential rims), `--danger` for
   fills with `--danger-soft` for text — #ef4444 on the panel is 3.9:1, below
   AA, so text never uses it.
+- **Composited badges answer for their worst background.** The credential and
+  unscanned badges float over 8% of an arbitrary screenshot, so their alphas
+  are 0.98 — high enough that a white capture cannot pull the badge below AA.
 - **Credential badges by kind**: amber for tokens, crimson for a private key,
   stone for personal data, dim stone for "could not check". The distinction is
   severity communicated without words.
@@ -107,15 +126,48 @@ Bottom to top: wash (blurred self, 0.5 opacity) → picture → label gradient
 marker (always, top-left, the one thing never covered). Actions order: pin
 (state), copy, show-in-folder, remove (destructive last).
 
+The corner grammar, stated once: **top-left** is safety (credential marker or
+the unscanned `?`, mutually exclusive, never covered), **top-right** is action
+(the hover cluster — and at rest on a pinned card, the star alone, its hidden
+siblings collapsed to zero width so the state anchors the corner it was set
+in), **bottom-left** is identity (the duration badge at rest, yielding to the
+label gradient on hover). A state indicator lives where its control is — the
+pinned star *is* the pin button — and no state may erase another: picked,
+hover and the credential rim compose in one declared rule rather than
+competing by specificity.
+
+Selection carries two treatments: every picked card gets the 2px inset accent
+ring, and in a multi-pick the **keyboard cursor** — the card the arrows move
+from — additionally carries a 1px outer accent halo, so a range never loses
+the point the user is standing on.
+
 ## Accessibility policy
 
 - Every control shows `:focus-visible` (2px accent ring) — the app ships a
   keyboard map, so focus must be visible everywhere it can land.
-- Icon-only buttons carry `aria-label` equal to their tooltip; the pin also
-  reports `aria-pressed`. Icons themselves are `aria-hidden`.
+- Focus must also be *usable* where it lands: the global keydown handler
+  yields Enter and Space to whatever focusable control has focus, so tabbing
+  to Hide and pressing Enter hides rather than copying.
+- Icon-only buttons carry `aria-label` equal to their tooltip; the pin
+  reports `aria-pressed`, and so do the editor's tool buttons. Icons
+  themselves are `aria-hidden`; glyph-only thumbnails (a recording's film
+  frame, a missing file) carry `sr-only` text.
+- The two message surfaces are live regions: `#shelf-alert` is `role="status"`
+  and `#settings-note` is `role="alert"` — a message nobody can hear is not a
+  message.
 - Global reduced-motion flattening; no information is motion-only.
-- Hit targets ≥ 24px throughout.
-- Text contrast ≥ AA against its actual background (see palette notes).
+- Hit targets ≥ 24px throughout (one documented exception: the scrollbar).
+- Text contrast ≥ AA against its actual background (see palette notes) —
+  including composited backgrounds: a badge over a screenshot answers for the
+  whitest capture it can sit on.
+- Tooltip micro-copy convention: control tooltips are label phrases with no
+  terminal period ("Mark up this capture (E)"), informational tooltips are
+  full-stopped sentences. Controls with a keyboard accelerator name it in
+  parentheses at the end.
+- **Stated limitation:** drawing in the editor is pointer-only. The tools,
+  Undo and Save are keyboard-reachable, but placing a mark needs a pointer;
+  an accessible marking flow is future work, recorded here rather than
+  implied absent.
 
 ## Feature inventory — what each one is for
 
@@ -128,7 +180,7 @@ that cannot say what job it does gets removed before it gets polished.
 | Peek column | Grab it *now*, without the shelf stealing focus | `tests/e2e/popover.spec.ts` |
 | Drag-out (multi-select, ordered) | The file lands where work happens; copy, never move | e2e drag specs; live drag on Windows |
 | Copy | Apps that paste but refuse drops | e2e + live |
-| Show in folder | The file itself is the product; this is the shortest path to it (tile control, `o`, and the tray's Open captures folder) | e2e + the IPC scope-refusal test |
+| Show in folder | The file itself is the product; this is the shortest path to it (tile control, `o`, and the tray's Open the screenshots folder) | e2e + the IPC scope-refusal test |
 | Pin / retention / item cap | The shelf stays a shelf, not an archive | unit + e2e sweeps |
 | Copy recognised text | The error text in a screenshot, into a chat, without retyping — the OCR the credential scan already runs, finally answering the keyboard | e2e + the IPC scope-refusal test; the text never crosses the wire |
 | Start at login | The product is being there when the capture lands; a reboot must not turn it off | settings e2e + IPC tolerance test; roams with the account |
@@ -138,7 +190,8 @@ that cannot say what job it does gets removed before it gets polished.
 | Editor (5 tools, real redaction) | Point at the thing without a second app; redaction that removes pixels | `tests/e2e/editor.spec.ts` |
 | Compare | The unit of iteration when working against a model | e2e compare specs |
 | Quick look | Read the capture without opening an app | e2e + window-resize specs |
-| Keyboard map | The shelf is summoned by key; acting on it should not need the mouse — incl. `t` copy-text, `p` pin, `o` show-in-folder | `tests/e2e/keyboard.spec.ts` |
+| Keyboard map | The shelf is summoned by key; acting on it should not need the mouse — incl. `t` copy-text, `p` pin, `o` show-in-folder, shelf-level `Ctrl+Z`, receipts for every key, and a guard sentence when nothing is picked. Taught in-app: tooltips name their keys, the settings footer lists the map, the empty state names the hotkey | `tests/e2e/keyboard.spec.ts` |
+| Removal undo | A shift-range of eight vanished on one keypress with nothing said; now the receipt names the batch and `Ctrl+Z` brings it back — session-scoped, and restored captures rejoin the cap and retention like new arrivals | `tests/e2e/keyboard.spec.ts` |
 | Backfill | A reboot must not cost the morning's captures | Rust + e2e |
 | Update check | The one network call — a static manifest off this repo's Releases; tells, never installs | Rust wiring + live failure path |
 

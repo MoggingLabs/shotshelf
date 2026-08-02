@@ -37,11 +37,29 @@ export function imageThumb(path: string, name: string): HTMLImageElement {
   return img;
 }
 
-export function glyphThumb(kind: GlyphKind, modifier?: string): HTMLElement {
+/**
+ * `label` is what a screen reader hears for the card's picture area. The
+ * glyph is `aria-hidden` like every icon, so without it a recording tile —
+ * or a missing file — had no text at all beyond its buttons.
+ */
+export function glyphThumb(kind: GlyphKind, label: string, modifier?: string): HTMLElement {
   const el = document.createElement("div");
   el.className = `tile__thumb tile__thumb--glyph${modifier ? ` tile__thumb--${modifier}` : ""}`;
   el.append(icon(kind, 24));
+  const said = document.createElement("span");
+  said.className = "sr-only";
+  said.textContent = label;
+  el.append(said);
   return el;
+}
+
+/**
+ * The card-level missing state: the rim that says "this file has gone" at a
+ * glance. The glyph swap alone changed only the picture area, and nothing on
+ * the card said anything was wrong until you hovered for the filename.
+ */
+export function markMissing(tile: HTMLElement): void {
+  tile.classList.add("tile--missing");
 }
 
 /**

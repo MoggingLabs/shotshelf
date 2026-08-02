@@ -78,6 +78,16 @@ export class EditSession {
     return this.#tool;
   }
 
+  /**
+   * Whether anything has been done that closing would throw away.
+   *
+   * The history is the answer — marks and the crop both join it — and this is
+   * what arms the discard confirmation and disables Undo when it is empty.
+   */
+  get dirty(): boolean {
+    return this.#history.length > 0;
+  }
+
   set tool(next: Tool) {
     this.#tool = next;
   }

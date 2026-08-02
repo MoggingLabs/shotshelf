@@ -27,6 +27,9 @@ export class ShelfView {
   readonly #callbacks: TileCallbacks;
   /** Card per capture id, reused across redraws. */
   readonly #tiles = new Map<string, HTMLElement>();
+  /** What the title currently reports, so the pick count can share the slot. */
+  #size = 0;
+  #picked = 0;
 
   /**
    * Forget every built tile, so the next render makes them again.
@@ -117,6 +120,12 @@ export class ShelfView {
     const grouped = groupByDay(items);
     this.#order = grouped.flatMap((group) => group.items.map((item) => item.id));
 
+    // `replaceChildren` collapses `scrollHeight` and clamps `scrollTop` to
+    // zero, and this runs on every removal, every retention sweep and every
+    // capture landing while browse is open — each of which yanked the list
+    // back to the top and lost the reader's place.
+    const scrolled = this.#list.scrollTop;
+
     this.#list.dataset["empty"] = "false";
     this.#list.replaceChildren(
       ...grouped.map((group) => {
@@ -136,6 +145,8 @@ export class ShelfView {
         return section;
       }),
     );
+
+    this.#list.scrollTop = scrolled;
   }
 
   #renderEmpty(): void {
@@ -149,20 +160,43 @@ export class ShelfView {
    * stale flag left the grid centring itself on nothing.
    */
   setCount(size: number): void {
-    this.#count.textContent =
-      size === 0 ? "Shelf" : `${size} capture${size === 1 ? "" : "s"}`;
+    this.#size = size;
+    this.#renderCount();
     this.#list.dataset["empty"] = String(size === 0);
+  }
+
+  /**
+   * The title reports the pick while one exists — "2 of 7 picked" — because
+   * nothing else did: at three or more picked, Edit and Compare both vanish
+   * and no signal anywhere said a selection was live, right before Delete
+   * acted on all of it. It also bridges the distance to Edit/Compare, which
+   * appear in this strip when the pick makes them meaningful.
+   */
+  #renderCount(): void {
+    if (this.#picked > 0 && this.#size > 0) {
+      this.#count.textContent = `${this.#picked} of ${this.#size} picked`;
+      return;
+    }
+    this.#count.textContent =
+      this.#size === 0 ? "Shelf" : `${this.#size} capture${this.#size === 1 ? "" : "s"}`;
   }
 
   /**
    * Mark the picked cards. Applied to live elements rather than by redrawing:
    * selection changes on every click, and a redraw per click would be a redraw
    * per click.
+   *
+   * The cursor — the card the arrows move from — gets its own class only in a
+   * multi-pick: with one card picked it *is* the cursor, and a second
+   * treatment on the same card would be noise.
    */
-  reflectSelection(picked: ReadonlySet<string>): void {
+  reflectSelection(picked: ReadonlySet<string>, cursor: string | undefined): void {
     for (const [id, tile] of this.#tiles) {
       tile.classList.toggle("tile--picked", picked.has(id));
+      tile.classList.toggle("tile--cursor", picked.size > 1 && id === cursor);
     }
+    this.#picked = picked.size;
+    this.#renderCount();
   }
 
   /**
@@ -173,6 +207,17 @@ export class ShelfView {
    */
   scrollIntoView(id: string): void {
     this.#tiles.get(id)?.scrollIntoView({ block: "nearest" });
+  }
+
+  /**
+   * Take the list out of the focus order while an overlay covers it.
+   *
+   * Without this, Tab inside the editor walked four invisible tile controls
+   * — pin, copy, reveal and Remove, the last of which removes the capture
+   * being edited — before it ever reached the toolbar.
+   */
+  setListInert(inert: boolean): void {
+    this.#list.inert = inert;
   }
 
   /** Pinning is applied to the live card rather than by rebuilding it. */

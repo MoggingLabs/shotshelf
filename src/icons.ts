@@ -32,7 +32,10 @@ const PATHS = {
 
 export type IconName = keyof typeof PATHS;
 
-export function icon(name: IconName, size = 15): SVGSVGElement {
+// No default size: 15 was off the documented five-step scale (10/12/14/16/24),
+// and a caller omitting the argument was the one thing `check-design.mjs`
+// cannot see — it reads the stylesheet, not this file.
+export function icon(name: IconName, size: number): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("width", String(size));
@@ -55,7 +58,7 @@ export function icon(name: IconName, size = 15): SVGSVGElement {
 }
 
 /** Solid rather than outlined, for states that need to read at a glance. */
-export function solidIcon(name: IconName, size = 15): SVGSVGElement {
+export function solidIcon(name: IconName, size: number): SVGSVGElement {
   const svg = icon(name, size);
   svg.setAttribute("fill", "currentColor");
   svg.setAttribute("stroke-width", "1");

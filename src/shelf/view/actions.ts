@@ -36,9 +36,13 @@ function pinLabel(pinned: boolean): string {
   // `ShelfStore.sweep` returns immediately when it is, so on a default install
   // the tooltip named the one effect pinning does *not* have while omitting the
   // two it always does — exemption from the item cap, and surviving a restart.
+  //
+  // The accelerator is named in every control tooltip — the Undo button set
+  // the precedent, and a keyboard map taught only in a file on GitHub is a
+  // keyboard map most users never learn exists.
   return pinned
-    ? "Pinned — kept until you unpin it"
-    : "Pin to keep this capture, and bring it back next launch";
+    ? "Pinned — kept until you unpin it (P)"
+    : "Pin to keep this capture, and bring it back next launch (P)";
 }
 
 function action(name: Parameters<typeof icon>[0], title: string): HTMLButtonElement {
@@ -99,7 +103,7 @@ function setPinned(button: HTMLElement, pinned: boolean): void {
 
 /** For the apps that take a paste but refuse a file drop. */
 function copyButton(id: string, name: string, handlers: TileHandlers): HTMLButtonElement {
-  const button = action("copy", `Copy ${name} to the clipboard`);
+  const button = action("copy", `Copy ${name} to the clipboard (Enter)`);
   // Named, like its two siblings. All three carried one shared class, so
   // anything reaching for a particular control had to count — see `PIN`.
   button.classList.add("tile__action--copy");
@@ -122,7 +126,7 @@ function copyButton(id: string, name: string, handlers: TileHandlers): HTMLButto
  * says which control it was.
  */
 function revealButton(id: string, name: string, handlers: TileHandlers): HTMLButtonElement {
-  const button = action("folder", `Show ${name} in its folder`);
+  const button = action("folder", `Show ${name} in its folder (O)`);
   button.classList.add("tile__action--reveal");
   button.addEventListener("click", () => {
     void handlers
@@ -134,7 +138,7 @@ function revealButton(id: string, name: string, handlers: TileHandlers): HTMLBut
 }
 
 function removeButton(id: string, name: string, handlers: TileHandlers): HTMLButtonElement {
-  const button = action("close", `Remove ${name} from the shelf (the file stays on disk)`);
+  const button = action("close", `Remove ${name} from the shelf — the file stays on disk (Delete)`);
   button.classList.add("tile__action--remove");
   button.addEventListener("click", () => handlers.remove(id));
   return button;

@@ -85,6 +85,33 @@ export function editorIsOpen(): boolean {
   return overlay.isOpen;
 }
 
+/** How long a first Escape's warning stands before it needs re-arming. */
+const CONFIRM_MS = 4000;
+
+let discardArmedAt: number | undefined;
+
+/**
+ * Whether backing out needs a second gesture first.
+ *
+ * True exactly once per four seconds while unsaved marks exist: the first
+ * Escape (or Hide click) arms it and the caller shows the warning; the same
+ * gesture repeated inside the window proceeds. Escape discarded silently
+ * before, from four different routes, for work this module's own save-failure
+ * path refuses to throw away.
+ */
+export function discardNeedsConfirm(): boolean {
+  const live = overlay.live;
+  if (!live?.session.dirty) return false;
+
+  const now = Date.now();
+  if (discardArmedAt !== undefined && now - discardArmedAt < CONFIRM_MS) {
+    discardArmedAt = undefined;
+    return false;
+  }
+  discardArmedAt = now;
+  return true;
+}
+
 /**
  * Open the editor on a capture. Recordings have nothing to annotate.
  *
@@ -216,7 +243,21 @@ export function undoEdit(): boolean {
   if (!live?.session.undo()) return false;
   fit();
   render();
+  refreshUndo();
   return true;
+}
+
+/**
+ * The Undo button shows whether there is anything to undo.
+ *
+ * A control that silently does nothing is indistinguishable from a broken
+ * one; `:disabled` is the difference. Called wherever the history changes.
+ */
+function refreshUndo(): void {
+  const live = overlay.live;
+  if (!live) return;
+  const undo = live.frame.querySelector<HTMLButtonElement>("#editor-undo");
+  if (undo) undo.disabled = !live.session.dirty;
 }
 
 function setTool(tool: Tool): void {
@@ -224,7 +265,12 @@ function setTool(tool: Tool): void {
   if (!live) return;
   live.session.tool = tool;
   for (const button of live.frame.querySelectorAll<HTMLButtonElement>(".editor__tool")) {
-    button.classList.toggle("editor__tool--on", button.dataset["tool"] === tool);
+    const on = button.dataset["tool"] === tool;
+    button.classList.toggle("editor__tool--on", on);
+    // The tool group is five toggles with exactly one on — the strongest
+    // case in the app for `aria-pressed`, and the pin already sets the
+    // policy: state a screen reader can hear, not only a class.
+    button.setAttribute("aria-pressed", String(on));
   }
 }
 
@@ -304,12 +350,20 @@ function toolbar(session: EditSession, callbacks: EditorHost): HTMLElement {
     button.dataset["tool"] = tool;
     button.textContent = label;
     button.classList.toggle("editor__tool--on", session.tool === tool);
+    button.setAttribute("aria-pressed", String(session.tool === tool));
+    // The one irreversible tool says so where the hand hovers — USAGE's
+    // "Redact destroys" paragraph reached only readers of USAGE.
+    if (tool === "redact") {
+      button.title = "Removes the pixels underneath — permanent in the saved copy";
+    }
     button.addEventListener("click", () => setTool(tool));
     bar.append(button);
   }
 
   const undo = action("Undo", "editor-undo", () => void undoEdit());
   undo.title = "Undo the last mark (Ctrl+Z)";
+  // Nothing has been drawn yet.
+  undo.disabled = true;
 
   const save = action("Save", "editor-save", () => {
     void saveEditedCapture(callbacks);
@@ -433,6 +487,7 @@ function bindPointer(): void {
     if (live.session.tool === "callout") {
       live.session.add({ kind: "callout", ...start, number: live.session.nextNumber() });
       render();
+      refreshUndo();
       return;
     }
 
@@ -463,6 +518,7 @@ function bindPointer(): void {
       const end = at(ended);
       commit(start, end);
       render();
+      refreshUndo();
     };
 
     canvas.addEventListener("pointermove", move);

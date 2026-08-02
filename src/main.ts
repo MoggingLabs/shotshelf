@@ -119,6 +119,20 @@ root.addEventListener("pointerleave", () => shelf.holdColumn("pointer", false));
  */
 document.addEventListener("keydown", (event) => {
   if (event.defaultPrevented) return;
+  // Enter and Space belong to whatever focusable control holds the focus.
+  // Without this, Tab to Hide and Enter *copied the picked capture* instead
+  // of hiding, and Space on the Settings button opened a quick look — the
+  // `preventDefault` below suppressed every button's activation, so the whole
+  // keyboard map's own surface was unusable by keyboard. Only the activation
+  // keys yield; arrows, letters and Escape keep their shelf meaning wherever
+  // focus sits.
+  if (
+    event.target instanceof HTMLElement &&
+    event.target.matches("button, input, select, textarea") &&
+    (event.key === "Enter" || event.key === " ")
+  ) {
+    return;
+  }
   // Typing a hotkey into the settings panel is not a shelf command.
   if (settingsOpen() && event.key !== "Escape") return;
   // While marking up a capture, the arrows and Delete belong to the editor's
@@ -144,9 +158,15 @@ document.addEventListener("keydown", (event) => {
 
     case "z":
       if (!event.ctrlKey && !event.metaKey) return;
-      if (!shelf.editing) return;
       event.preventDefault();
-      shelf.undoEdit();
+      // Two undos, split by surface: in the editor Ctrl+Z takes back the
+      // last mark; on the shelf it brings back the last removal — the pair
+      // the Delete receipt promises.
+      if (shelf.editing) {
+        shelf.undoEdit();
+      } else if (!shelf.restoreRemoved()) {
+        say("Nothing to bring back.");
+      }
       return;
 
     case "e":
@@ -199,15 +219,30 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-hideButton.addEventListener("click", () => popover.dismiss());
+hideButton.addEventListener("click", () => {
+  // The hide button reaches the same discard the Escape ladder does, so it
+  // gets the same double-step when marks are unsaved.
+  if (shelf.editing && shelf.warnUnsavedMarks()) return;
+  popover.dismiss();
+});
 
 editButton.addEventListener("click", () => shelf.editPicked());
 
 compareButton.addEventListener("click", () => {
-  void shelf.compare().catch((error: unknown) => {
-    console.error("[shotshelf] could not compare those captures", error);
-    say("Those two captures could not be compared.");
-  });
+  // Disabled for the length of the decode — the button stays on screen for a
+  // full-resolution read of two captures, and a second click used to be
+  // swallowed with no acknowledgement at all.
+  compareButton.disabled = true;
+  say("Comparing the two captures…");
+  void shelf
+    .compare()
+    .catch((error: unknown) => {
+      console.error("[shotshelf] could not compare those captures", error);
+      say("Those two captures could not be compared.");
+    })
+    .finally(() => {
+      compareButton.disabled = false;
+    });
 });
 
 /**
@@ -273,7 +308,7 @@ subscribe(
     say(payload);
     popover.showProblem();
   }),
-  "Shotshelf will not be able to tell you when a capture goes missing.",
+  "Shotshelf will not be able to tell you when a capture goes missing. Restarting should fix it.",
 );
 
 subscribe(
@@ -345,7 +380,7 @@ subscribe(
   listen<string>("update://available", ({ payload }) => {
     say(`Shotshelf ${payload} is available.`);
   }),
-  "Shotshelf cannot tell you about new versions this session.",
+  "Shotshelf cannot tell you about new versions this session. Restarting should fix it.",
 );
 
 // Registered together and reported once: they are two halves of one thing —

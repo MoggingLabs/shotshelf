@@ -365,8 +365,14 @@ test("a capture landing mid-annotation does not destroy the editor", async ({ pa
   await land(page, FIXTURE.tall, { ts: 99 });
 
   await expect(page.locator(".editor__canvas")).toBeVisible();
-  // And it is still the editor: Escape closes it rather than the shelf.
+  // And it is still the editor: Escape acts on it rather than the shelf.
+  // A mark was drawn above, so the first Escape warns instead of discarding
+  // — silent discard was reachable from four routes — and the second, inside
+  // the window, closes. Neither may fall through to hiding the shelf.
   await page.evaluate(() => window.__shotshelf__.clearCalls());
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#shelf-alert")).toHaveText(/unsaved marks/);
+  await expect(page.locator(".editor")).toHaveCount(1);
   await page.keyboard.press("Escape");
   await expect(page.locator(".editor")).toHaveCount(0);
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);

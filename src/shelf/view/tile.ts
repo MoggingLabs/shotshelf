@@ -9,13 +9,14 @@
  * protocol and flickering.
  */
 
-import { fileName, formatBytes, formatDuration } from "../../format.ts";
+import { describeHotkey, fileName, formatBytes, formatDuration } from "../../format.ts";
 import { icon, solidIcon } from "../../icons.ts";
+import { currentSettings } from "../../settings.ts";
 import { videoDetails } from "../bridge.ts";
 import type { ShelfItem, VideoDetails } from "../types.ts";
 import { actions, type TileHandlers } from "./actions.ts";
-import { markSecrets } from "./secrets.ts";
-import { glyphThumb, imageThumb, replaceThumb, setWash } from "./thumb.ts";
+import { markRecordingUnscanned, markSecrets } from "./secrets.ts";
+import { glyphThumb, imageThumb, markMissing, replaceThumb, setWash } from "./thumb.ts";
 
 /** What a tile needs beyond the buttons: starting a native drag. */
 export interface TileCallbacks extends TileHandlers {
@@ -81,7 +82,14 @@ async function describeVideo(tile: HTMLElement, item: ShelfItem): Promise<void> 
     // moved or deleted" was true of images only, and a recording that had gone
     // was distinguishable from a healthy one solely by an empty size badge.
     if (String(error).includes("no longer on disk")) {
-      replaceThumb(tile, glyphThumb("alert", "missing"), null);
+      replaceThumb(tile, glyphThumb("alert", "This capture's file has gone", "missing"), null);
+      markMissing(tile);
+    } else {
+      // Unreadable but present. The badge says "unknown" the same way
+      // `formatBytes` does, rather than sitting as an empty pill — an empty
+      // pill is a rendering artefact, not a state.
+      const text = tile.querySelector<HTMLElement>(".tile__badge-text");
+      if (text) text.textContent = "—";
     }
     return;
   }
@@ -93,9 +101,11 @@ async function describeVideo(tile: HTMLElement, item: ShelfItem): Promise<void> 
 
   const frame = imageThumb(details.poster, fileName(item.path));
   // A poster that has been swept from the cache should not blank the card.
-  frame.addEventListener("error", () => replaceThumb(tile, glyphThumb("film"), null), {
-    once: true,
-  });
+  frame.addEventListener(
+    "error",
+    () => replaceThumb(tile, glyphThumb("film", "A recording"), null),
+    { once: true },
+  );
   // The poster is the recording's own frame, so it fills the bars too.
   replaceThumb(tile, frame, details.poster);
 }
@@ -105,21 +115,35 @@ export function buildTile(item: ShelfItem, callbacks: TileCallbacks): HTMLElemen
 
   const tile = document.createElement("article");
   tile.className = "tile";
-  tile.title = item.path;
+  // No `title` on the card itself, deliberately. It held the full absolute
+  // path, which competed with the label's own tooltip — two native tooltips
+  // on one card, decided by where the pointer rested — and a full path in a
+  // floating strip is more than the app exposes anywhere else (`secrets.ts`
+  // argues tooltips are somewhere values spread to). The label's tooltip
+  // carries the filename, which is what USAGE promises.
   tile.classList.toggle("tile--pinned", item.pinned);
 
   if (item.kind === "video") {
-    tile.append(glyphThumb("film"));
+    tile.append(glyphThumb("film", "A recording"));
   } else {
     const picture = imageThumb(item.path, name);
     picture.addEventListener(
       "error",
-      () => replaceThumb(tile, glyphThumb("alert", "missing"), null),
+      () => {
+        replaceThumb(tile, glyphThumb("alert", "This capture's file has gone", "missing"), null);
+        markMissing(tile);
+      },
       { once: true },
     );
     tile.append(picture);
     setWash(tile, item.path);
   }
+
+  // The badge is appended before the actions: `docs/DESIGN.md`'s card
+  // hierarchy paints actions above the badge, and tree order is what decides
+  // between positioned siblings without z-indexes. Invisible today — opposite
+  // corners — but drift against a written contract is how it stops being.
+  if (item.kind === "video") tile.append(badge());
 
   tile.append(
     label(item),
@@ -127,8 +151,11 @@ export function buildTile(item: ShelfItem, callbacks: TileCallbacks): HTMLElemen
   );
 
   if (item.kind === "video") {
-    tile.append(badge());
     void describeVideo(tile, item);
+    // A recording is never OCR-scanned — the branches are exclusive by
+    // design — and by `secrets.ts`'s own rule a card with no marker at all is
+    // a card claiming to have been checked. Recordings claim nothing now.
+    markRecordingUnscanned(tile);
   } else {
     // Reading the capture is slow and entirely optional; the card is complete
     // and draggable whether or not this ever comes back.
@@ -147,7 +174,13 @@ export function buildTile(item: ShelfItem, callbacks: TileCallbacks): HTMLElemen
   return tile;
 }
 
-/** The placeholder shown when there is nothing on the shelf at all. */
+/**
+ * The placeholder shown when there is nothing on the shelf at all.
+ *
+ * The one screen with room to teach, so it does: the hotkey — the only
+ * reliable way back once the shelf is hidden — and the drag gesture the app
+ * exists for. Rebuilt per render, so the hotkey line follows the setting.
+ */
 export function emptyState(): HTMLElement {
   const wrap = document.createElement("div");
   wrap.className = "empty";
@@ -164,6 +197,11 @@ export function emptyState(): HTMLElement {
   hint.className = "empty__hint";
   hint.textContent = "Screenshots and recordings land here the moment you take them.";
 
-  wrap.append(frame, title, hint);
+  const teach = document.createElement("p");
+  teach.className = "empty__hint";
+  const mac = navigator.userAgent.includes("Mac");
+  teach.textContent = `${describeHotkey(currentSettings().hotkey, mac)} summons the shelf. Drag a capture out to use it.`;
+
+  wrap.append(frame, title, hint, teach);
   return wrap;
 }

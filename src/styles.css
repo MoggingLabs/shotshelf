@@ -18,8 +18,10 @@
   --stroke-strong: rgba(255, 255, 255, 0.16);
   --stroke-heavy: rgba(255, 255, 255, 0.26);
   /* The editor and quick look float on this; the canvas sits on the opaque
-     twin so a transparent capture cannot show the desktop through the app. */
-  --overlay: rgba(5, 6, 10, 0.96);
+     twin so a transparent capture cannot show the desktop through the app.
+     0.98, not 0.96: at 0.96 the day headings ghosted through behind a quick
+     look, which read as a rendering fault rather than a frosted surface. */
+  --overlay: rgba(5, 6, 10, 0.98);
   --surface-deep: #05060a;
   /* Scrims sit between a photograph and text, where a translucent panel
      colour would tint unpredictably. Neutral black, three strengths. */
@@ -33,6 +35,10 @@
   --muted: #8b91a1;
   /* Over scrims and photographs, never over the panel. */
   --text-on-media: #fff;
+  /* Ink for glyphs sitting ON a role-coloured fill. White on the amber pin
+     was 2.15:1 and on the green copy receipt 1.92:1 — the state colour erased
+     the glyph that named it. This is ≥4.5:1 on every role fill. */
+  --ink-on-fill: #05060a;
 
   /* ── Roles ── */
   --accent: #6366f1;
@@ -52,11 +58,15 @@
      and their kin in amber, a private key in crimson (the one kind whose
      exposure is not recoverable by rotation alone in a hurry), personal data
      in stone — information, not alarm. */
-  --badge-token: rgba(180, 83, 9, 0.92);
-  --badge-key: rgba(190, 18, 60, 0.94);
-  --badge-personal: rgba(120, 113, 108, 0.92);
+  /* 0.98 alpha throughout: these float over 8% of an arbitrary screenshot,
+     and at 0.92 a white capture pulled the token badge to 4.1:1 and personal
+     to 3.9:1. A composited badge answers for its worst background. The stone
+     is darkened for the same reason. */
+  --badge-token: rgba(180, 83, 9, 0.98);
+  --badge-key: rgba(190, 18, 60, 0.98);
+  --badge-personal: rgba(104, 98, 93, 0.98);
   /* "Could not look" is a state, not a kind — related to stone but dimmer. */
-  --badge-unscanned: rgba(87, 83, 78, 0.9);
+  --badge-unscanned: rgba(87, 83, 78, 0.98);
   --text-unscanned: #d6d3d1;
 
   /* ── Type scale ──
@@ -228,18 +238,35 @@ body {
   padding: 0 8px 0 12px;
 }
 
-/* Doubles as the catch-engine indicator: it goes green once watching. */
+/* Doubles as the catch-engine indicator: it goes green once watching. A
+   button around an 8px dot, not a bare span: its tooltip is the app's
+   primary diagnostic — the watch list, the clipboard state, the credential
+   note all live there — and a mouse-only 8px target made that unreachable
+   by keyboard and near-unreachable by pointing. The dot is the visual; the
+   24px button is the hit area. */
 .shelf__mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--ctl-tile);
+  height: var(--ctl-tile);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-ctl);
+  background: transparent;
+}
+
+.shelf__mark::before {
+  content: "";
   width: 8px;
   height: 8px;
-  flex: none;
   border-radius: 50%;
   background: var(--muted);
   transition: background var(--motion-state) ease-out,
     box-shadow var(--motion-state) ease-out;
 }
 
-.shelf__mark--live {
+.shelf__mark--live::before {
   background: var(--live);
   box-shadow: 0 0 0 3px var(--live-halo);
 }
@@ -280,7 +307,22 @@ body {
 
 .shelf__btn--on {
   background: var(--accent);
-  color: var(--text-on-media);
+  color: var(--ink-on-fill);
+}
+
+/* Busy is a state the control shows — Compare during its decode. */
+.shelf__btn:disabled {
+  opacity: 0.45;
+}
+
+/* A hairline between Settings and Hide. The two were identical 28px muted
+   icon buttons 8px apart with the dismissive one outermost — a measured
+   mis-click away from losing the window while aiming for the panel. */
+.shelf__sep {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: var(--stroke-strong);
 }
 
 /* ── Shelf body ────────────────────────────────────────────────────────── */
@@ -290,6 +332,8 @@ body {
   padding: 4px 12px 12px;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--stroke-heavy) transparent;
 }
 
 .shelf__items[data-empty="true"] {
@@ -298,21 +342,13 @@ body {
   justify-content: center;
 }
 
-.shelf__items::-webkit-scrollbar {
-  width: 8px;
-}
-
-.shelf__items::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: var(--radius-pill);
-  background: var(--stroke-strong);
-  background-clip: content-box;
-}
-
-.shelf__items::-webkit-scrollbar-thumb:hover {
-  background: var(--stroke-heavy);
-  background-clip: content-box;
-}
+/* Scrollbar note, for the rule above: the standard properties, not
+   `::-webkit-scrollbar` — the pseudo-element rules produced no laid-out
+   scrollbar at all under WebView2's overlay scrollbars (measured
+   `offsetWidth === clientWidth` with 12 items), so a list holding four
+   windows of content showed no scroll affordance beyond a clipped tile.
+   `scrollbar-width: thin` yields a real gutter; the colour comes off the
+   stroke scale. The one sub-24px interactive exception in `docs/DESIGN.md`. */
 
 /* A wall of identical tiles is hard to read; dates give the eye a foothold. */
 .group__label {
@@ -352,6 +388,10 @@ body {
   background: var(--raised);
   box-shadow: inset 0 0 0 1px var(--stroke);
   overflow: hidden;
+  /* The one non-arrow cursor in the app — see DESIGN.md's principle 3. The
+     grabbing hand is the native drag affordance, and drag-out is the thing a
+     card is for; without it nothing anywhere said a tile can be dragged. */
+  cursor: grab;
   transition: box-shadow var(--motion-fast) ease-out,
     transform var(--motion-fast) ease-out;
 }
@@ -463,18 +503,29 @@ body {
   opacity: 0;
 }
 
+/* Spacing between the buttons is margins rather than flex gap, because the
+   pinned collapse below animates each hidden sibling to zero width — a gap
+   would survive at 4px per hidden button and park the resting star 12px off
+   the corner it is meant to anchor. */
 .tile__actions {
   position: absolute;
   top: 6px;
   right: 6px;
   display: flex;
-  gap: 4px;
   opacity: 0;
   transition: opacity var(--motion-fast) ease-out;
 }
 
 .tile:hover .tile__actions,
 .tile__actions:focus-within {
+  opacity: 1;
+}
+
+/* A receipt outlives the hover that revealed it. The flash lasts 1100ms and
+   the natural next act after a copy is moving the pointer to the destination
+   — which faded the whole row and took the only confirmation with it. */
+.tile__actions:has(.tile__action--ok),
+.tile__actions:has(.tile__action--bad) {
   opacity: 1;
 }
 
@@ -492,24 +543,42 @@ body {
   transition: background var(--motion-fast) ease-out;
 }
 
+.tile__action + .tile__action {
+  margin-left: 4px;
+}
+
 .tile__action:hover {
   background: var(--accent);
+  color: var(--ink-on-fill);
 }
 
 .tile__action--remove:hover {
   background: var(--danger);
+  color: var(--ink-on-fill);
 }
 
-.tile__action--on {
+/* State beats hover, spelled as specificity rather than hoped from order.
+   Single-class state rules lost to `.tile__action:hover` — so the pinned
+   star turned indigo at the exact moment the pointer reached for it, and the
+   green copy receipt rendered as plain hover for its whole 1100ms, on the
+   button the user was necessarily still over from clicking it. */
+.tile__action.tile__action--on {
   background: var(--warning);
+  color: var(--ink-on-fill);
 }
 
-.tile__action--ok {
+.tile__action.tile__action--on:hover {
+  background: var(--warn-rim-hover);
+}
+
+.tile__action.tile__action--ok {
   background: var(--live);
+  color: var(--ink-on-fill);
 }
 
-.tile__action--bad {
+.tile__action.tile__action--bad {
   background: var(--danger);
+  color: var(--ink-on-fill);
 }
 
 /* A pinned tile keeps its star showing — it is a state, not a hover. */
@@ -517,24 +586,54 @@ body {
   opacity: 1;
 }
 
-.tile--pinned .tile__action:not(.tile__action--on) {
+/* The hidden siblings collapse to nothing rather than merely fading, so the
+   resting star anchors the top-right corner — the slot the corner grammar in
+   `docs/DESIGN.md` gives it. At opacity-only they kept their 84px in flow and
+   the one visible action floated at the card's top-centre, in no corner at
+   all. `:where` keeps this at (0,2,0) so every restore below outranks it, and
+   a live receipt (`--ok`/`--bad`) is never collapsed mid-flash. */
+.tile--pinned
+  .tile__action:where(:not(.tile__action--on)):where(:not(.tile__action--ok)):where(
+    :not(.tile__action--bad)
+  ) {
+  width: 0;
+  margin-left: 0;
+  overflow: hidden;
   opacity: 0;
-  transition: opacity var(--motion-fast) ease-out;
+  transition:
+    width var(--motion-fast) ease-out,
+    margin-left var(--motion-fast) ease-out,
+    opacity var(--motion-fast) ease-out;
 }
 
 /* Keyboard focus counts as reaching for it, exactly as hover does.
    Without this, tabbing to Copy or Remove on a pinned tile put the focus ring
    on a fully transparent button: the ring was drawn, the control was not, and
-   Enter took a capture off the shelf with nothing visible to aim at. */
-.tile--pinned .tile__action:focus-visible,
-.tile--pinned:hover .tile__action {
+   Enter took a capture off the shelf with nothing visible to aim at. The
+   width comes back with the opacity, or the ring would wrap a 0px control. */
+.tile--pinned:hover .tile__action,
+.tile--pinned .tile__action:focus-visible {
+  width: var(--ctl-tile);
   opacity: 1;
+}
+
+.tile--pinned:hover .tile__action + .tile__action,
+.tile--pinned .tile__action + .tile__action:focus-visible {
+  margin-left: 4px;
 }
 
 /* The OS draws the drag image; fading the tile shows where it came from. */
 .tile--dragging {
   opacity: 0.45;
   transform: scale(0.97);
+  cursor: grabbing;
+}
+
+/* A capture whose file has gone. The rim makes the state legible at a glance
+   — the glyph alone was a small triangle on a dark card, and nothing else on
+   the tile said anything was wrong. `--danger-soft`, the readable danger. */
+.tile--missing {
+  box-shadow: inset 0 0 0 1px var(--danger-soft);
 }
 
 /* ── Empty state ───────────────────────────────────────────────────────── */
@@ -570,8 +669,16 @@ body {
 
 /* ── Settings ──────────────────────────────────────────────────────────── */
 
+/* Scrolls internally rather than squeezing the list to nothing: the panel
+   grew a keyboard map, and `flex: none` was already slicing the empty state
+   mid-word underneath it. `.shelf__body`'s min-height keeps one card's worth
+   of shelf visible below the open panel. */
 .settings {
-  flex: none;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--stroke-heavy) transparent;
   padding: 12px;
   border-top: 1px solid var(--stroke);
   border-bottom: 1px solid var(--stroke);
@@ -586,23 +693,41 @@ body {
   margin-bottom: 8px;
 }
 
+/* 84px, not 72: at 72 "Send smaller copies" wrapped to three lines and broke
+   the row rhythm — baselines fell 29/45px apart in a form whose other rows
+   sat at a steady 35. Every label fits two lines at 84. */
 .settings__row > span {
   flex: none;
-  width: 72px;
+  width: 84px;
   color: var(--muted);
 }
 
+/* One height for every field. The mixed defaults put selects at 28, text
+   inputs at 26 and checkboxes at 24 — three heights in seven rows, one of
+   them off the grid entirely. Checkboxes get their own rule below. */
 .settings__row select,
-.settings__row input {
+.settings__row input:not([type="checkbox"]) {
   flex: 1;
   min-width: 0;
-  min-height: var(--ctl-tile);
+  height: 28px;
   padding: 4px 8px;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-ctl);
   background: var(--raised);
   color: var(--text);
   font: inherit;
+}
+
+/* A checkbox is a 16px mark, not a field: the field chrome painted these as
+   blank grey rounded squares indistinguishable from an empty text input. The
+   whole `<label>` row stays the hit target, which is what carries the 24px
+   minimum. */
+.settings__row input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 6px 0;
+  accent-color: var(--accent);
 }
 
 .settings__row select:hover,
@@ -633,6 +758,24 @@ body {
   color: var(--muted);
   font-size: var(--font-sm);
   line-height: var(--leading);
+}
+
+/* The keyboard map, where someone changing settings will actually see it —
+   the app's whole premise is keys, and they were documented only in a file
+   on GitHub. */
+.settings__keys {
+  margin: 8px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--stroke);
+  color: var(--muted);
+  font-size: var(--font-sm);
+  line-height: var(--leading);
+}
+
+.settings__keys kbd {
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
 }
 
 /* ── Alerts ────────────────────────────────────────────────────────────── */
@@ -710,10 +853,46 @@ body {
 
 /* A picked card. Deliberately quiet — several can be picked at once, and an
    accent ring on four cards at once is louder than the pictures they are
-   there to show. */
-.tile--picked {
+   there to show.
+
+   Every state pair is composed in its own declared rule, because box-shadow
+   is one property and specificity was deciding which state survived: hovering
+   a picked card showed the plain hover border (visually un-picking the card
+   the user was about to drag), and picking a credential-carrying capture
+   erased the amber rim at exactly the moment before it gets dragged out. */
+.tile--picked,
+.tile--picked:hover {
   box-shadow:
     inset 0 0 0 2px var(--accent),
+    var(--shadow-1);
+}
+
+.tile--secret.tile--picked,
+.tile--secret.tile--picked:hover {
+  box-shadow:
+    inset 0 0 0 2px var(--accent),
+    inset 0 0 0 3px var(--warn-rim),
+    var(--shadow-1);
+}
+
+/* The keyboard cursor — the card the arrows move from. Only rendered in a
+   multi-pick (the view withholds the class otherwise): with one card picked
+   the cursor is that card, and a second treatment would be noise. The outer
+   1px halo is what keeps a range from losing the point you are standing on. */
+.tile--cursor,
+.tile--cursor:hover {
+  box-shadow:
+    inset 0 0 0 2px var(--accent),
+    0 0 0 1px var(--accent),
+    var(--shadow-1);
+}
+
+.tile--secret.tile--cursor,
+.tile--secret.tile--cursor:hover {
+  box-shadow:
+    inset 0 0 0 2px var(--accent),
+    inset 0 0 0 3px var(--warn-rim),
+    0 0 0 1px var(--accent),
     var(--shadow-1);
 }
 
@@ -795,7 +974,12 @@ body {
 
 .editor__tool--on {
   background: var(--accent);
-  color: var(--text-on-media);
+  color: var(--ink-on-fill);
+}
+
+/* Nothing to undo is a state the control shows, not a silent no-op. */
+.editor__action:disabled {
+  opacity: 0.45;
 }
 
 /* The one control in the toolbar that leaves the editor with something saved.
@@ -806,7 +990,7 @@ body {
    in the DOM for the tests and scripts that look controls up by it. */
 .editor__action--primary {
   background: var(--accent);
-  color: var(--text-on-media);
+  color: var(--ink-on-fill);
 }
 
 .editor__action--primary:hover {
@@ -871,7 +1055,10 @@ body {
 .shelf__body {
   position: relative;
   flex: 1;
-  min-height: 0;
+  /* One card's height plus the list padding, not zero: with the settings
+     panel open the body kept whatever was left, which sliced the empty state
+     mid-word. The panel scrolls internally instead (see `.settings`). */
+  min-height: 136px;
   display: flex;
   flex-direction: column;
 }
@@ -890,4 +1077,21 @@ body {
      does the corner clipping. */
   z-index: 2;
   overflow: hidden;
+}
+
+/* Windows High Contrast strips box-shadow, which is what every card state is
+   drawn with — so picked, cursor and the credential rim all vanished. These
+   restate the three as outlines, which forced-colors preserves, in the
+   system's own colours. */
+@media (forced-colors: active) {
+  .tile--picked,
+  .tile--cursor {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .tile--secret {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
 }

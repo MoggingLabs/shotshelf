@@ -116,9 +116,24 @@ export async function markSecrets(tile: HTMLElement, path: string): Promise<void
  * that claims to have been checked.
  */
 function markUnscanned(tile: HTMLElement): void {
+  appendUnscanned(tile, "This capture could not be read, so it was not checked for credentials.");
+}
+
+/**
+ * The same absence, for recordings — which are never scanned at all.
+ *
+ * By this module's own rule an unmarked card claims to have been checked, and
+ * every recording made that claim falsely: a screen recording of a terminal
+ * is a plausible carrier of exactly what the scanner exists to catch.
+ */
+export function markRecordingUnscanned(tile: HTMLElement): void {
+  appendUnscanned(tile, "A recording's frames are not checked for credentials.");
+}
+
+function appendUnscanned(tile: HTMLElement, said: string): void {
   const el = document.createElement("span");
   el.className = "tile__unscanned";
-  el.title = "This capture could not be read, so it was not checked for credentials.";
+  el.title = said;
   el.textContent = "?";
   tile.append(el);
 }

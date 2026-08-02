@@ -7,6 +7,21 @@
  */
 
 /**
+ * A stored accelerator, in the words the user's keyboard uses.
+ *
+ * `CommandOrControl+Shift+S` is Tauri's spelling, not anyone's keycap. The
+ * caller says whether this keyboard has a ⌘ — passed in rather than sniffed
+ * here, so this stays a pure function this file's header can keep its
+ * no-DOM promise about.
+ */
+export function describeHotkey(accelerator: string, mac: boolean): string {
+  const platform = mac ? "⌘" : "Ctrl";
+  return accelerator
+    .replaceAll("CommandOrControl", platform)
+    .replaceAll("CmdOrCtrl", platform);
+}
+
+/**
  * `0:08`, `1:05`, `12:30`, `1:02:03`.
  *
  * The hour field appears only when there is one, so the common case stays two

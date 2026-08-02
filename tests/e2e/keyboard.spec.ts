@@ -9,7 +9,16 @@
  * exists to save.
  */
 
-import { bootShelf, BOUNDS, expect, FIXTURE, land, openBrowse, test } from "../harness/app.ts";
+import {
+  bootShelf,
+  BOUNDS,
+  expect,
+  FIXTURE,
+  HIDDEN_EVENT,
+  land,
+  openBrowse,
+  test,
+} from "../harness/app.ts";
 
 async function threeOpen(page: import("@playwright/test").Page): Promise<void> {
   await bootShelf(page);
@@ -106,9 +115,13 @@ test("a recording has no preview to show", async ({ page }) => {
   // media player rather than a shelf.
   await expect(page.locator(".preview")).toHaveCount(0);
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("preview_shelf").length)).toBe(0);
+  // Said, not silent: `e` and `t` both answer for a recording, and Space was
+  // the one silent no-op of the three — a spec asserted the silence as
+  // correct, which is how a gap survives review.
+  await expect(page.locator("#shelf-alert")).toHaveText("A recording has no preview.");
 });
 
-test("enter copies the picked capture", async ({ page }) => {
+test("enter copies the picked capture, and says so", async ({ page }) => {
   await threeOpen(page);
   await page.keyboard.press("ArrowDown");
   await page.evaluate(() => window.__shotshelf__.clearCalls());
@@ -118,6 +131,21 @@ test("enter copies the picked capture", async ({ page }) => {
   await expect
     .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("copy_capture").length))
     .toBe(1);
+  // The same receipt reasoning `t` wrote down, applied to the key beside it:
+  // the keyboard has no button to flash, so a silent success was
+  // indistinguishable from a dead key.
+  await expect(page.locator("#shelf-alert")).toHaveText("Copied to the clipboard.");
+});
+
+test("the keys that need a pick say so when nothing is picked", async ({ page }) => {
+  await threeOpen(page);
+  // No arrow, no click: the state every open starts in.
+  await page.keyboard.press("t");
+
+  await expect(page.locator("#shelf-alert")).toHaveText(/Pick a capture first/);
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("copy_capture_text").length)).toBe(
+    0,
+  );
 });
 
 test("t copies the recognised text of the picked capture, and says so", async ({ page }) => {
@@ -295,9 +323,11 @@ test("the arrows walk the order on screen, not the order captures arrived", asyn
   await openBrowse(page);
   await expect(page.locator(".group")).toHaveCount(2);
 
-  // The first card on screen is today's.
+  // The first card on screen is today's. Identified by its label's tooltip —
+  // the card itself no longer carries one; it held the full absolute path,
+  // which is more than the app exposes anywhere else.
   const first = page.locator(".tile").first();
-  await expect(first).toHaveAttribute("title", /wide\.png/);
+  await expect(first.locator(".tile__label")).toHaveAttribute("title", /wide\.png/);
 
   await page.keyboard.press("ArrowDown");
 
@@ -393,4 +423,137 @@ test("each settings control writes the field it is labelled for", async ({ page 
   expect((await saved())["startAtLogin"]).toBe(true);
   await page.locator("#setting-autostart").uncheck();
   expect((await saved())["startAtLogin"]).toBe(false);
+});
+
+test("the pick does not survive the shelf hiding", async ({ page }) => {
+  // `Selection.clear` had exactly one caller — `compare` — so a pick made in
+  // an earlier appearance held its ring across every hide, walked down the
+  // list as newer captures landed on top of it, and kept Edit lit for a card
+  // nobody remembered choosing. The live session that found this showed the
+  // ring on the second tile with no click in the whole appearance.
+  await threeOpen(page);
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator(".tile--picked")).toHaveCount(1);
+
+  await page.evaluate(
+    ([event]) => window.__shotshelf__.emit(event, null),
+    [HIDDEN_EVENT] as const,
+  );
+  await openBrowse(page);
+
+  await expect(page.locator(".tile--picked")).toHaveCount(0);
+  await expect(page.locator("#shelf-edit")).toBeHidden();
+});
+
+test("enter on a focused control activates the control, not the shelf gesture", async ({
+  page,
+}) => {
+  // The document-level keydown `preventDefault`ed Enter and Space wholesale,
+  // so Tab to Hide and Enter *copied the picked capture* instead of hiding —
+  // every icon button in the app was keyboard-unusable.
+  await threeOpen(page);
+  await page.keyboard.press("ArrowDown");
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await page.locator("#shelf-hide").focus();
+  await page.keyboard.press("Enter");
+
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length))
+    .toBe(1);
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("copy_capture").length)).toBe(0);
+});
+
+test("delete announces the removal and ctrl+z brings the batch back", async ({ page }) => {
+  await threeOpen(page);
+  // Pick all three: arrow to the top, then shift-extend to the bottom.
+  await page.keyboard.press("ArrowDown");
+  await page.locator(".tile").last().click({ modifiers: ["Shift"] });
+  await expect(page.locator(".tile--picked")).toHaveCount(3);
+
+  await page.keyboard.press("Delete");
+  await expect(page.locator(".tile")).toHaveCount(0);
+  // The receipt names the two things that matter: the files are safe, and
+  // the act is reversible.
+  await expect(page.locator("#shelf-alert")).toHaveText(/3 captures taken off .* Ctrl\+Z/);
+
+  await page.keyboard.press("Control+z");
+  await expect(page.locator(".tile")).toHaveCount(3);
+  await expect(page.locator("#shelf-alert")).toHaveText(/3 captures back on the shelf/);
+
+  // The stack is one level deep per batch, not bottomless.
+  await page.keyboard.press("Control+z");
+  await expect(page.locator("#shelf-alert")).toHaveText("Nothing to bring back.");
+});
+
+test("a plain release on a multi-pick collapses to the pressed card", async ({ page }) => {
+  // Picking happens on press so a drag can carry the set — but the platform
+  // convention completes on release: a click without a drag collapses to the
+  // clicked card. There used to be no gesture at all from "three picked" to
+  // "just this one".
+  await threeOpen(page);
+  await page.keyboard.press("ArrowDown");
+  await page.locator(".tile").last().click({ modifiers: ["Shift"] });
+  await expect(page.locator(".tile--picked")).toHaveCount(3);
+
+  await page.locator(".tile").nth(1).click();
+  await expect(page.locator(".tile--picked")).toHaveCount(1);
+  await expect(page.locator(".tile").nth(1)).toHaveClass(/tile--picked/);
+});
+
+test("a press on the space between cards clears the pick", async ({ page }) => {
+  await threeOpen(page);
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator(".tile--picked")).toHaveCount(1);
+
+  // The day heading is outside every card.
+  await page.locator(".group__label").first().click();
+  await expect(page.locator(".tile--picked")).toHaveCount(0);
+});
+
+test("the title strip counts the pick while one exists", async ({ page }) => {
+  // At three or more picked, Edit and Compare both vanish and nothing said a
+  // selection was live — right before Delete acted on all of it.
+  await threeOpen(page);
+  await expect(page.locator("#shelf-count")).toHaveText("3 captures");
+
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator("#shelf-count")).toHaveText("1 of 3 picked");
+
+  await page.locator(".tile").last().click({ modifiers: ["Shift"] });
+  await expect(page.locator("#shelf-count")).toHaveText("3 of 3 picked");
+
+  await page.locator(".group__label").first().click();
+  await expect(page.locator("#shelf-count")).toHaveText("3 captures");
+});
+
+test("the cursor card is marked when more than one is picked", async ({ page }) => {
+  await threeOpen(page);
+  await page.keyboard.press("ArrowDown");
+  // One picked: the pick is the cursor, and a second treatment would be noise.
+  await expect(page.locator(".tile--cursor")).toHaveCount(0);
+
+  await page.locator(".tile").last().click({ modifiers: ["Shift"] });
+  // The cursor is the card the user last touched — the shift-clicked one.
+  await expect(page.locator(".tile--cursor")).toHaveCount(1);
+  await expect(page.locator(".tile").last()).toHaveClass(/tile--cursor/);
+});
+
+test("escape in the settings panel discards the half-typed field", async ({ page }) => {
+  // Escape is the universal cancel, and it was the one key that *committed*:
+  // hiding the panel blurred the focused field, the native change event
+  // fired, and a half-typed shortcut was saved.
+  await bootShelf(page);
+  await openBrowse(page);
+  await page.locator("#shelf-settings").click();
+
+  const hotkey = page.locator("#setting-hotkey");
+  await hotkey.fill("CommandOrControl+Shift+");
+  await page.keyboard.press("Escape");
+
+  await expect(page.locator("#settings-panel")).toBeHidden();
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("set_settings").length)).toBe(0);
+  // And the field shows the stored value again on reopen, not the abandoned edit.
+  await page.locator("#shelf-settings").click();
+  await expect(hotkey).toHaveValue("CommandOrControl+Shift+S");
 });

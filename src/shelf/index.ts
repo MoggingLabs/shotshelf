@@ -30,6 +30,7 @@
 import {
   closeEditor,
   discardEditor,
+  discardNeedsConfirm,
   editorIsOpen,
   openEditor,
   undoEdit,
@@ -50,7 +51,14 @@ import { columnHeight } from "./geometry.ts";
 import { alertHeight } from "../status.ts";
 import { inHandoverOrder, Selection } from "./selection.ts";
 import { ShelfStore } from "./store.ts";
-import { canCompare, type Capture, captureId, isEditable, type ShelfItem } from "./types.ts";
+import {
+  canCompare,
+  canPreview,
+  type Capture,
+  captureId,
+  isEditable,
+  type ShelfItem,
+} from "./types.ts";
 import { ShelfView } from "./view/index.ts";
 import {
   discardPreview,
@@ -112,6 +120,25 @@ export class Shelf {
   #comparing = false;
   /** An OS drag steals focus; the popover must not read that as a dismissal. */
   #dragging = false;
+  /**
+   * The card a plain press landed on while it was already multi-picked.
+   *
+   * The platform convention completes on pointer-*up*: Explorer and Finder
+   * both collapse a multi-selection to the pressed item if no drag happened.
+   * Picking on press alone (which a multi-drag needs) left no gesture at all
+   * that goes from "four picked" to "just this one". Cleared the moment a
+   * drag begins, because then the press meant "carry the set".
+   */
+  #collapseTo: string | undefined;
+  /**
+   * Batches of removals, most recent last, for Ctrl+Z outside the editor.
+   *
+   * Session-scoped: the records are cheap and the files were never touched,
+   * so "bring them back" is re-adding what was known. Only user removals join
+   * — the item cap and the retention sweep are policy, and undoing policy
+   * re-evicts on the next tick.
+   */
+  readonly #removedBatches: ShelfItem[][] = [];
 
   /**
    * Where the editor and quick look mount.
@@ -139,6 +166,35 @@ export class Shelf {
       armDrag: (node, item, event) => this.#armDrag(node, item, event),
       pick: (id, event) => this.#pick(id, event),
     });
+
+    // A press on the space between cards, a day heading, or the empty area
+    // clears the pick — the platform gesture for "deselect" that had no
+    // binding at all. On the list, not the document: the title strip and the
+    // settings panel are not "outside the selection".
+    list.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      if ((event.target as HTMLElement).closest(".tile")) return;
+      this.clearSelection();
+    });
+
+    // The other half of `#collapseTo`: a release without a drag collapses the
+    // multi-pick to the pressed card. `#dragging` cannot be the guard — the
+    // OS may swallow the pointerup during a drag — so the pending id is
+    // cleared where the drag begins instead.
+    list.addEventListener("pointerup", () => {
+      const to = this.#collapseTo;
+      this.#collapseTo = undefined;
+      if (to === undefined) return;
+      this.#selection.only(to);
+      this.#reflectSelection();
+    });
+  }
+
+  /** Drop the pick entirely. The popover calls this as the window hides. */
+  clearSelection(): void {
+    this.#collapseTo = undefined;
+    this.#selection.clear();
+    this.#reflectSelection();
   }
 
   // ── State the popover asks about ───────────────────────────────────────
@@ -238,14 +294,70 @@ export class Shelf {
    * the shelf is a view of your captures, not their owner.
    */
   remove(id: string): void {
-    const removed = this.#store.remove(id);
-    if (!removed) return;
+    this.#removeMany([id]);
+  }
 
-    this.#release(removed);
-    // Taking a card off the shelf takes it out of the popup column too.
-    this.#dropFromColumn(id);
+  /**
+   * One batch out, one batch back: every user-initiated removal goes through
+   * here so the × and Delete behave identically — one receipt, one undo
+   * entry, however many cards were picked.
+   */
+  #removeMany(ids: readonly string[]): void {
+    const batch: ShelfItem[] = [];
+    for (const id of ids) {
+      const removed = this.#store.remove(id);
+      if (!removed) continue;
+      batch.push(removed);
+      this.#release(removed);
+      // Taking a card off the shelf takes it out of the popup column too.
+      this.#dropFromColumn(id);
+    }
+    if (batch.length === 0) return;
+
+    this.#removedBatches.push(batch);
     this.#refresh();
     void this.#savePins();
+
+    // The receipt names the two things a person needs at this moment: the
+    // files are safe, and the act is reversible. Delete used to take a
+    // shift-range of eight off the shelf without a word.
+    const n = batch.length;
+    this.#options.onProblem(
+      n === 1
+        ? "1 capture taken off the shelf — Ctrl+Z brings it back. The file is untouched."
+        : `${n} captures taken off the shelf — Ctrl+Z brings them back. The files are untouched.`,
+    );
+  }
+
+  /**
+   * Put the last removed batch back — Ctrl+Z's job whenever the editor is
+   * not open. Returns false when there is nothing to bring back.
+   *
+   * Restored captures rejoin the shelf as ordinary members: the item cap and
+   * the retention window apply to them exactly as if they had just landed,
+   * which is what keeps undo from being a way around policy.
+   */
+  restoreRemoved(): boolean {
+    const batch = this.#removedBatches.pop();
+    if (!batch) return false;
+
+    let pinnedAny = false;
+    for (const item of batch) {
+      this.add(
+        { path: item.path, kind: item.kind, ts: item.ts, context: item.context },
+        { pinned: item.pinned, render: false },
+      );
+      pinnedAny ||= item.pinned;
+    }
+    this.#refresh();
+    // The removal rewrote the pin list; a restored pin has to be written back.
+    if (pinnedAny) void this.#savePins();
+
+    const n = batch.length;
+    this.#options.onProblem(
+      n === 1 ? "1 capture back on the shelf." : `${n} captures back on the shelf.`,
+    );
+    return true;
   }
 
   /**
@@ -325,6 +437,16 @@ export class Shelf {
       this.#dropFromColumn(item.id);
     }
     this.#refresh();
+
+    // Said out loud, because the commonest way to see this is choosing a
+    // shorter "Keep for" and watching cards vanish with no explanation — the
+    // one destructive-looking act in the app, and it was silent.
+    const n = evicted.length;
+    this.#options.onProblem(
+      n === 1
+        ? "1 capture left the shelf — its Keep for time was up. The file is untouched."
+        : `${n} captures left the shelf — their Keep for time was up. The files are untouched.`,
+    );
   }
 
   // ── The auto-popup column ──────────────────────────────────────────────
@@ -389,17 +511,24 @@ export class Shelf {
    * would mean the drag had already begun with the wrong set.
    */
   #pick(id: string, event: PointerEvent): void {
+    this.#collapseTo = undefined;
     if (event.shiftKey) this.#selection.extendTo(id, this.#visibleIds());
     else if (event.ctrlKey || event.metaKey) this.#selection.toggle(id);
-    // Pressing an already-picked card keeps the selection, so a multi-drag can
-    // start from any card in it.
     else if (!this.#selection.has(id)) this.#selection.only(id);
+    // Pressing an already-picked card keeps the selection on the *press*, so
+    // a multi-drag can start from any card in it — and remembers the card, so
+    // a release without a drag can collapse to it (the pointerup half lives
+    // in the constructor).
+    else if (this.#selection.ids().length > 1) this.#collapseTo = id;
 
     this.#reflectSelection();
   }
 
   #reflectSelection(): void {
-    this.#view.reflectSelection(new Set(this.#selection.ids()));
+    // Rides this method because every route that opens or closes an overlay
+    // already ends here — the same reason the title-strip controls do.
+    this.#view.setListInert(this.overlayOpen);
+    this.#view.reflectSelection(new Set(this.#selection.ids()), this.#selection.focus());
     const picked = this.#pickedItems();
     // Editability is reported alongside the count because the count alone
     // cannot answer it: one picked *recording* showed the Edit control, and
@@ -459,6 +588,21 @@ export class Shelf {
     );
   }
 
+  /**
+   * The picked captures, or one shared sentence when there are none.
+   *
+   * Six keys need a pick, the shelf opens with nothing picked, and every one
+   * of them was a silent no-op — a first-time user pressing the documented
+   * keys got nothing at all from the app's own keyboard map.
+   */
+  #pickedOrSay(): ShelfItem[] {
+    const picked = this.#pickedItems();
+    if (picked.length === 0) {
+      this.#options.onProblem("Pick a capture first — click one, or press an arrow key.");
+    }
+    return picked;
+  }
+
   /** The captures a drag from `item` should carry. */
   #dragSet(item: ShelfItem): ShelfItem[] {
     if (!this.#selection.has(item.id)) return [item];
@@ -515,7 +659,7 @@ export class Shelf {
     // window at preview size with the browse list inside it — the exact
     // symptom the editor's own restore was added to fix, on a path that
     // predated it.
-    const [item] = this.#pickedItems();
+    const [item] = this.#pickedOrSay();
     if (!item) return;
     if (!isEditable(item)) {
       // The control should not be offered at all, and is not; this is the
@@ -572,9 +716,26 @@ export class Shelf {
 
   /** Back out of the editor. Returns false if there was nothing to back out of. */
   closeEditor(): boolean {
+    // The first Escape over unsaved marks warns instead of discarding; the
+    // second inside four seconds proceeds. Consuming the gesture (true) is
+    // what stops the ladder falling through to the settings panel.
+    if (this.warnUnsavedMarks()) return true;
     const closed = closeEditor();
     if (closed) this.#reflectSelection();
     return closed;
+  }
+
+  /**
+   * Warn about unsaved marks, once per gesture window. True when the caller
+   * should stop and let the user repeat the gesture to mean it — shared by
+   * Escape and the Hide button, the two discard routes the front end owns.
+   * (The tray and the hotkey hide through Rust and cannot be intercepted
+   * here; the editor's teardown on those routes is documented behaviour.)
+   */
+  warnUnsavedMarks(): boolean {
+    if (!discardNeedsConfirm()) return false;
+    this.#options.onProblem("You have unsaved marks — press again to discard them.");
+    return true;
   }
 
   /** Undo the last mark. Returns false if there was nothing to undo. */
@@ -617,8 +778,15 @@ export class Shelf {
   togglePreview(): void {
     if (this.closePreview()) return;
 
-    const [item] = this.#pickedItems();
+    const [item] = this.#pickedOrSay();
     if (!item) return;
+    if (!canPreview(item)) {
+      // Space's siblings both answer for a recording — `e` says it cannot be
+      // marked up, `t` that its text cannot be read — and Space was the one
+      // silent no-op of the three, asserted as correct by a spec.
+      this.#options.onProblem("A recording has no preview.");
+      return;
+    }
 
     void showPreview(item, this.#overlay)
       .catch((error: unknown) => {
@@ -654,16 +822,43 @@ export class Shelf {
     this.#selection.only(id);
     this.#reflectSelection();
     this.#view.scrollIntoView(id);
+
+    // A quick look follows the arrows. Without this the preview kept showing
+    // the previous capture while the selection moved underneath it — and
+    // Space then *closed* the stale preview instead of showing the new pick,
+    // with `p`, `o`, Enter and Delete all acting on a card the preview hid.
+    if (previewIsOpen()) {
+      const item = this.#store.find(id);
+      if (item && canPreview(item)) {
+        discardPreview();
+        void showPreview(item, this.#overlay)
+          .catch((error: unknown) => {
+            console.error("[shotshelf] could not preview that capture", error);
+            this.#options.onProblem("That capture could not be opened.");
+          })
+          .finally(() => this.#reflectSelection());
+      } else {
+        // Arrowed onto a recording: the honest state is no preview at all,
+        // not a picture of some other capture.
+        this.closePreview();
+      }
+    }
   }
 
   /** Copy the picked capture, for the keyboard path. */
   copyPicked(): void {
-    const [item] = this.#pickedItems();
+    const [item] = this.#pickedOrSay();
     if (!item) return;
-    void this.copy(item.id).catch(() => {
-      // Already reported through `onProblem`; the keyboard has no button to
-      // flash, so there is nothing further to do here.
-    });
+    void this.copy(item.id)
+      .then(() => {
+        // The keyboard has no button to flash, so the strip is the receipt —
+        // the same reasoning `copyPickedText` wrote down, applied to the key
+        // it was written next to.
+        this.#options.onProblem("Copied to the clipboard.");
+      })
+      .catch(() => {
+        // Already reported through `onProblem`.
+      });
   }
 
   /**
@@ -674,7 +869,7 @@ export class Shelf {
    * answer, not an apology — the capture was read and that is what it held.
    */
   copyPickedText(): void {
-    const [item] = this.#pickedItems();
+    const [item] = this.#pickedOrSay();
     if (!item) return;
     if (item.kind !== "image") {
       this.#options.onProblem("A recording's text cannot be read.");
@@ -695,7 +890,7 @@ export class Shelf {
 
   /** Toggle the pin on every picked capture — `p`'s whole job. */
   togglePinPicked(): void {
-    for (const item of this.#pickedItems()) this.#togglePin(item.id);
+    for (const item of this.#pickedOrSay()) this.#togglePin(item.id);
   }
 
   /**
@@ -706,11 +901,17 @@ export class Shelf {
    * is oldest-first, so the last entry is the newest.
    */
   revealPicked(): void {
-    const item = this.#pickedItems().at(-1);
+    const item = this.#pickedOrSay().at(-1);
     if (!item) return;
-    void this.reveal(item.id).catch(() => {
-      // Reported through `onProblem` by `reveal` itself.
-    });
+    void this.reveal(item.id)
+      .then(() => {
+        // The file manager can open *behind* an always-on-top shelf, which
+        // made a successful `o` indistinguishable from a dead key.
+        this.#options.onProblem("Opened its folder.");
+      })
+      .catch(() => {
+        // Reported through `onProblem` by `reveal` itself.
+      });
   }
 
   /**
@@ -756,14 +957,20 @@ export class Shelf {
 
   /** Take the picked captures off the shelf. The files are untouched. */
   removePicked(): void {
-    for (const item of this.#pickedItems()) this.remove(item.id);
+    const picked = this.#pickedOrSay();
+    if (picked.length === 0) return;
+    this.#removeMany(picked.map((item) => item.id));
   }
 
   // ── Pins ───────────────────────────────────────────────────────────────
 
   #togglePin(id: string): void {
     const pinned = this.#store.togglePin(id);
-    if (pinned === undefined) return;
+    if (pinned === undefined) {
+      // Reachable from `p` against a selection the store has since dropped.
+      console.error("[shotshelf] cannot pin: capture is no longer on the shelf", id);
+      return;
+    }
 
     this.#view.reflectPin(id, pinned);
     // *Un*pinning is what can evict: the cap counts unpinned captures, so
@@ -806,6 +1013,9 @@ export class Shelf {
 
   #armDrag(node: HTMLElement, item: ShelfItem, event: PointerEvent): void {
     armDrag(node, item, event, (target, capture) => {
+      // The press that started this drag was "carry the set", not "collapse
+      // to this card" — and the pointerup may never reach the webview.
+      this.#collapseTo = undefined;
       this.#dragging = true;
       void beginDrag(
         target,
