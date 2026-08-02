@@ -58,7 +58,9 @@ jobs:
           d.text((50, 50), "deploy failed: invalid credentials\nAKIAIOSFODNN7EXAMPLE\nrunner smoke canary", fill="black")
           img.save("backfill.png")
           EOF
-          pip3 install --quiet pillow
+          # PEP 668: the runner's Python is externally managed and plain pip
+          # refuses. User-scoped with the override is the documented escape.
+          pip3 install --quiet --user --break-system-packages pillow
           python3 canary.py
           cp backfill.png ~/Desktop/smoke-backfill.png
 
