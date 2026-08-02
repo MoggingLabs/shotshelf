@@ -85,6 +85,13 @@ export default defineConfig({
     // of the runner image rather than of the code.
     locale: "en-US",
     timezoneId: "UTC",
+    // The third ambient input, pinned the day it bit: the default theme is
+    // "system", Playwright's default `prefers-color-scheme` is *light*, and
+    // the moment the light palette existed every unseeded spec silently ran
+    // light — the dark goldens came back as light images with all gates
+    // green. Dark is the canonical suite theme; light is always asked for
+    // by name (`settings: { theme: "light" }` or `emulateMedia`).
+    colorScheme: "dark",
   },
 
   expect: {
