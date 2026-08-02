@@ -1,0 +1,28 @@
+PackageIdentifier: MoggingLabs.Shotshelf
+PackageVersion: 0.3.0
+PackageLocale: en-US
+Publisher: MoggingLabs
+PublisherUrl: https://github.com/MoggingLabs
+PublisherSupportUrl: https://github.com/MoggingLabs/shotshelf/issues
+PackageName: Shotshelf
+PackageUrl: https://github.com/MoggingLabs/shotshelf
+License: MIT
+LicenseUrl: https://github.com/MoggingLabs/shotshelf/blob/main/LICENSE
+ShortDescription: The shelf that catches every capture.
+Description: >-
+  A local-only desktop shelf that watches the OS screenshot and recording
+  folders, catches every capture the moment it lands, and keeps it one drag
+  away — with on-device text recognition, a credential warning before you
+  send a token in a screenshot, an annotation editor with real redaction,
+  and a full keyboard map. No accounts, no cloud; the only network call is
+  an optional update check.
+Moniker: shotshelf
+Tags:
+  - screenshot
+  - screen-recording
+  - clipboard
+  - productivity
+  - tauri
+ReleaseNotesUrl: https://github.com/MoggingLabs/shotshelf/releases/tag/v0.3.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
