@@ -64,6 +64,17 @@
             <ul class="stg__watchlist" id="watch-list">
               <li class="stg__watchitem stg__watchitem--pending">Asking the catch engine…</li>
             </ul>
+            <div class="stg__watchactions">
+              <button id="watch-add" type="button" class="stg__button">Add folder…</button>
+              <button id="watch-restore" type="button" class="stg__button">Restore defaults</button>
+            </div>
+            <!-- The one place both halves of the promise are stated: watching
+                 is additive, and un-watching destroys nothing. -->
+            <p class="stg__hint">
+              Folders you add are watched the moment you confirm them. Stopping a watch
+              never touches files — captures already on the shelf stay. Restore defaults
+              brings back the stock folders and keeps the ones you added.
+            </p>
           </div>
 
           <div class="stg__row">

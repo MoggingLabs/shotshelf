@@ -66,6 +66,17 @@ export interface Settings {
    * pinned to Rust's `THEMES` and an unknown value comes back normalised.
    */
   theme: "system" | "light" | "dark";
+  /**
+   * Folders the user chose to watch beyond the per-OS defaults. Absolute
+   * paths, exactly as the picker returned them.
+   */
+  watchAdded: string[];
+  /**
+   * Default folders the user chose to stop watching, by exact resolved path.
+   * A subtraction rather than a materialised list, so Restore defaults is
+   * just clearing it — stock folders come back, added ones stay.
+   */
+  watchRemoved: string[];
   pinned: PinnedItem[];
 }
 
@@ -83,6 +94,8 @@ export const DEFAULTS: Settings = {
   dockMonitor: "primary",
   startAtLogin: false,
   theme: "system",
+  watchAdded: [],
+  watchRemoved: [],
   pinned: [],
 };
 
@@ -216,4 +229,13 @@ export function watchStateNow(): Promise<WatchState> {
 /** Open one of the About links in the system browser, by name. */
 export function openLink(which: "repo" | "usage" | "issues"): Promise<void> {
   return invoke("open_link", { which });
+}
+
+/**
+ * Ask the OS for a folder to watch. `null` is the user closing the picker —
+ * an answer, not an error. The webview never composes a path: what comes
+ * back is what the user clicked in their own file chooser.
+ */
+export function chooseWatchFolder(): Promise<string | null> {
+  return invoke<string | null>("choose_watch_folder");
 }

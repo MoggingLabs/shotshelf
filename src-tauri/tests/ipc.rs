@@ -321,6 +321,10 @@ fn the_new_settings_fields_cross_the_boundary_normalised_and_tolerated() {
             "dockMonitor": "the-neighbour's",
             "startAtLogin": true,
             "theme": "vantablack",
+            // Relative entries name nothing — a watch list is joined to no
+            // working directory — so the command must drop them, not store them.
+            "watchAdded": ["not-an-absolute-path"],
+            "watchRemoved": ["also/relative"],
             "pinned": [],
         }}),
     )
@@ -341,6 +345,21 @@ fn the_new_settings_fields_cross_the_boundary_normalised_and_tolerated() {
         stored.get("theme").and_then(serde_json::Value::as_str),
         Some("system"),
         "an unknown theme crossed the boundary unnormalised",
+    );
+    assert_eq!(
+        stored
+            .get("watchAdded")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(0),
+        "a relative watch entry crossed the boundary unnormalised: {stored}",
+    );
+    assert_eq!(
+        stored
+            .get("watchRemoved")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(0),
     );
     assert_eq!(
         stored

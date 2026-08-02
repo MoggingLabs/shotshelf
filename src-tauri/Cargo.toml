@@ -84,6 +84,11 @@ tokio = { version = "1", default-features = false, features = ["sync", "time"] }
 # The `reveal` feature's Linux half rides the `dbus` crate this tree already
 # carried; `cargo add` locked only `opener`, `bstr` and `normpath`.
 opener = { version = "0.8.5", features = ["reveal"] }
+# The settings window's folder picker — the one native dialog in the app; a
+# folder picker is a security surface, not a widget, so the webview only ever
+# receives what the user actually clicked. Default features: on Linux that is
+# the XDG portal, so no GTK link and the desktop's own chooser.
+rfd = "0.15"
 # The login item, as a Settings toggle (off by default). Driven from Rust
 # only through our own set_settings — the webview gains no permission and
 # there is no npm half. See autostart.rs for the account-roams/machine-registers

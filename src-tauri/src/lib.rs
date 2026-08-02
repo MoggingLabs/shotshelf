@@ -26,6 +26,7 @@ mod hotkey;
 mod imaging;
 mod limits;
 mod links;
+mod pick;
 mod poster;
 // `pub` for one reason: `tests/ipc.rs` is the only executable gate the IPC
 // tier has, and an integration test is the only kind cargo will attach the

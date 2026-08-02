@@ -1319,7 +1319,11 @@ body {
 }
 
 .stg__watchitem {
-  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  min-height: 28px;
   color: var(--text);
   font-size: var(--font-sm);
 }
@@ -1331,6 +1335,46 @@ body {
 
 .stg__watchitem--down {
   color: var(--danger-soft);
+}
+
+.stg__watchpath {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 24px: the WCAG floor every other control in the app already stands on. */
+.stg__watchremove {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--radius-ctl);
+  background: none;
+  color: var(--muted);
+  font-size: var(--font-lg);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.stg__watchremove:hover {
+  background: var(--raised-hover);
+  color: var(--danger-soft);
+}
+
+.stg__watchactions {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 0;
+}
+
+/* A row mid-question: the accent hairline marks that the list is waiting on
+   an answer, and nothing else changes shape. */
+.stg__watchitem--asking {
+  padding-left: 8px;
+  border-left: 2px solid var(--accent);
 }
 
 .stg__keys {

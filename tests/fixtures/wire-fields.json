@@ -41,7 +41,9 @@
     "dockMonitor",
     "startAtLogin",
     "pinned",
-    "theme"
+    "theme",
+    "watchAdded",
+    "watchRemoved"
   ],
   "VideoDetails": [
     "poster",

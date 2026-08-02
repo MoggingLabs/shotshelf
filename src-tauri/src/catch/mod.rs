@@ -429,6 +429,63 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
     }
 }
 
+/// Re-resolve the watched folders and swap the folder watchers, live.
+///
+/// The settings window edits the watch lists, and "changes apply at once" is
+/// that window's contract — a folder confirmed there starts catching now, not
+/// at the next launch. Folder watchers only: the clipboard thread and the
+/// shared [`CaptureSink`] stay exactly where [`start`] put them, which is why
+/// this is not a second `start` — a re-run would spawn a second clipboard
+/// thread and split the echo-suppression sink between the two halves.
+///
+/// What this deliberately does not do: backfill the new folder (its history
+/// is not captures — the same reasoning as `a_launch_does_not_index_the_
+/// pictures_folder`), or narrow the asset scope for a removed one (the scope
+/// has no revoke; it re-grants only what is watched at the next launch).
+pub fn rewatch<R: Runtime>(app: &AppHandle<R>) {
+    let Some(engine) = app.try_state::<CatchEngine>() else {
+        return;
+    };
+    // No sink managed means `start` has not run yet; when it does, it will
+    // read the same store this rewatch was asked about.
+    let Some(sink) = app.try_state::<std::sync::Arc<CaptureSink>>() else {
+        return;
+    };
+
+    let watch_dirs = paths::resolve_watch_dirs(app, &overrides_from_env());
+    for dir in &watch_dirs {
+        crate::diag::info(&format!("watching {}", dir.display()));
+    }
+    allow_reading_captures(app, &watch_dirs);
+
+    let folders = match folders::start(app, &watch_dirs, std::sync::Arc::clone(&sink)) {
+        Ok(watch) => Some(watch),
+        Err(err) => {
+            crate::diag::warn(&format!("folder watching unavailable: {err}"));
+            None
+        }
+    };
+
+    {
+        let mut started = lock(&engine.started);
+        if let Some(state) = started.as_mut() {
+            state.dirs = folders
+                .as_ref()
+                .map(|watch| watch.watching.clone())
+                .unwrap_or_default();
+            state.since = folders
+                .as_ref()
+                .map(|watch| watch.started.clone())
+                .unwrap_or_default();
+        }
+        // Still starting: `start` will overwrite with its own resolve, which
+        // reads the same store. Nothing to reconcile.
+    }
+
+    // Replacing the old watch drops it, which stops its `notify` threads.
+    *lock(&engine._folders) = folders;
+}
+
 /// How far back a launch looks for captures it was not running to see.
 ///
 /// Shotshelf only ever hears about a capture from a watcher, and a watcher only

@@ -283,6 +283,96 @@ test("a save made elsewhere moves this window's controls", async ({ page }) => {
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 });
 
+test("adding a folder asks first, and closing the picker is a no", async ({ page }) => {
+  // The picker hands back what the user clicked; nothing is saved or watched
+  // until the inline question is answered. The default mock answers the
+  // picker with null — the user closing it — and that must save nothing.
+  await bootSettings(page);
+  await echoSaves(page);
+  await page.locator('button[data-section="capturing"]').click();
+
+  await page.locator("#watch-add").click();
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("set_settings").length)).toBe(0);
+
+  await page.evaluate(() =>
+    window.__shotshelf__.respond("choose_watch_folder", "C:\\Somewhere\\Else"),
+  );
+  await page.locator("#watch-add").click();
+
+  // Picked is not yet chosen: the row asks, and Cancel leaves no trace.
+  await expect(page.locator(".stg__watchitem--asking")).toContainText("C:\\Somewhere\\Else");
+  await page.getByRole("button", { name: "Cancel" }).click();
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("set_settings").length)).toBe(0);
+
+  await page.locator("#watch-add").click();
+  await page.getByRole("button", { name: "Watch", exact: true }).click();
+
+  const call = await page.evaluate(() => window.__shotshelf__.callsTo("set_settings").at(-1)?.args);
+  expect((call?.["settings"] as Record<string, unknown>)["watchAdded"]).toEqual([
+    "C:\\Somewhere\\Else",
+  ]);
+});
+
+test("stopping a watch asks first and sorts default from added", async ({ page }) => {
+  await page.addInitScript(() => {
+    const existing = window.__shotshelfStubs__ ?? {};
+    window.__shotshelfStubs__ = {
+      catch_watch_dirs: { dirs: ["C:\\Stock\\Screenshots", "C:\\Mine\\Grabs"], clipboard: true },
+      ...existing,
+    };
+  });
+  await bootSettings(page, { settings: { watchAdded: ["C:\\Mine\\Grabs"] } });
+  await echoSaves(page);
+  await page.locator('button[data-section="capturing"]').click();
+
+  const rows = page.locator("#watch-list .stg__watchitem");
+  await expect(rows).toHaveCount(3); // two folders + the clipboard, which has no ×
+
+  // A stock folder goes on the removed list — the list Restore defaults
+  // clears — and only after the row's question is answered.
+  await rows.nth(0).locator(".stg__watchremove").click();
+  await expect(page.locator(".stg__watchitem--asking")).toContainText("Files are never touched");
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  let call = await page.evaluate(() => window.__shotshelf__.callsTo("set_settings").at(-1)?.args);
+  expect((call?.["settings"] as Record<string, unknown>)["watchRemoved"]).toEqual([
+    "C:\\Stock\\Screenshots",
+  ]);
+
+  // An added folder is simply un-added; the removed list stays clean.
+  await rows.nth(1).locator(".stg__watchremove").click();
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  call = await page.evaluate(() => window.__shotshelf__.callsTo("set_settings").at(-1)?.args);
+  expect((call?.["settings"] as Record<string, unknown>)["watchAdded"]).toEqual([]);
+  expect((call?.["settings"] as Record<string, unknown>)["watchRemoved"]).toEqual([
+    "C:\\Stock\\Screenshots",
+  ]);
+});
+
+test("restore defaults brings the stock folders back and keeps yours", async ({ page }) => {
+  await bootSettings(page, {
+    settings: { watchAdded: ["C:\\Mine\\Grabs"], watchRemoved: ["C:\\Stock\\Screenshots"] },
+  });
+  await echoSaves(page);
+  await page.locator('button[data-section="capturing"]').click();
+
+  await page.locator("#watch-restore").click();
+  await expect(page.locator(".stg__watchitem--asking")).toContainText(
+    "Folders you added stay",
+  );
+  await page.getByRole("button", { name: "Restore", exact: true }).click();
+
+  const call = await page.evaluate(() => window.__shotshelf__.callsTo("set_settings").at(-1)?.args);
+  const saved = call?.["settings"] as Record<string, unknown>;
+  expect(saved["watchRemoved"]).toEqual([]);
+  expect(saved["watchAdded"]).toEqual(["C:\\Mine\\Grabs"]);
+});
+
+test("with nothing removed there is nothing to restore", async ({ page }) => {
+  await bootSettings(page);
+  await page.locator('button[data-section="capturing"]').click();
+  await expect(page.locator("#watch-restore")).toBeDisabled();
+});
+
 test("capturing shows what is really being watched", async ({ page }) => {
   // The watch dot's diagnostic, finally somewhere findable — and it must be
   // the engine's answer, not the config's intent.

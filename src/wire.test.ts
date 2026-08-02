@@ -73,6 +73,8 @@ const settings: Settings = {
   dockMonitor: "primary",
   startAtLogin: false,
   theme: "system",
+  watchAdded: [],
+  watchRemoved: [],
   pinned: [],
 };
 const videoDetails: VideoDetails = { poster: null, durationMs: null, bytes: 0 };

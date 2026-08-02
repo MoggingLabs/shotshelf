@@ -266,14 +266,21 @@ past 200 and the note reads "Max items was limited to 200" rather than
 snapping back in silence. The hotkey is recorded rather than typed: click the
 control, press the combination you want, Escape to cancel. Capturing shows
 the folders *actually* being watched right now — the watch dot's diagnostic,
-somewhere findable — and About carries the version, the update check, and
-links out (which open through a named allowlist, never a raw URL).
+somewhere findable — and lets you edit the list: add any folder with the
+OS's own picker, stop watching any folder (stock or added) with its ×, and
+every change asks once, in the row, before anything is saved. Watching
+starts the moment you confirm; stopping never touches files. **Restore
+defaults** brings back the stock folders and keeps the ones you added —
+it exists to recover a stock folder removed by mistake. About carries the
+version, the update check, and links out (which open through a named
+allowlist, never a raw URL).
 
 | Setting | Where | What it does |
 | :-- | :-- | :-- |
 | **Start at login** | General | Registers Shotshelf as a login item so it is already watching at the day's first capture. Follows your account — turn it on once and each machine you log into registers itself at the next launch; turning it off unregisters the same way |
 | **Keep for** | General | How long unpinned captures stay. Removing them never touches the files |
 | **Max items** | General | How many unpinned captures the shelf holds |
+| **Watched folders** | Capturing | Add any folder to the watch; stop watching any, stock or added. Additions apply live and roam with your account — a machine where the path doesn't exist just skips it, the way an absent OneDrive folder is skipped |
 | **Smaller copies** | Capturing | Hand over a copy no larger than 1568px on its long edge, instead of the original |
 | **Theme** | Appearance | System, Light or Dark. System follows the OS setting live |
 | **Corner** | Appearance | Which screen corner the popover docks to — a 2×2 picker. A bottom corner grows the popped column upward; a top corner grows it downward |

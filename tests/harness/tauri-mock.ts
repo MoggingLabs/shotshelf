@@ -181,6 +181,9 @@ export function installTauriMock(EVENTS: WindowEvents): void {
     "check_for_updates": "You are on the newest version.",
     // Named link opened in the OS browser — nothing to return.
     "open_link": null,
+    // The folder picker with the user closing it — the ordinary changed-my-
+    // mind answer; a spec that wants a folder chosen stubs the path.
+    "choose_watch_folder": null,
     // Read, and nothing found — the ordinary case.
     "describe_capture": { secrets: [], scanned: true },
     ...(window.__shotshelfStubs__ ?? {}),

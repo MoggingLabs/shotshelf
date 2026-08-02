@@ -101,6 +101,19 @@ pub struct Settings {
     /// Same string-not-enum reasoning as [`Settings::dock_corner`] — a
     /// misspelled theme should cost the theme, not the settings file.
     pub theme: String,
+    /// Folders the user chose to watch, beyond the per-OS defaults.
+    ///
+    /// Absolute paths, kept as chosen. They roam with the preferences on
+    /// purpose: "watch my Downloads too" is a statement about how you work,
+    /// not about one machine — and on a machine where the path does not
+    /// exist, the resolver skips it by name exactly as it skips an absent
+    /// OneDrive default.
+    pub watch_added: Vec<String>,
+    /// Default folders the user chose to *stop* watching, by exact resolved
+    /// path. Kept as a subtraction from the defaults rather than a
+    /// materialised list, so "Restore defaults" is just clearing this —
+    /// bringing every stock folder back without touching what was added.
+    pub watch_removed: Vec<String>,
     pub pinned: Vec<PinnedItem>,
 }
 
@@ -123,6 +136,8 @@ impl Default for Settings {
             dock_monitor: DOCK_MONITORS[0].to_owned(),
             start_at_login: false,
             theme: THEMES[0].to_owned(),
+            watch_added: Vec::new(),
+            watch_removed: Vec::new(),
             pinned: Vec::new(),
         }
     }
@@ -757,7 +772,28 @@ fn sanitise(mut settings: Settings) -> Settings {
     if !THEMES.contains(&settings.theme.as_str()) {
         settings.theme = THEMES[0].to_owned();
     }
+    settings.watch_added = allowed_watch_list(std::mem::take(&mut settings.watch_added));
+    settings.watch_removed = allowed_watch_list(std::mem::take(&mut settings.watch_removed));
     settings
+}
+
+/// The watch lists may be as many entries as a file can hold; the watcher
+/// registry, the settings window's list and the asset-scope grant all grow
+/// with them, so the ceiling is a sanity bound, not a product decision.
+const MAX_WATCH_LIST: usize = 32;
+
+/// A hand-editable list of folder paths, kept sane: trimmed, absolute only,
+/// de-duplicated in order, bounded. Relative entries are dropped rather than
+/// guessed at — a watch list is joined to nothing, so "Screenshots" names a
+/// different folder from every working directory it is read in.
+fn allowed_watch_list(list: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    list.into_iter()
+        .map(|dir| dir.trim().to_owned())
+        .filter(|dir| std::path::Path::new(dir).is_absolute())
+        .filter(|dir| seen.insert(dir.clone()))
+        .take(MAX_WATCH_LIST)
+        .collect()
 }
 
 #[cfg(test)]
@@ -1634,6 +1670,39 @@ mod tests {
     }
 
     #[test]
+    fn a_hand_edited_watch_list_is_kept_sane() {
+        let extra = somewhere("Extra");
+        let listed = sanitise(Settings {
+            watch_added: vec![
+                format!("  {extra}  "),   // trimmed, kept
+                extra.clone(),            // duplicate of the above, dropped
+                "Screenshots".to_owned(), // relative — names nothing, dropped
+                String::new(),            // empty, dropped
+            ],
+            watch_removed: vec!["also-relative".to_owned(), somewhere("Gone")],
+            ..Settings::default()
+        });
+        assert_eq!(
+            listed.watch_added,
+            vec![extra],
+            "trim, dedupe, absolute only"
+        );
+        assert_eq!(listed.watch_removed, vec![somewhere("Gone")]);
+    }
+
+    #[test]
+    fn a_watch_list_cannot_grow_without_bound() {
+        // Same reasoning as the pinned list: every entry costs a watcher
+        // registration, a scope grant and a row in the settings window.
+        let long = (0..100).map(|i| somewhere(&format!("d{i}"))).collect();
+        let bounded = sanitise(Settings {
+            watch_added: long,
+            ..Settings::default()
+        });
+        assert_eq!(bounded.watch_added.len(), MAX_WATCH_LIST);
+    }
+
+    #[test]
     fn a_shelf_that_holds_nothing_is_not_a_shelf() {
         let none = sanitise(Settings {
             max_items: 0,
@@ -1681,6 +1750,16 @@ pub fn set_settings<R: Runtime>(
     // store, so a re-place that fails cannot roll back a save that succeeded.
     if stored.dock_corner != previous.dock_corner || stored.dock_monitor != previous.dock_monitor {
         crate::window::reposition(&app);
+    }
+
+    // The watchers follow the store immediately — a folder confirmed in the
+    // settings window starts catching now, not at the next launch. On a
+    // worker: watcher registration can touch slow disks, and this command
+    // answers a form.
+    if stored.watch_added != previous.watch_added || stored.watch_removed != previous.watch_removed
+    {
+        let handle = app.clone();
+        tauri::async_runtime::spawn_blocking(move || crate::catch::rewatch(&handle));
     }
 
     // Every window learns the new truth at once. The reply below reaches only

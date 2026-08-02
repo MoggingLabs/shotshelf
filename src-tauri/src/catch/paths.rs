@@ -13,8 +13,10 @@ use tauri::{AppHandle, Manager, Runtime};
 /// Resolve the folders to watch.
 ///
 /// A non-empty `overrides` list replaces the per-OS defaults entirely. Either
-/// way the result is filtered to directories that exist and de-duplicated —
-/// on Windows, Pictures redirected into OneDrive would otherwise be watched twice.
+/// way the user's settings are applied on top — folders they added joined,
+/// folders they removed subtracted — and the result is filtered to
+/// directories that exist and de-duplicated — on Windows, Pictures redirected
+/// into OneDrive would otherwise be watched twice.
 pub fn resolve_watch_dirs<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) -> Vec<PathBuf> {
     let candidates = if overrides.is_empty() {
         defaults(app)
@@ -22,7 +24,38 @@ pub fn resolve_watch_dirs<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf])
         overrides.to_vec()
     };
 
-    settle(candidates, app.path().home_dir().ok().as_deref())
+    // Read from state rather than disk: `set_settings` has already stored the
+    // lists by the time it asks for a rewatch, and at launch `reserve` put the
+    // store in place before the engine starts. Absent state (unit tests build
+    // bare apps) means no choices, which is the default install.
+    let (added, removed) = app
+        .try_state::<crate::settings::SettingsStore>()
+        .map(|store| {
+            let settings = store.get();
+            (settings.watch_added, settings.watch_removed)
+        })
+        .unwrap_or_default();
+
+    settle(
+        apply_choices(candidates, &added, &removed),
+        app.path().home_dir().ok().as_deref(),
+    )
+}
+
+/// The user's watch choices, applied to the platform's candidates.
+///
+/// Added folders join the end, and removals are applied *after* — so a path
+/// somehow present in both lists stays unwatched, which is the predictable
+/// reading of "stop watching this". Order is preserved: the first entry stays
+/// the primary screenshots location the tray's "Open the screenshots folder"
+/// opens, unless the user removed exactly that.
+fn apply_choices(candidates: Vec<PathBuf>, added: &[String], removed: &[String]) -> Vec<PathBuf> {
+    let removed: HashSet<PathBuf> = removed.iter().map(PathBuf::from).collect();
+    candidates
+        .into_iter()
+        .chain(added.iter().map(PathBuf::from))
+        .filter(|dir| !removed.contains(dir))
+        .collect()
 }
 
 /// Turn a candidate list into the folders actually watched.
@@ -471,5 +504,35 @@ mod tests {
         assert_eq!(settle(vec![dir.clone(), dir.clone()], None).len(), 1);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_users_choices_shape_the_watch_list() {
+        let defaults = vec![PathBuf::from("/d/one"), PathBuf::from("/d/two")];
+
+        // A removed default is gone; an added folder joins the end; order —
+        // and with it the tray's "first watched folder" — is preserved.
+        let shaped = apply_choices(
+            defaults.clone(),
+            &["/mine/extra".to_owned()],
+            &["/d/two".to_owned()],
+        );
+        assert_eq!(
+            shaped,
+            vec![PathBuf::from("/d/one"), PathBuf::from("/mine/extra")]
+        );
+
+        // Removals the defaults do not contain are harmless — they may name a
+        // default on the *other* machine this file roams to.
+        let unknown = apply_choices(defaults.clone(), &[], &["/not/here".to_owned()]);
+        assert_eq!(unknown, defaults);
+
+        // A path in both lists stays unwatched: "stop watching" always wins.
+        let both = apply_choices(
+            defaults,
+            &["/mine/extra".to_owned()],
+            &["/mine/extra".to_owned()],
+        );
+        assert_eq!(both, vec![PathBuf::from("/d/one"), PathBuf::from("/d/two")]);
     }
 }

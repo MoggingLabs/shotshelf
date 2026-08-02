@@ -14,6 +14,7 @@ import { enhanceSelect, refreshSelect } from "../ui/select.ts";
 import { initTooltips } from "../ui/tooltip.ts";
 import {
   checkForUpdatesNow,
+  chooseWatchFolder,
   currentSettings,
   loadSettings,
   onSettingsChanged,
@@ -124,6 +125,10 @@ function fill(): void {
     corner.setAttribute("aria-checked", String(corner.dataset["corner"] === current.dockCorner));
   }
 
+  // Nothing removed means nothing to restore — a button that would save a
+  // no-op is a button that lies about having done something.
+  el<HTMLButtonElement>("#watch-restore").disabled = current.watchRemoved.length === 0;
+
   applyTheme(current.theme);
 }
 
@@ -215,16 +220,77 @@ const WATCH_WAIT: Wait = {
   transient: (error) => String(error).includes("still starting"),
 };
 
+/** What the last render saw watched — the add flow's duplicate check. */
+let watchedNow: string[] = [];
+
+/**
+ * Swap a row's content for a one-line question with two buttons — themed and
+ * in place, because a native confirm cannot be themed and a modal for a
+ * one-row decision is a heavier interruption than the decision.
+ */
+function askInRow(item: HTMLElement, question: string, act: string, onYes: () => void): void {
+  item.replaceChildren();
+  item.classList.add("stg__watchitem--asking");
+  const ask = document.createElement("span");
+  ask.className = "stg__watchpath";
+  ask.textContent = question;
+  const yes = document.createElement("button");
+  yes.type = "button";
+  yes.className = "stg__button";
+  yes.textContent = act;
+  yes.addEventListener("click", onYes);
+  const no = document.createElement("button");
+  no.type = "button";
+  no.className = "stg__button";
+  no.textContent = "Cancel";
+  // Re-rendering is the undo: the row goes back to what the store says.
+  no.addEventListener("click", () => showWatchList());
+  item.append(ask, yes, no);
+}
+
+/** A watched-folder row: the path, and a × that asks before it stops. */
+function watchRow(dir: string, down: boolean): HTMLLIElement {
+  const item = document.createElement("li");
+  item.className = down ? "stg__watchitem stg__watchitem--down" : "stg__watchitem";
+  const path = document.createElement("span");
+  path.className = "stg__watchpath";
+  path.textContent = dir;
+  path.dataset["tip"] = down
+    ? `${dir}\nNot currently watched — the folder may not exist on this machine.`
+    : dir;
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "stg__watchremove";
+  remove.textContent = "×";
+  remove.setAttribute("aria-label", `Stop watching ${dir}`);
+  remove.dataset["tip"] = "Stop watching this folder";
+  remove.addEventListener("click", () => {
+    askInRow(item, "Stop watching this folder? Files are never touched.", "Stop", () => {
+      const current = currentSettings();
+      // An added folder is un-added; a stock folder goes on the removed
+      // list, which is what Restore defaults clears.
+      const patch: Partial<Settings> = current.watchAdded.includes(dir)
+        ? { watchAdded: current.watchAdded.filter((kept) => kept !== dir) }
+        : { watchRemoved: [...current.watchRemoved, dir] };
+      void save(patch).then(() => refreshWatchListSoon());
+    });
+  });
+  item.append(path, remove);
+  return item;
+}
+
 function showWatchList(): void {
   const list = el<HTMLElement>("#watch-list");
   void until(() => watchStateNow(), WATCH_WAIT)
     .then(({ dirs, clipboard }) => {
+      watchedNow = dirs;
       list.replaceChildren();
-      for (const dir of dirs) {
-        const item = document.createElement("li");
-        item.className = "stg__watchitem";
-        item.textContent = dir;
-        list.append(item);
+      for (const dir of dirs) list.append(watchRow(dir, false));
+      // Added folders the engine is not actually watching — chosen on another
+      // machine this file roamed from, or deleted from disk since. Shown down
+      // rather than hidden, so they can still be un-added from here.
+      for (const extra of currentSettings().watchAdded) {
+        if (!dirs.includes(extra)) list.append(watchRow(extra, true));
       }
       const clip = document.createElement("li");
       clip.className = clipboard ? "stg__watchitem" : "stg__watchitem stg__watchitem--down";
@@ -246,6 +312,56 @@ function showWatchList(): void {
       dead.textContent = "The catch engine could not be reached.";
       list.append(dead);
     });
+}
+
+/**
+ * Once now for the stored truth, once again after the watchers had time to
+ * follow it — `set_settings` hands the rewatch to a worker, so the engine's
+ * answer can trail the store by a beat.
+ */
+function refreshWatchListSoon(): void {
+  showWatchList();
+  window.setTimeout(showWatchList, 700);
+}
+
+function initWatchControls(): void {
+  const list = el<HTMLElement>("#watch-list");
+
+  el<HTMLButtonElement>("#watch-add").addEventListener("click", () => {
+    void chooseWatchFolder()
+      .then((chosen) => {
+        // Closing the picker is the answer, not an error.
+        if (chosen === null) return;
+        if (watchedNow.includes(chosen) || currentSettings().watchAdded.includes(chosen)) {
+          note().textContent = "That folder is already being watched.";
+          return;
+        }
+        // Picked is not yet chosen: the row asks once more before anything
+        // is saved or watched.
+        const item = document.createElement("li");
+        item.className = "stg__watchitem";
+        list.append(item);
+        askInRow(item, `Watch ${chosen}?`, "Watch", () => {
+          void save({ watchAdded: [...currentSettings().watchAdded, chosen] }).then(() =>
+            refreshWatchListSoon(),
+          );
+        });
+      })
+      .catch((error: unknown) => {
+        console.error("[shotshelf] the folder picker failed", error);
+        note().textContent = "The folder picker could not be opened.";
+      });
+  });
+
+  el<HTMLButtonElement>("#watch-restore").addEventListener("click", () => {
+    if (currentSettings().watchRemoved.length === 0) return;
+    const item = document.createElement("li");
+    item.className = "stg__watchitem";
+    list.append(item);
+    askInRow(item, "Bring back the stock folders? Folders you added stay.", "Restore", () => {
+      void save({ watchRemoved: [] }).then(() => refreshWatchListSoon());
+    });
+  });
 }
 
 // ── About ────────────────────────────────────────────────────────────────
@@ -292,6 +408,7 @@ initNav();
 bindControls();
 initAbout();
 initTooltips();
+initWatchControls();
 // After bindControls: the themed dropdowns re-dispatch `change` on the real
 // selects, so the save handlers must already be listening.
 enhanceSelect(el<HTMLSelectElement>("#setting-retention"));
@@ -300,7 +417,19 @@ enhanceSelect(el<HTMLSelectElement>("#setting-monitor"));
 // A save from any window — including this one — refreshes the form with what
 // was actually stored. The registration promise is watched: a window that
 // silently stops tracking the store shows stale settings forever.
-void onSettingsChanged(() => fill()).catch((error: unknown) => {
+//
+// The watch list re-renders only when the watch *lists* moved: it holds
+// in-flight confirmation rows, and a theme click elsewhere must not sweep a
+// question off the screen mid-answer.
+let watchListsSeen = JSON.stringify([currentSettings().watchAdded, currentSettings().watchRemoved]);
+void onSettingsChanged((settings) => {
+  fill();
+  const watchListsNow = JSON.stringify([settings.watchAdded, settings.watchRemoved]);
+  if (watchListsNow !== watchListsSeen) {
+    watchListsSeen = watchListsNow;
+    refreshWatchListSoon();
+  }
+}).catch((error: unknown) => {
   console.error("[shotshelf] settings subscription failed", error);
   note().textContent = "This window may not notice changes made elsewhere.";
 });
