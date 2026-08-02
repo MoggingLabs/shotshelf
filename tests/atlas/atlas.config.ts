@@ -36,6 +36,9 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:4173",
     locale: "en-US",
     timezoneId: "UTC",
+    // Pinned for the same reason the main config pins it: "system" resolves
+    // against the browser's scheme, and Playwright's default is light.
+    colorScheme: "dark",
     viewport: { width: shelfWindow.width, height: shelfWindow.height },
     deviceScaleFactor: 1,
   },
