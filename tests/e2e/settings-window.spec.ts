@@ -183,8 +183,9 @@ test("the hotkey is recorded from real keys, not typed", async ({ page }) => {
 
   await page.keyboard.press("Control+Shift+KeyK");
 
+  // The wire carries Tauri's spelling; the control shows the OS's.
   expect((await saved(page))["hotkey"]).toBe("CommandOrControl+Shift+K");
-  await expect(page.locator("#setting-hotkey")).toHaveText("CommandOrControl+Shift+K");
+  await expect(page.locator("#setting-hotkey")).toHaveText("Ctrl+Shift+K");
 });
 
 test("escape cancels the recording without a save", async ({ page }) => {
@@ -197,7 +198,7 @@ test("escape cancels the recording without a save", async ({ page }) => {
   await page.keyboard.press("Escape");
 
   await expect(page.locator("#setting-hotkey")).toHaveText(
-    String(DEFAULT_SETTINGS["hotkey"]),
+    String(DEFAULT_SETTINGS["hotkey"]).replace("CommandOrControl", "Ctrl"),
   );
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("set_settings").length)).toBe(0);
 });

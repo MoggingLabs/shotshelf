@@ -24,6 +24,15 @@ import { applyTheme } from "../theme.ts";
 
 const note = () => el<HTMLElement>("#settings-note");
 
+/**
+ * The accelerator, shown the way this OS spells it. The stored string keeps
+ * Tauri's `CommandOrControl` so one settings file works on every machine;
+ * shown verbatim it overflowed the control — the old panel's exact
+ * truncation failure, reproduced in a button.
+ */
+const prettyHotkey = (hotkey: string): string =>
+  hotkey.replace("CommandOrControl", navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl");
+
 // ── Sections ─────────────────────────────────────────────────────────────
 
 /**
@@ -101,7 +110,7 @@ function fill(): void {
   el<HTMLInputElement>("#setting-autostart").checked = current.startAtLogin;
   el<HTMLInputElement>("#setting-updates").checked = current.checkForUpdates;
   el<HTMLSelectElement>("#setting-monitor").value = current.dockMonitor;
-  el<HTMLButtonElement>("#setting-hotkey").textContent = current.hotkey;
+  el<HTMLButtonElement>("#setting-hotkey").textContent = prettyHotkey(current.hotkey);
 
   for (const segment of document.querySelectorAll<HTMLButtonElement>("[data-theme-choice]")) {
     segment.setAttribute("aria-checked", String(segment.dataset["themeChoice"] === current.theme));

@@ -231,7 +231,11 @@ export async function bootSettings(page: Page, options: BootOptions = {}): Promi
   await serveFixtures(page);
   await page.goto("/settings.html");
   await expect(page.locator(".stg")).toBeVisible();
-  await expect(page.locator("#setting-hotkey")).toHaveText(String(seed["hotkey"]));
+  // The control shows the OS spelling of the stored accelerator — and the
+  // suite's user agent says Linux, so "CommandOrControl" reads as "Ctrl".
+  await expect(page.locator("#setting-hotkey")).toHaveText(
+    String(seed["hotkey"]).replace("CommandOrControl", "Ctrl"),
+  );
 }
 
 /** Deliver a `capture://new` event exactly as Rust would. */
