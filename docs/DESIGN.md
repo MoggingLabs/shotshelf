@@ -218,5 +218,15 @@ with a reason — so the next person weighs the reason, not the absence:
 ## Regenerating the appearance goldens
 
 The pixel goldens under `tests/visual/` are Linux-rendered. Any change to this
-system invalidates all ten: run the **Appearance goldens** workflow, look at
-the images, and commit them in the same PR as the change that moved them.
+system invalidates all fifteen: run the **Appearance goldens** workflow, look
+at the images, and commit them in the same PR as the change that moved them.
+Five of the fifteen picture *composed* states — pinned-at-rest,
+pinned+secret, picked-under-hover, secret+picked, multi-pick-with-cursor —
+because the 2026-08-02 audit's worst finds were compositions losing to
+specificity, which is exactly the rot no single-state golden can catch.
+
+For everything the goldens do not enforce, the **State atlas** workflow (or
+`npm run atlas` locally) photographs every reachable UI state — about fifty
+screenshots, assertion-free, for a person to read. That is the audit tool:
+the next visual audit starts from a complete picture set instead of an
+afternoon of harness reconstruction.

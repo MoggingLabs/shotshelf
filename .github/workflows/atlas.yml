@@ -1,0 +1,43 @@
+# The state atlas, rendered on Linux — the same rasterisation the goldens
+# use, so its pictures are comparable with them.
+#
+# Assertion-free by design, like the goldens workflow: this uploads ~50
+# screenshots of every reachable UI state for a person to read. It exists so
+# the next visual audit starts from a complete, minutes-old picture set
+# instead of an afternoon of harness reconstruction — the 2026-08-02 audit
+# paid that afternoon once, and this is what it bought.
+
+name: State atlas
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  atlas:
+    name: Photograph every state
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npx playwright install chromium --with-deps
+
+      - name: Take the atlas
+        run: npm run atlas
+
+      - name: Upload it
+        uses: actions/upload-artifact@v7
+        with:
+          name: state-atlas
+          path: tests/atlas/output/
+          if-no-files-found: error

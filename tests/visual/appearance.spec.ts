@@ -147,4 +147,80 @@ test.describe("appearance", () => {
     await land(page, FIXTURE.missing);
     await expect(page.locator(".tile")).toHaveScreenshot("tile-missing.png");
   });
+
+  // ── Composed states ──────────────────────────────────────────────────
+  // The audit's worst finds were compositions losing to specificity: hover
+  // erasing the picked ring, picking erasing the credential rim, the pinned
+  // star floating mid-edge. Each is a single box-shadow or width rule away
+  // from regressing invisibly, so each composition gets its own image.
+
+  test("a pinned card at rest anchors its star to the corner", async ({ page }) => {
+    await bootShelf(page);
+    await land(page, FIXTURE.wide);
+    await openBrowse(page);
+    await page.locator(".tile").hover();
+    await page.locator(".tile__action--pin").click();
+    await page.mouse.move(0, 0);
+    await settled(page);
+    await expect(page.locator(".tile")).toHaveScreenshot("pinned-at-rest.png");
+  });
+
+  test("a pinned credential-carrying card keeps both corners", async ({ page }) => {
+    // The corner-grammar worst case: safety top-left, state top-right,
+    // neither erasing the other.
+    await bootShelf(page);
+    await page.evaluate(() =>
+      window.__shotshelf__.respond("describe_capture", {
+        scanned: true,
+        secrets: [{ kind: "serviceToken", label: "GitHub token", preview: "ghp_••••••" }],
+      }),
+    );
+    await land(page, FIXTURE.wide);
+    await openBrowse(page);
+    await expect(page.locator(".tile__secret")).toBeVisible();
+    await page.locator(".tile").hover();
+    await page.locator(".tile__action--pin").click();
+    await page.mouse.move(0, 0);
+    await settled(page);
+    await expect(page.locator(".tile")).toHaveScreenshot("pinned-secret-at-rest.png");
+  });
+
+  test("a picked card under the pointer keeps its ring", async ({ page }) => {
+    await bootShelf(page);
+    await land(page, FIXTURE.wide);
+    await openBrowse(page);
+    await page.keyboard.press("ArrowDown");
+    await page.locator(".tile").hover();
+    await settled(page);
+    await expect(page.locator(".tile")).toHaveScreenshot("picked-under-hover.png");
+  });
+
+  test("picking a credential-carrying card keeps the warning rim", async ({ page }) => {
+    await bootShelf(page);
+    await page.evaluate(() =>
+      window.__shotshelf__.respond("describe_capture", {
+        scanned: true,
+        secrets: [{ kind: "serviceToken", label: "GitHub token", preview: "ghp_••••••" }],
+      }),
+    );
+    await land(page, FIXTURE.wide);
+    await openBrowse(page);
+    await expect(page.locator(".tile__secret")).toBeVisible();
+    await page.keyboard.press("ArrowDown");
+    await settled(page);
+    await expect(page.locator(".tile")).toHaveScreenshot("secret-picked.png");
+  });
+
+  test("a multi-pick marks the cursor card and counts itself", async ({ page }) => {
+    await bootShelf(page);
+    await land(page, FIXTURE.wide, { ts: 1 });
+    await land(page, FIXTURE.tall, { ts: 2 });
+    await land(page, FIXTURE.square, { ts: 3 });
+    await openBrowse(page);
+    await page.keyboard.press("ArrowDown");
+    await page.locator(".tile").last().click({ modifiers: ["Shift"] });
+    await page.mouse.move(0, 0);
+    await settled(page);
+    await expect(page.locator(".shelf")).toHaveScreenshot("multi-pick-cursor.png");
+  });
 });

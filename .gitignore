@@ -83,3 +83,7 @@ out/
 # Review agents run in throwaway git worktrees under here. They are clones of
 # this repository, not part of it — one round committed two of them by accident.
 .claude/worktrees/
+
+# The state atlas's screenshots — regenerated on demand, never committed.
+tests/atlas/output/
+tests/atlas/test-output/

@@ -48,6 +48,10 @@ const NON_WINDOWS_UA =
 
 export default defineConfig({
   testDir: "tests",
+  // The state atlas is photography, not a gate — ~50 screenshots per run.
+  // It has its own config (tests/atlas/atlas.config.ts) and only runs when
+  // asked for by name.
+  testIgnore: "**/atlas/**",
   // A failing gate that passes on a retry is not a gate. CI retries once, to
   // absorb runner flakiness, and any test that needs it is a bug to fix.
   retries: process.env["CI"] ? 1 : 0,

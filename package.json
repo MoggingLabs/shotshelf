@@ -21,7 +21,8 @@
     "sidecar": "node scripts/prepare-sidecar.mjs",
     "release": "node scripts/build-release.mjs",
     "postinstall": "node scripts/prepare-sidecar.mjs",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "atlas": "playwright test --config tests/atlas/atlas.config.ts"
   },
   "dependencies": {
     "@crabnebula/tauri-plugin-drag": "^2.1.0",
