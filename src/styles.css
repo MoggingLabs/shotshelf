@@ -1328,3 +1328,86 @@ body {
 .stg a:hover {
   text-decoration: underline;
 }
+
+/* ── The two floating primitives: tooltip and dropdown list ──────────────
+   Both are positioned by their modules (src/ui/tooltip.ts, src/ui/select.ts)
+   as fixed elements clamped to the window, because both float over panes
+   that scroll and must not be clipped mid-sentence. z-index 3: above the
+   overlay's 2, because both can be asked for from inside it. */
+
+.tip {
+  position: fixed;
+  z-index: 3;
+  max-width: 280px;
+  padding: 6px 8px;
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--window);
+  border: 1px solid var(--stroke-strong);
+  border-radius: var(--radius-ctl);
+  box-shadow: var(--shadow-1);
+  white-space: pre-line;
+  /* A tooltip the pointer can land on flickers forever. */
+  pointer-events: none;
+}
+
+/* The native control keeps the options and the value; the button and list
+   render it. Hidden, not removed: the form bindings and the wire tests
+   still read and write the real element. */
+select[data-enhanced] {
+  display: none;
+}
+
+.sel__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+/* The chevron, drawn rather than glyphed: a font's caret sits on the
+   baseline and never quite centres. */
+.sel__button::after {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.sel__list {
+  position: fixed;
+  z-index: 3;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  background: var(--window);
+  border: 1px solid var(--stroke-strong);
+  border-radius: var(--radius-ctl);
+  box-shadow: var(--shadow-1);
+}
+
+.sel__option {
+  padding: 4px 8px;
+  border-radius: var(--radius-ctl);
+  font-size: var(--font-md);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sel__option--active {
+  background: var(--raised-hover);
+}
+
+.sel__option[aria-selected="true"] {
+  font-weight: 600;
+}

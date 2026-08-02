@@ -102,7 +102,7 @@ test("the warning reads as English for a label starting with a vowel", async ({ 
   await land(page, FIXTURE.wide);
 
   await expect
-    .poll(async () => await page.locator(".tile__secret").getAttribute("title"))
+    .poll(async () => await page.locator(".tile__secret").getAttribute("data-tip"))
     .toMatch(/contains an email address/);
 
   // And a consonant still takes "a", so the fix is not "always an".
@@ -110,7 +110,7 @@ test("the warning reads as English for a label starting with a vowel", async ({ 
   await withFindings(page, [TOKEN_FINDING]);
   await land(page, FIXTURE.wide);
   await expect
-    .poll(async () => await page.locator(".tile__secret").getAttribute("title"))
+    .poll(async () => await page.locator(".tile__secret").getAttribute("data-tip"))
     .toMatch(/contains a GitHub token/);
 });
 
@@ -126,7 +126,7 @@ test("the warning never puts the secret itself in the page", async ({ page }) =>
   // that could not enter the system under test, so it could not fail — and its
   // fixture still carried the old leaky "ghp_A1b…" shape, which the Rust rule
   // stopped producing when the marker length became per-pattern.
-  const shown = await page.locator(".tile__secret").getAttribute("title");
+  const shown = await page.locator(".tile__secret").getAttribute("data-tip");
   expect(shown).toContain("ghp_");
   // Only the type marker survives; nothing after it.
   expect(shown).not.toMatch(/ghp_[A-Za-z0-9]/);
@@ -146,7 +146,7 @@ test("several findings are counted, worst first", async ({ page }) => {
 
   await expect(page.locator(".tile__secret-count")).toHaveText("3");
   await expect(page.locator(".tile__secret")).toHaveAttribute("data-kind", "privateKey");
-  await expect(page.locator(".tile__secret")).toHaveAttribute("title", /private key and 2 others/);
+  await expect(page.locator(".tile__secret")).toHaveAttribute("data-tip", /private key and 2 others/);
 });
 
 test("a capture that cannot be read is marked unread, not warned about", async ({ page }) => {
@@ -245,7 +245,7 @@ test("the shelf says once when captures are not being checked", async ({ page })
   // recogniser is present or `tesseract` is not installed — so the wording that
   // named the platform was a build-level claim the probe cannot make.
   await expect
-    .poll(() => page.locator("#shelf-mark").getAttribute("title"))
+    .poll(() => page.locator("#shelf-mark").getAttribute("data-tip"))
     .toMatch(/not being checked for credentials/);
   await expect(page.locator("#shelf-alert")).toBeHidden();
 });

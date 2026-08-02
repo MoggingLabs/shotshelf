@@ -31,6 +31,7 @@ import {
 import { textRecognitionAvailable } from "./shelf/bridge.ts";
 import { Shelf, type Capture } from "./shelf/index.ts";
 import { applyTheme } from "./theme.ts";
+import { initTooltips } from "./ui/tooltip.ts";
 import { until, type Wait } from "./retry.ts";
 import {
   noteScanUnavailable,
@@ -394,6 +395,10 @@ subscribe(
 );
 
 // ── Start-up ─────────────────────────────────────────────────────────────
+
+// One delegated listener answers every `data-tip` in this window, the
+// editor's included.
+initTooltips();
 
 // The gear opens the settings window; the shelf holds no form of its own.
 settingsButton.addEventListener("click", () => {

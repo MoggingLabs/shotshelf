@@ -56,7 +56,7 @@ function marker(findings: readonly SecretFinding[]): HTMLElement {
   const el = document.createElement("span");
   el.className = "tile__secret";
   el.dataset["kind"] = findings[0]?.kind ?? "";
-  el.title = summarise(findings);
+  el.dataset["tip"] = summarise(findings);
   el.append(icon("alert", 12));
 
   // The count only earns its space when there is more than one thing to say.
@@ -133,7 +133,7 @@ export function markRecordingUnscanned(tile: HTMLElement): void {
 function appendUnscanned(tile: HTMLElement, said: string): void {
   const el = document.createElement("span");
   el.className = "tile__unscanned";
-  el.title = said;
+  el.dataset["tip"] = said;
   el.textContent = "?";
   tile.append(el);
 }

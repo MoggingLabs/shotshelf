@@ -39,8 +39,7 @@ function label(item: ShelfItem): HTMLElement {
   const context = item.context?.label;
   el.textContent = context ?? fileName(item.path);
   // The filename is still what the file is called, so it stays reachable.
-  el.title = context ? `${context}
-${fileName(item.path)}` : fileName(item.path);
+  el.dataset["tip"] = context ? `${context}\n${fileName(item.path)}` : fileName(item.path);
   return el;
 }
 

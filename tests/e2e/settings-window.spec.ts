@@ -58,12 +58,16 @@ test("each settings control writes the field it is labelled for", async ({ page 
 
   // General is on screen at boot; the other sections come up behind their
   // tabs as the walk reaches them — a hidden control cannot be driven.
-  await page.locator("#setting-retention").selectOption("8");
+  // The dropdowns are the themed control, driven the way a user drives them;
+  // the native select underneath is hidden and only carries the value.
+  await page.locator("#setting-retention-button").click();
+  await page.getByRole("option", { name: "8 hours" }).click();
   expect((await saved(page))["retentionHours"]).toBe(8);
 
   // "Forever" is the empty option, and it must reach Rust as null rather than
   // as 0 — which would expire every capture the moment it landed.
-  await page.locator("#setting-retention").selectOption("");
+  await page.locator("#setting-retention-button").click();
+  await page.getByRole("option", { name: "Forever" }).click();
   expect((await saved(page))["retentionHours"]).toBeNull();
 
   await page.locator("#setting-max").fill("25");
@@ -92,14 +96,55 @@ test("each settings control writes the field it is labelled for", async ({ page 
       "true",
     );
   }
-  for (const monitor of ["cursor", "primary"]) {
-    await page.locator("#setting-monitor").selectOption(monitor);
+  for (const [label, monitor] of [
+    ["Where my cursor is", "cursor"],
+    ["Primary", "primary"],
+  ] as const) {
+    await page.locator("#setting-monitor-button").click();
+    await page.getByRole("option", { name: label }).click();
     expect((await saved(page))["dockMonitor"]).toBe(monitor);
   }
   for (const theme of ["dark", "light", "system"]) {
     await page.locator(`[data-theme-choice="${theme}"]`).click();
     expect((await saved(page))["theme"]).toBe(theme);
   }
+});
+
+test("no native select is visible anywhere in the window", async ({ page }) => {
+  // The owner's rule: the OS's white dropdown never appears. The native
+  // elements stay in the DOM as value carriers, hidden by the enhancement.
+  await bootSettings(page);
+  for (const section of ["general", "capturing", "appearance", "shortcuts", "about"]) {
+    await page.locator(`button[data-section="${section}"]`).click();
+    await expect(page.locator("select:visible")).toHaveCount(0);
+  }
+});
+
+test("the themed dropdown speaks keyboard", async ({ page }) => {
+  // The select-only combobox contract: arrows open and walk, Enter chooses,
+  // Escape closes without choosing — and is consumed, so the window does not
+  // also act on the same press.
+  await bootSettings(page);
+  await echoSaves(page);
+
+  const button = page.locator("#setting-retention-button");
+  await button.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(button).toHaveAttribute("aria-expanded", "true");
+
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+
+  expect((await saved(page))["retentionHours"]).toBe(1);
+  await expect(button).toHaveText("1 hour");
+  await expect(button).toHaveAttribute("aria-expanded", "false");
+
+  // Escape closes the list and nothing else changes.
+  await page.keyboard.press("ArrowDown");
+  await expect(button).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("Escape");
+  await expect(button).toHaveAttribute("aria-expanded", "false");
+  expect((await saved(page))["retentionHours"]).toBe(1);
 });
 
 test("choosing a theme stamps the window at once", async ({ page }) => {

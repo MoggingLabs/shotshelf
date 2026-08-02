@@ -209,7 +209,7 @@ test("the pin control shows its own state, not whichever button came first", asy
   await pin.click();
 
   await expect(pin).toHaveClass(/tile__action--on/);
-  await expect(pin).toHaveAttribute("title", /unpin/i);
+  await expect(pin).toHaveAttribute("data-tip", /unpin/i);
   // And nothing else was relabelled or lit.
   //
   // A compound selector, not `filter({ has })`: `has` matches elements with a
@@ -220,7 +220,7 @@ test("the pin control shows its own state, not whichever button came first", asy
     0,
   );
   const labels = await others.evaluateAll((nodes) =>
-    nodes.map((node) => node.getAttribute("title") ?? ""),
+    nodes.map((node) => node.getAttribute("data-tip") ?? ""),
   );
   for (const label of labels) {
     expect(label).not.toMatch(/pinned/i);
@@ -229,7 +229,7 @@ test("the pin control shows its own state, not whichever button came first", asy
   // Unpinning goes back, on the same control.
   await pin.click();
   await expect(pin).not.toHaveClass(/tile__action--on/);
-  await expect(pin).toHaveAttribute("title", /pin/i);
+  await expect(pin).toHaveAttribute("data-tip", /pin/i);
 });
 
 test("copying a capture asks Rust for the clipboard, not the DOM", async ({ page }) => {
@@ -348,7 +348,7 @@ test("a card is labelled with what was in front when it was taken", async ({ pag
   // screenshot this is.
   await expect(page.locator(".tile__label")).toHaveText("Code — auth.ts");
   // The filename is still what the file is called, so it stays reachable.
-  await expect(page.locator(".tile__label")).toHaveAttribute("title", /wide\.png/);
+  await expect(page.locator(".tile__label")).toHaveAttribute("data-tip", /wide\.png/);
 });
 
 test("a card with no context falls back to the filename", async ({ page }) => {
@@ -455,10 +455,10 @@ test("captures taken while the app was closed come back on the next launch", asy
   await expect(page.locator(".tile")).toHaveCount(2);
   // Newest at the top, from the time each was *taken* — not the launch time,
   // which would put yesterday's screenshots under "Today" and restart their
-  // retention clock on every launch. The label's tooltip identifies the card;
-  // the card itself no longer carries a title.
+  // retention clock on every launch. The label's tip identifies the card;
+  // the card itself no longer carries one.
   await expect(page.locator(".tile").first().locator(".tile__label")).toHaveAttribute(
-    "title",
+    "data-tip",
     /wide\.png/,
   );
 });
@@ -518,7 +518,7 @@ test("the tooltip says what is watched, in every state it can be in", async ({ p
       window.__shotshelfStubs__ = { catch_watch_dirs: stub };
     }, { dirs, clipboard });
     await bootShelf(page);
-    return (await page.locator("#shelf-mark").getAttribute("title")) ?? "";
+    return (await page.locator("#shelf-mark").getAttribute("data-tip")) ?? "";
   };
 
   await expect
@@ -546,7 +546,7 @@ test("the watching indicator is green when a folder really is watched", async ({
   await bootShelf(page);
 
   await expect(page.locator("#shelf-mark")).toHaveClass(/shelf__mark--live/);
-  await expect(page.locator("#shelf-mark")).toHaveAttribute("title", /Pictures/);
+  await expect(page.locator("#shelf-mark")).toHaveAttribute("data-tip", /Pictures/);
 });
 
 test("an unreachable catch engine is not shown as healthy either", async ({ page }) => {
@@ -559,7 +559,7 @@ test("an unreachable catch engine is not shown as healthy either", async ({ page
   await bootShelf(page);
 
   await expect(page.locator("#shelf-mark")).not.toHaveClass(/shelf__mark--live/);
-  await expect(page.locator("#shelf-mark")).toHaveAttribute("title", /could not reach/i);
+  await expect(page.locator("#shelf-mark")).toHaveAttribute("data-tip", /could not reach/i);
 });
 
 test("a shelf that asks before the catch engine is up waits rather than reporting failure", async ({
@@ -599,7 +599,7 @@ test("a shelf that asks before the catch engine is up waits rather than reportin
   // Both waited and both got their real answer: the indicator is live and the
   // capture the launch missed is on the shelf.
   await expect(page.locator("#shelf-mark")).toHaveClass(/shelf__mark--live/);
-  await expect(page.locator("#shelf-mark")).toHaveAttribute("title", /Pictures/);
+  await expect(page.locator("#shelf-mark")).toHaveAttribute("data-tip", /Pictures/);
   await expect(page.locator(".tile")).toHaveCount(1);
   // And nothing was reported as broken along the way.
   await expect(page.locator("#shelf-alert")).not.toContainText(/could not reach/i);
@@ -709,7 +709,7 @@ test("captures older than the retention window are let go, and the setting is th
   await page.clock.runFor(15_000);
 
   await expect(page.locator(".tile")).toHaveCount(1);
-  await expect(page.locator(".tile__label")).toHaveAttribute("title", /just-now\.png/);
+  await expect(page.locator(".tile__label")).toHaveAttribute("data-tip", /just-now\.png/);
   // And the eviction is said out loud — the one destructive-looking act in
   // the app used to be silent.
   await expect(page.locator("#shelf-alert")).toHaveText(/left the shelf.*untouched/);
@@ -1083,7 +1083,7 @@ test("a clipboard watcher that did not start is said out loud", async ({ page })
   // The folders are fine, so the dot still says so.
   await expect(page.locator("#shelf-mark")).toHaveClass(/shelf__mark--live/);
   // And the tooltip does not claim a watcher that is not running.
-  await expect(page.locator("#shelf-mark")).not.toHaveAttribute("title", /\+ the clipboard/);
+  await expect(page.locator("#shelf-mark")).not.toHaveAttribute("data-tip", /\+ the clipboard/);
 });
 
 test("the list says when more captures lie below the fold", async ({ page }) => {

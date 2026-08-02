@@ -354,14 +354,14 @@ function toolbar(session: EditSession, callbacks: EditorHost): HTMLElement {
     // The one irreversible tool says so where the hand hovers — USAGE's
     // "Redact destroys" paragraph reached only readers of USAGE.
     if (tool === "redact") {
-      button.title = "Removes the pixels underneath — permanent in the saved copy";
+      button.dataset["tip"] = "Removes the pixels underneath — permanent in the saved copy";
     }
     button.addEventListener("click", () => setTool(tool));
     bar.append(button);
   }
 
   const undo = action("Undo", "editor-undo", () => void undoEdit());
-  undo.title = "Undo the last mark (Ctrl+Z)";
+  undo.dataset["tip"] = "Undo the last mark (Ctrl+Z)";
   // Nothing has been drawn yet.
   undo.disabled = true;
 
@@ -372,7 +372,7 @@ function toolbar(session: EditSession, callbacks: EditorHost): HTMLElement {
   // action. A styling class, not the id: `styles.css` explains why an
   // id-strength rule was the wrong tool, and the id stays for lookups.
   save.classList.add("editor__action--primary");
-  save.title = "Save as a new capture — the original is untouched";
+  save.dataset["tip"] = "Save as a new capture — the original is untouched";
 
   bar.append(undo, save);
   return bar;

@@ -10,6 +10,8 @@
 
 import { el } from "../dom.ts";
 import { until, type Wait } from "../retry.ts";
+import { enhanceSelect, refreshSelect } from "../ui/select.ts";
+import { initTooltips } from "../ui/tooltip.ts";
 import {
   checkForUpdatesNow,
   currentSettings,
@@ -104,12 +106,15 @@ function fill(): void {
     retention.append(extra);
   }
   retention.value = held;
+  refreshSelect(retention);
 
   el<HTMLInputElement>("#setting-max").value = String(current.maxItems);
   el<HTMLInputElement>("#setting-downscale").checked = current.downscaleExports;
   el<HTMLInputElement>("#setting-autostart").checked = current.startAtLogin;
   el<HTMLInputElement>("#setting-updates").checked = current.checkForUpdates;
-  el<HTMLSelectElement>("#setting-monitor").value = current.dockMonitor;
+  const monitor = el<HTMLSelectElement>("#setting-monitor");
+  monitor.value = current.dockMonitor;
+  refreshSelect(monitor);
   el<HTMLButtonElement>("#setting-hotkey").textContent = prettyHotkey(current.hotkey);
 
   for (const segment of document.querySelectorAll<HTMLButtonElement>("[data-theme-choice]")) {
@@ -286,6 +291,11 @@ function initAbout(): void {
 initNav();
 bindControls();
 initAbout();
+initTooltips();
+// After bindControls: the themed dropdowns re-dispatch `change` on the real
+// selects, so the save handlers must already be listening.
+enhanceSelect(el<HTMLSelectElement>("#setting-retention"));
+enhanceSelect(el<HTMLSelectElement>("#setting-monitor"));
 
 // A save from any window — including this one — refreshes the form with what
 // was actually stored. The registration promise is watched: a window that

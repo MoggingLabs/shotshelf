@@ -257,7 +257,7 @@ test("the arrows walk the order on screen, not the order captures arrived", asyn
   // the card itself no longer carries one; it held the full absolute path,
   // which is more than the app exposes anywhere else.
   const first = page.locator(".tile").first();
-  await expect(first.locator(".tile__label")).toHaveAttribute("title", /wide\.png/);
+  await expect(first.locator(".tile__label")).toHaveAttribute("data-tip", /wide\.png/);
 
   await page.keyboard.press("ArrowDown");
 

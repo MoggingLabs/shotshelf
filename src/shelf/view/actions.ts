@@ -49,10 +49,9 @@ function action(name: Parameters<typeof icon>[0], title: string): HTMLButtonElem
   const button = document.createElement("button");
   button.className = "tile__action";
   button.type = "button";
-  button.title = title;
-  // The name a screen reader announces. The icon is `aria-hidden` and a
-  // `title` alone is a tooltip first and an accessible name only by fallback,
-  // which some screen reader and browser pairings do not apply.
+  button.dataset["tip"] = title;
+  // The name a screen reader announces. The icon is `aria-hidden` and the
+  // themed tip is presentation only — the name has to live somewhere real.
   button.setAttribute("aria-label", title);
   button.append(icon(name, 14));
   return button;
@@ -95,7 +94,7 @@ function pinButton(id: string, pinned: boolean, handlers: TileHandlers): HTMLBut
  */
 function setPinned(button: HTMLElement, pinned: boolean): void {
   button.classList.toggle("tile__action--on", pinned);
-  button.title = pinLabel(pinned);
+  button.dataset["tip"] = pinLabel(pinned);
   // The announced name follows the state exactly as the tooltip does.
   button.setAttribute("aria-label", pinLabel(pinned));
   button.setAttribute("aria-pressed", String(pinned));

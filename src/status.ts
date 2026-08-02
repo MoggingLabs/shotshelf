@@ -263,9 +263,9 @@ function paint(): void {
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n\n");
-  mark.title = said;
+  mark.dataset["tip"] = said;
   // The mark is a button now, and the announced name is the diagnostic
-  // itself — the policy is aria-label equal to the tooltip, and this tooltip
-  // is the one that matters most.
+  // itself — the policy is aria-label equal to the tip, and this tip is the
+  // one that matters most.
   mark.setAttribute("aria-label", said === "" ? "Watch status" : said);
 }
