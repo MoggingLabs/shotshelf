@@ -53,6 +53,20 @@ export class ShelfView {
     this.#list = list;
     this.#count = count;
     this.#callbacks = callbacks;
+    // The bottom fade that says "there is more below". Scroll position and
+    // content both move it, so both routes converge here.
+    list.addEventListener("scroll", () => this.#reflectMore());
+  }
+
+  /**
+   * Overlay scrollbar engines draw no thumb at rest, so scrollability was
+   * invisible — twelve items read as three. `data-more` drives the fade the
+   * stylesheet paints along the bottom edge while content lies below.
+   */
+  #reflectMore(): void {
+    const more =
+      this.#list.scrollTop + this.#list.clientHeight < this.#list.scrollHeight - 1;
+    this.#list.dataset["more"] = String(more);
   }
 
   #tileFor(item: ShelfItem): HTMLElement {
@@ -86,6 +100,7 @@ export class ShelfView {
 
     this.#list.replaceChildren(grid);
     this.#list.scrollTop = 0;
+    this.#reflectMore();
   }
 
   /**
@@ -147,6 +162,7 @@ export class ShelfView {
     );
 
     this.#list.scrollTop = scrolled;
+    this.#reflectMore();
   }
 
   #renderEmpty(): void {

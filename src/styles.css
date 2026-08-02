@@ -344,11 +344,33 @@ body {
 
 /* Scrollbar note, for the rule above: the standard properties, not
    `::-webkit-scrollbar` — the pseudo-element rules produced no laid-out
-   scrollbar at all under WebView2's overlay scrollbars (measured
+   scrollbar at all under overlay scrollbars (measured
    `offsetWidth === clientWidth` with 12 items), so a list holding four
    windows of content showed no scroll affordance beyond a clipped tile.
-   `scrollbar-width: thin` yields a real gutter; the colour comes off the
-   stroke scale. The one sub-24px interactive exception in `docs/DESIGN.md`. */
+   `scrollbar-width: thin` yields a classic thin bar where the engine draws
+   classic bars; the colour comes off the stroke scale. The one sub-24px
+   interactive exception in `docs/DESIGN.md`.
+
+   And because overlay engines hide even that at rest, the affordance that
+   cannot be taken away: a fade along the bottom edge whenever more content
+   lies below, toggled by the view. Sticky, with the negative margin giving
+   its height back, so it costs no layout. */
+.shelf__items::after {
+  content: "";
+  position: sticky;
+  bottom: 0;
+  display: block;
+  height: 24px;
+  margin-top: -24px;
+  background: linear-gradient(to top, var(--panel), transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast) ease-out;
+}
+
+.shelf__items[data-more="true"]::after {
+  opacity: 1;
+}
 
 /* A wall of identical tiles is hard to read; dates give the eye a foothold. */
 .group__label {

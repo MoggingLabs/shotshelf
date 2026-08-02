@@ -1137,3 +1137,23 @@ test("a clipboard watcher that did not start is said out loud", async ({ page })
   // And the tooltip does not claim a watcher that is not running.
   await expect(page.locator("#shelf-mark")).not.toHaveAttribute("title", /\+ the clipboard/);
 });
+
+test("the list says when more captures lie below the fold", async ({ page }) => {
+  // Overlay scrollbar engines draw no thumb at rest, so a shelf holding four
+  // windows of content read as three cards — a clipped tile was the only cue.
+  // The fade cannot be taken away by the engine.
+  await bootShelf(page);
+  for (let index = 0; index < 12; index += 1) {
+    await land(page, FIXTURE.wide, { ts: index });
+  }
+  await openBrowse(page);
+
+  await expect(page.locator("#shelf-items")).toHaveAttribute("data-more", "true");
+
+  // Scrolled to the bottom, the fade stands down — saying "more" with
+  // nothing below is how an affordance becomes noise.
+  await page.locator("#shelf-items").evaluate((list) => {
+    list.scrollTop = list.scrollHeight;
+  });
+  await expect(page.locator("#shelf-items")).toHaveAttribute("data-more", "false");
+});
