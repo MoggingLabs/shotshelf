@@ -22,6 +22,10 @@ on:
       - settings.html
       - "src/settings-window/**"
       - "tests/visual/**"
+      # The harness and runner config shape every pixel as surely as the
+      # stylesheet does — the pinned color scheme lives there.
+      - playwright.config.ts
+      - "tests/harness/**"
       - .github/workflows/goldens.yml
 
 permissions:
