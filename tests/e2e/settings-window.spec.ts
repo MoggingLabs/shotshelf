@@ -165,6 +165,27 @@ test("the stored theme is stamped at boot", async ({ page }) => {
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 });
 
+test("system follows the OS, live", async ({ page }) => {
+  // "System" is not "whatever it was at boot": the media listener re-stamps
+  // when the OS setting moves under a running app.
+  await page.emulateMedia({ colorScheme: "light" });
+  await bootSettings(page);
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+});
+
+test("the light palette really changes the paint", async ({ page }) => {
+  // `data-theme` flipping while every token stays dark is the failure a
+  // stamp-only assertion cannot see.
+  await bootSettings(page, { settings: { theme: "light" } });
+  const paint = await page.evaluate(
+    () => getComputedStyle(document.documentElement).getPropertyValue("--window"),
+  );
+  expect(paint.trim()).toBe("#f4f5f8");
+});
+
 test("a clamp is applied out loud", async ({ page }) => {
   // Rust clamps and returns what it stored; the form adopts *that* answer and
   // says so — a 500 that silently became 200 reads as the app ignoring the

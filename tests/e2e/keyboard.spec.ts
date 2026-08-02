@@ -227,7 +227,7 @@ test("a save in the settings window reaches the shelf through the changed event"
   await openBrowse(page);
   await expect(page.locator(".tile")).toHaveCount(3);
 
-  const stored = { ...DEFAULT_SETTINGS, maxItems: 1 };
+  const stored = { ...DEFAULT_SETTINGS, maxItems: 1, theme: "light" };
   await page.evaluate(
     ([event, settings]) => window.__shotshelf__.emit(event, settings),
     [SETTINGS_CHANGED_EVENT, stored] as const,
@@ -235,6 +235,8 @@ test("a save in the settings window reaches the shelf through the changed event"
 
   // One tile rather than three: the shelf honoured the 1 the event carried.
   await expect(page.locator(".tile")).toHaveCount(1);
+  // And the theme crossed with it — the shelf window re-stamps too.
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 });
 
 test("the arrows walk the order on screen, not the order captures arrived", async ({ page }) => {

@@ -281,6 +281,21 @@ test("settings window states", async ({ page }) => {
   await shot(page, "settings-03-save-error-note");
 });
 
+test("the light theme, shelf side", async ({ page }) => {
+  await bootShelf(page, { settings: { theme: "light" } });
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await settled(page);
+  await shot(page, "light-00-browse");
+});
+
+test("the light theme, settings side", async ({ page }) => {
+  await page.setViewportSize(SETTINGS_VIEWPORT);
+  await bootSettings(page, { settings: { theme: "light" } });
+  await settled(page);
+  await shot(page, "light-01-settings");
+});
+
 test("the strip's vocabulary", async ({ page }) => {
   await bootShelf(page);
   await land(page, FIXTURE.wide);

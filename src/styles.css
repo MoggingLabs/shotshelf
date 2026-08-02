@@ -47,6 +47,11 @@
   /* ── Roles ── */
   --accent: #6366f1;
   --accent-hover: #7275f4;
+  /* Accent as *text* (links). Its own token because no single indigo can be
+     both a fill that carries dark ink (needs to be light) and text on a
+     light surface (needs to be dark) — the light theme proves it: 4.5:1
+     against both is arithmetically impossible from one value. */
+  --accent-text: #7275f4;
   --live: #34d399;
   --live-halo: rgba(52, 211, 153, 0.14);
   --danger: #ef4444;
@@ -111,6 +116,46 @@
   --motion-state: 160ms;
 
   color-scheme: dark;
+}
+
+/* ── The light palette ────────────────────────────────────────────────────
+   `src/theme.ts` stamps `data-theme` on the root — "light" or "dark",
+   resolved from the setting, with "system" following the OS live. Dark is
+   the base `:root` above; this block overrides exactly the tokens whose
+   value is a theme decision.
+
+   What deliberately does NOT change: everything that sits over a
+   *photograph* rather than a theme surface (the scrims, --text-on-media,
+   the credential badges and their ink) — a capture is whatever colour it
+   is in either theme, and those tokens already answer for their worst
+   background. Role fills and --ink-on-fill keep their audited pairs for
+   the same reason.
+
+   The contrast maths, redone for light (AA = 4.5:1 text, 3:1 UI):
+   --text 15.4:1 and --muted 5.6:1 on --window; --accent-text 5.8:1 as link
+   text; --danger-soft 5.9:1 as the failure text; --live darkened to hold
+   3.4:1 as a status dot where the dark theme's mint fell to 1.7:1. */
+:root[data-theme="light"] {
+  --panel: rgba(248, 249, 252, 0.94);
+  --raised: rgba(0, 0, 0, 0.05);
+  --raised-hover: rgba(0, 0, 0, 0.09);
+  --stroke: rgba(0, 0, 0, 0.1);
+  --stroke-strong: rgba(0, 0, 0, 0.18);
+  --stroke-heavy: rgba(0, 0, 0, 0.3);
+  --window: #f4f5f8;
+  --overlay: rgba(250, 250, 253, 0.98);
+  --surface-deep: #e8eaef;
+  --shadow-1: 0 4px 14px rgba(0, 0, 0, 0.18);
+
+  --text: #1a1d26;
+  --muted: #5c6270;
+
+  --accent-text: #4f46e5;
+  --danger-soft: #b91c1c;
+  --live: #059669;
+  --live-halo: rgba(5, 150, 105, 0.14);
+
+  color-scheme: light;
 }
 
 /* Windows rounds the window itself through DWM, because acrylic is painted
@@ -1321,7 +1366,7 @@ body {
 }
 
 .stg a {
-  color: var(--accent-hover);
+  color: var(--accent-text);
   text-decoration: none;
 }
 

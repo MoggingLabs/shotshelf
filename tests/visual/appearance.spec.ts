@@ -242,4 +242,96 @@ test.describe("appearance", () => {
     await settled(page);
     await expect(page.locator(".shelf")).toHaveScreenshot("multi-pick-cursor.png");
   });
+
+  // ── The light palette ────────────────────────────────────────────────
+  // The same compositions that gate the dark theme, on the light tokens.
+  // Every one is a single overridden token away from a light-only
+  // regression the dark goldens can never see — the AA reworks in
+  // particular (`--accent-text`, `--danger-soft`, `--live`) exist only in
+  // the light block, so only a light image gates them.
+  const LIGHT = { settings: { theme: "light" as const } };
+
+  test("the browse view in light", async ({ page }) => {
+    await bootShelf(page, LIGHT);
+    await land(page, FIXTURE.wide, { ts: NOW - DAY });
+    await land(page, FIXTURE.tall, { ts: NOW - 2 * DAY });
+    await openBrowse(page);
+    await settled(page);
+    await expect(page.locator(".shelf")).toHaveScreenshot("light-browse.png");
+  });
+
+  test("the settings window in light", async ({ page }) => {
+    await page.setViewportSize(SETTINGS_VIEWPORT);
+    await bootSettings(page, LIGHT);
+    await settled(page);
+    await expect(page.locator(".stg")).toHaveScreenshot("light-settings-general.png");
+  });
+
+  test("a pinned card at rest, in light", async ({ page }) => {
+    await bootShelf(page, LIGHT);
+    await land(page, FIXTURE.wide);
+    await openBrowse(page);
+    await page.locator(".tile").hover();
+    await page.locator(".tile__action--pin").click();
+    await page.mouse.move(0, 0);
+    await settled(page);
+    await expect(page.locator(".tile")).toHaveScreenshot("light-pinned-at-rest.png");
+  });
+
+  test("a pinned credential-carrying card, in light", async ({ page }) => {
+    await bootShelf(page, LIGHT);
+    await page.evaluate(() =>
+      window.__shotshelf__.respond("describe_capture", {
+        scanned: true,
+        secrets: [{ kind: "serviceToken", label: "GitHub token", preview: "ghp_••••••" }],
+      }),
+    );
+    await land(page, FIXTURE.wide);
+    await openBrowse(page);
+    await expect(page.locator(".tile__secret")).toBeVisible();
+    await page.locator(".tile").hover();
+    await page.locator(".tile__action--pin").click();
+    await page.mouse.move(0, 0);
+    await settled(page);
+    await expect(page.locator(".tile")).toHaveScreenshot("light-pinned-secret-at-rest.png");
+  });
+
+  test("a picked card under the pointer, in light", async ({ page }) => {
+    await bootShelf(page, LIGHT);
+    await land(page, FIXTURE.wide);
+    await openBrowse(page);
+    await page.keyboard.press("ArrowDown");
+    await page.locator(".tile").hover();
+    await settled(page);
+    await expect(page.locator(".tile")).toHaveScreenshot("light-picked-under-hover.png");
+  });
+
+  test("a picked credential-carrying card, in light", async ({ page }) => {
+    await bootShelf(page, LIGHT);
+    await page.evaluate(() =>
+      window.__shotshelf__.respond("describe_capture", {
+        scanned: true,
+        secrets: [{ kind: "serviceToken", label: "GitHub token", preview: "ghp_••••••" }],
+      }),
+    );
+    await land(page, FIXTURE.wide);
+    await openBrowse(page);
+    await expect(page.locator(".tile__secret")).toBeVisible();
+    await page.keyboard.press("ArrowDown");
+    await settled(page);
+    await expect(page.locator(".tile")).toHaveScreenshot("light-secret-picked.png");
+  });
+
+  test("a multi-pick with its cursor card, in light", async ({ page }) => {
+    await bootShelf(page, LIGHT);
+    await land(page, FIXTURE.wide, { ts: 1 });
+    await land(page, FIXTURE.tall, { ts: 2 });
+    await land(page, FIXTURE.square, { ts: 3 });
+    await openBrowse(page);
+    await page.keyboard.press("ArrowDown");
+    await page.locator(".tile").last().click({ modifiers: ["Shift"] });
+    await page.mouse.move(0, 0);
+    await settled(page);
+    await expect(page.locator(".shelf")).toHaveScreenshot("light-multi-pick-cursor.png");
+  });
 });

@@ -97,7 +97,32 @@ dot. Motion is never the only signal, which is what lets the global
 ## Palette
 
 Semantic tokens only; `check-design.mjs` refuses a colour literal outside
-`:root`. The groups:
+`:root`. Two themes: dark is the base `:root`, light is a
+`:root[data-theme="light"]` override block, and `src/theme.ts` stamps
+`data-theme` from the setting — "system" follows `prefers-color-scheme`
+live. (The "no light theme" stance is retired: it dated from when the whole
+UI was a 225px acrylic popover, and a real settings window on a light
+desktop looked like a hole in it.) The light block overrides exactly the
+tokens whose value is a theme decision:
+
+| Token | Dark | Light | Why the light value |
+| :-- | :-- | :-- | :-- |
+| `--window` | `#14161e` | `#f4f5f8` | The solid window surface |
+| `--panel` | white-on-dark tint | `rgba(248,249,252,.94)` | Same acrylic trick, inverted |
+| `--raised` / strokes | white alphas | black alphas | Same three strengths |
+| `--text` / `--muted` | `#e9ebf0` / `#8b91a1` | `#1a1d26` / `#5c6270` | 15.4:1 and 5.6:1 on `--window` |
+| `--accent-text` | `#7275f4` | `#4f46e5` | Links: 5.8:1 on light |
+| `--danger-soft` | `#fca5a5` | `#b91c1c` | Failure text: 5.9:1 on light |
+| `--live` | `#34d399` | `#059669` | The dot held only 1.7:1 on light |
+
+What deliberately does **not** change: everything that answers to a
+*photograph* rather than a theme surface — the scrims, `--text-on-media`,
+the credential badges — and the role **fills** with their audited
+`--ink-on-fill`. `--accent-text` exists because no single indigo can be both
+a fill carrying dark ink (needs to be light) and text on a light surface
+(needs to be dark); 4.5:1 against both is arithmetically impossible.
+
+The groups:
 
 - **Surfaces**: `--panel` (tinted acrylic/vibrancy), `--raised`/`--raised-hover`
   (controls), `--overlay` (editor, quick look), `--surface-deep` (canvas),
