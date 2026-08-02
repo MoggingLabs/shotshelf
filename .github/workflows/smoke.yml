@@ -1,0 +1,188 @@
+# Runner smokes: launch the SHIPPED v0.2.0 artifacts on the two OSes nobody
+# has watched, drive them with synthetic captures, and upload screenshots.
+#
+# Deliberately assertion-free. `docs/PARITY.md`'s rule is that a cell is
+# filled when someone *watched* the thing happen — so these jobs only produce
+# evidence (screencaptures + the app's own log), and a person reads the images
+# before a single cell moves. A green run here proves nothing by itself;
+# that is the point, and why this is not part of the gate.
+#
+# `workflow_dispatch` only: it downloads a pinned release and costs several
+# runner-minutes of theatre — nothing about a push invalidates it.
+
+name: Runner smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to smoke"
+        required: false
+        default: "v0.2.0"
+      linux_run_id:
+        description: "Release run id carrying the linux-smoke artifact"
+        required: false
+        default: "30732749546"
+
+jobs:
+  macos:
+    name: macOS
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - name: Download the shipped dmg
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" --pattern "*.dmg" --dir dist
+          ls -la dist
+
+      - name: Install it the way a user would
+        run: |
+          hdiutil attach dist/*.dmg -nobrowse -mountpoint /Volumes/shotshelf
+          cp -R /Volumes/shotshelf/*.app /Applications/
+          hdiutil detach /Volumes/shotshelf
+          # The release is unsigned; this strip is what a user must do too,
+          # and recording that it is REQUIRED is itself an observation.
+          xattr -dr com.apple.quarantine /Applications/Shotshelf.app || true
+
+      - name: Seed a capture before first launch (backfill evidence)
+        run: |
+          mkdir -p ~/Desktop shots
+          # A text-bearing capture with a credential canary, for Vision OCR.
+          cat > canary.py <<'EOF'
+          from PIL import Image, ImageDraw
+          img = Image.new("RGB", (1280, 720), "white")
+          d = ImageDraw.Draw(img)
+          d.text((50, 50), "deploy failed: invalid credentials\nAKIAIOSFODNN7EXAMPLE\nrunner smoke canary", fill="black")
+          img.save("backfill.png")
+          EOF
+          pip3 install --quiet pillow
+          python3 canary.py
+          cp backfill.png ~/Desktop/smoke-backfill.png
+
+      - name: Launch, catch, screencapture
+        run: |
+          open /Applications/Shotshelf.app
+          sleep 12
+          screencapture -x shots/01-after-launch.png
+          # A capture landing while the app runs: the column should peek.
+          cp backfill.png ~/Desktop/smoke-live.png
+          sleep 6
+          screencapture -x shots/02-after-live-capture.png
+          sleep 4
+          screencapture -x shots/03-later.png
+
+      - name: Autostart reconcile probe (no input needed)
+        run: |
+          ls -la ~/Library/LaunchAgents || true
+          osascript -e 'quit app "Shotshelf"' || pkill -f Shotshelf.app || true
+          sleep 3
+          SETTINGS="$HOME/Library/Application Support/com.mogginglabs.shotshelf/settings.json"
+          if [ -f "$SETTINGS" ]; then
+            python3 - "$SETTINGS" <<'EOF'
+          import json, sys
+          p = sys.argv[1]
+          s = json.load(open(p))
+          s["startAtLogin"] = True
+          json.dump(s, open(p, "w"))
+          EOF
+            open /Applications/Shotshelf.app
+            sleep 8
+            echo "--- LaunchAgents after startAtLogin=true:"
+            ls -la ~/Library/LaunchAgents || true
+            cp ~/Library/LaunchAgents/*.plist shots/ 2>/dev/null || true
+          else
+            echo "no settings file was written at $SETTINGS"
+          fi
+
+      - name: Try the hotkey (runners may refuse Accessibility)
+        run: |
+          osascript -e 'tell application "System Events" to keystroke "s" using {command down, shift down}' \
+            && echo "keystroke accepted" || echo "keystroke refused (Accessibility)"
+          sleep 3
+          screencapture -x shots/04-after-hotkey-attempt.png
+
+      - name: Collect the log and wind down
+        if: always()
+        run: |
+          pkill -f Shotshelf.app || true
+          cp "$HOME/Library/Application Support/com.mogginglabs.shotshelf/shotshelf.log" shots/ 2>/dev/null || true
+          ls -la shots
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: smoke-macos-${{ inputs.tag }}
+          path: shots/
+
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Fetch the linux-smoke bundle from the release run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ inputs.linux_run_id }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "linux-smoke-ubuntu-latest-${{ inputs.tag }}" --dir dist
+          find dist -name "*.deb"
+
+      - name: Install it plus a display to run on
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb openbox xdotool imagemagick \
+            libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1
+          sudo apt-get install -y ./$(find dist -name "*.deb" | head -1)
+
+      - name: Seed a capture before first launch
+        run: |
+          mkdir -p ~/Pictures shots
+          sudo apt-get install -y --no-install-recommends python3-pil
+          python3 - <<'EOF'
+          from PIL import Image, ImageDraw
+          img = Image.new("RGB", (1280, 720), "white")
+          d = ImageDraw.Draw(img)
+          d.text((50, 50), "deploy failed: invalid credentials\nAKIAIOSFODNN7EXAMPLE\nrunner smoke canary", fill="black")
+          img.save("backfill.png")
+          EOF
+          cp backfill.png ~/Pictures/smoke-backfill.png
+
+      - name: Launch under Xvfb, catch, hotkey, screenshot
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 2
+          openbox &
+          sleep 1
+          shotshelf &
+          sleep 12
+          import -window root shots/01-after-launch.png
+          cp backfill.png ~/Pictures/smoke-live.png
+          sleep 6
+          import -window root shots/02-after-live-capture.png
+          # The X11 hotkey — the one platform where synthetic input needs no
+          # permission. This is the XGrabKey path USAGE documents as X11-only.
+          xdotool key ctrl+shift+s
+          sleep 3
+          import -window root shots/03-after-hotkey.png
+          xdotool key ctrl+shift+s
+          sleep 2
+          import -window root shots/04-after-hotkey-toggle.png
+
+      - name: Collect the log and wind down
+        if: always()
+        run: |
+          pkill -f shotshelf || true
+          cp ~/.local/share/com.mogginglabs.shotshelf/shotshelf.log shots/ 2>/dev/null || true
+          ls -la shots
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: smoke-linux-${{ inputs.tag }}
+          path: shots/
