@@ -1,0 +1,46 @@
+# The bug template asks for the two things docs/USAGE.md's troubleshooting
+# table needs: which OS, and what the log said. The log paths are printed in
+# the description because nobody finds them on their own.
+name: Bug report
+description: Something did not behave the way the docs promise
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple silicon)
+        - macOS (Intel — note that no build ships for it yet)
+        - Linux (say which desktop below)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Shotshelf version
+      description: From the release you installed, e.g. v0.2.0
+      placeholder: v0.2.0
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what the shelf did instead.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: What the log says
+      description: |
+        `shotshelf.log` lives at:
+        - Windows: `%LOCALAPPDATA%\com.mogginglabs.shotshelf\shotshelf.log`
+        - macOS: `~/Library/Application Support/com.mogginglabs.shotshelf/shotshelf.log`
+        - Linux: `~/.local/share/com.mogginglabs.shotshelf/shotshelf.log`
+        Paste the lines from around when it happened. The log never contains
+        capture contents — only paths and events.
+      render: text

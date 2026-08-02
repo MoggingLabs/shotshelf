@@ -1,0 +1,27 @@
+# The feature template asks the question docs/DESIGN.md holds every shipped
+# feature to: what job does it do. It also points at the
+# evaluated-and-declined list, so a request can argue with the recorded
+# reasons rather than with an absence.
+name: Feature request
+description: Something the shelf should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: job
+    attributes:
+      label: What job would this do?
+      description: |
+        Every feature in the shelf can say what job it does (the inventory is
+        in docs/DESIGN.md). Describe the moment this feature would help you —
+        what you were doing, what you reached for, what was not there.
+    validations:
+      required: true
+  - type: textarea
+    id: declined
+    attributes:
+      label: If it is on the declined list, why should that change?
+      description: |
+        docs/DESIGN.md keeps a list of features that were evaluated and
+        deliberately not built, each with its reason (drag-into-shelf,
+        open-on-double-click, search, rename/delete on disk). If yours is
+        one of them, the useful request argues with the reason.

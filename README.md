@@ -12,31 +12,43 @@ take and keeps it one drag away — so you never dig through folders for the cli
 [![License: MIT](https://img.shields.io/badge/License-MIT-6366f1?style=for-the-badge)](./LICENSE)
 
 [![CI](https://github.com/MoggingLabs/shotshelf/actions/workflows/ci.yml/badge.svg)](https://github.com/MoggingLabs/shotshelf/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/MoggingLabs/shotshelf?style=flat&color=6366f1)](https://github.com/MoggingLabs/shotshelf/releases/latest)
+
+<img src="docs/media/shelf-browse-windows.png" width="225" alt="The shelf on Windows 11: a recording with its duration badge and unscanned marker, a screenshot flagged for carrying a credential, real acrylic behind it all" />
+
+*The real thing on Windows 11 — a recording with its duration badge, a screenshot
+flagged for the credential it contains, acrylic and all.*
 
 </div>
 
 ---
 
-> **Status: built, gated, and run end-to-end on Windows — once, unpackaged.** Every gate below is
-> green on Windows, macOS and Linux, and the front-end suite drives the real UI in a browser. On
-> 2026-07-31 the development build was launched for the first time, on Windows 11, and the whole
-> loop was driven with synthetic captures: a screenshot and a recording caught off disk, an image
-> caught off the clipboard, thumbnails and a poster frame rendered, text recognised on-device, a
-> credential flagged on the card, an annotation drawn and saved, a capture copied to the clipboard
-> and a native drag started. The installers were then built for the first time on any machine —
-> an `.msi` and an NSIS `.exe` — and the **packaged** binary was launched from the MSI's own
-> contents, caught a screenshot and a recording, and drew a poster frame with the ffmpeg that
-> shipped inside it. **macOS and Linux have still never run it, and nothing is signed** — what
-> remains unverified is named in
-> [SECURITY.md](./SECURITY.md#what-has-not-been-verified). Cross-platform desktop app
-> on **Tauri v2**. The catch engine, the corner
-> popover, native drag-out, recordings, settings and packaging are all in — and on top of them:
-> on-device text recognition, a credential warning, a five-tool annotation editor with real
-> redaction, before/after comparison, quick look, multi-select and a keyboard map. Prior-art
-> research settled fork-vs-build (nothing forkable does cross-platform auto-catch, so we build)
-> and confirmed the scary part, native drag-out, is a solved plugin. The research notes behind those choices are kept locally and are not in the repo. Part of
-> [MoggingLabs Internals](https://github.com/MoggingLabs/mogginglabs-internals), in a new category:
-> an **internal desktop utility** (not a platform driver like the `-wire` tools).
+> **Status: v0.2.0 is [released](https://github.com/MoggingLabs/shotshelf/releases) —
+> unsigned, checksummed, and observed running on all three OSes.** Every gate is green on
+> Windows, macOS and Linux; the front-end suite drives the real UI in a browser; and
+> [PARITY](./docs/PARITY.md) records what has actually been *watched* working per OS — Windows
+> live and packaged, macOS and Linux via the shipped v0.2.0 artifacts driven on runners
+> (catch, backfill, hotkey, placement, the LaunchAgent). **Nothing is signed yet** — checksums
+> are the integrity statement, and what remains unverified is named in
+> [SECURITY.md](./SECURITY.md#what-has-not-been-verified). Cross-platform desktop app on
+> **Tauri v2**: the catch engine, the corner popover, native drag-out, recordings, settings and
+> packaging — and on top of them on-device text recognition, a credential warning, a five-tool
+> annotation editor with real redaction, before/after comparison, quick look, multi-select, a
+> full keyboard map with receipts, and shelf-level undo. Prior-art research settled
+> fork-vs-build (nothing forkable does cross-platform auto-catch, so we build); the notes are
+> kept locally and are not in the repo. Part of
+> [MoggingLabs Internals](https://github.com/MoggingLabs/mogginglabs-internals), in a new
+> category: an **internal desktop utility** (not a platform driver like the `-wire` tools).
+
+## 📥 Install
+
+| | |
+| :-- | :-- |
+| **Windows** | Download the [`.msi` or `.exe`](https://github.com/MoggingLabs/shotshelf/releases/latest) — SmartScreen will warn (unsigned; verify against `SHA256SUMS.txt` instead). A winget manifest is staged in [`packaging/winget/`](./packaging/winget/) for submission to winget-pkgs |
+| **macOS** (Apple silicon) | `brew install MoggingLabs/tap/shotshelf` — or download the [`.dmg`](https://github.com/MoggingLabs/shotshelf/releases/latest). Either way the app is unsigned: run `xattr -dr com.apple.quarantine /Applications/Shotshelf.app` once, or right-click → Open |
+| **Linux** | Build from source (below). Bundles build in CI but are deliberately unpublished until a real desktop smoke — the reasoning is in [`release.yml`](./.github/workflows/release.yml) |
+
+Verify any download: `SHA256SUMS.txt` ships with every release.
 
 ## 🎯 The problem
 
@@ -63,6 +75,15 @@ instead of fixing our filing habits.
   which is the unit that actually carries meaning when you are iterating with a model.
 
 One job, done well. No accounts, no cloud, no 15 settings.
+
+<div align="center">
+<img src="docs/media/card-pinned-secret.png" width="199" alt="One card, both corners speaking: the credential badge top-left, the pinned star top-right" />
+&nbsp;&nbsp;
+<img src="docs/media/multi-pick.png" width="225" alt="Three captures picked with the keyboard cursor haloed, the title strip counting 3 of 3 picked" />
+
+*A card that is pinned **and** carrying a credential — both corners keep talking.
+A multi-pick counts itself, and the card the arrows move from wears the halo.*
+</div>
 
 ## 🧱 How it works (target)
 
@@ -407,6 +428,13 @@ still succeeds and emits unsigned artifacts.
 Windows and macOS differ in kind here, not just in variable names: Windows signing is one
 Authenticode timestamped signature, while macOS needs a Developer ID signature **and** a
 round-trip to Apple's notary service before Gatekeeper will open it.
+
+**Every new tag owes two manual follow-ups**, until signing lands and they are worth
+automating: bump the staged winget manifest in [`packaging/winget/`](./packaging/winget/)
+(version, installer URL, and the new `SHA256SUMS.txt` hash) and submit it to winget-pkgs; and
+bump [`Casks/shotshelf.rb`](https://github.com/MoggingLabs/homebrew-tap/blob/master/Casks/shotshelf.rb)
+in the tap the same way. Both pin the release's own checksums — that is the whole integrity
+story while the artifacts are unsigned.
 
 ### The update feed
 

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Usage guide
+    url: https://github.com/MoggingLabs/shotshelf/blob/main/docs/USAGE.md
+    about: How everything works, where files live, and the troubleshooting table.
+  - name: Security and privacy
+    url: https://github.com/MoggingLabs/shotshelf/blob/main/SECURITY.md
+    about: What leaves your machine (nothing), and what has not been verified.
