@@ -271,7 +271,8 @@ and size, because that is identity rather than chrome.
 
 ### Settings
 
-The gear in the title strip opens the settings window — five sections
+The gear in the title strip — or the tray menu's **Settings…** — opens the
+settings window: five sections
 (General, Capturing, Appearance, Shortcuts, About) in a real resizable
 window. How long captures **stay**, how many the shelf **holds**, whether to
 **send smaller copies**, the **hotkey** (recorded from your keys), the

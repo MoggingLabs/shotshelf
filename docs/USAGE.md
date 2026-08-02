@@ -256,7 +256,8 @@ never leaves Rust.
 
 ## Settings
 
-The gear in the title strip opens the settings window — its own resizable
+The gear in the title strip — or **Settings…** in the tray icon's
+right-click menu — opens the settings window: its own resizable
 window, with a sidebar of five sections: **General**, **Capturing**,
 **Appearance**, **Shortcuts** and **About**. There is no Save button because
 there is nothing it would do: changes apply the moment you make them, in every

@@ -24,9 +24,26 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
+    // The same window the gear opens — a tray utility's menu is where a user
+    // looks for Settings first, especially on Linux, where clicks never
+    // reach the app and this menu is the whole way in. ("Check for updates"
+    // is deliberately absent: from here a you-are-current answer would have
+    // nowhere to appear, and a menu item that succeeds in silence reads as
+    // broken. It lives in Settings → About, where the answer prints beside
+    // the button.)
+    let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Shotshelf", true, None::<&str>)?;
-    let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&toggle, &folder, &separator, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &toggle,
+            &folder,
+            &PredefinedMenuItem::separator(app)?,
+            &settings,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )?;
 
     // Windows/Linux show the full-colour app icon; macOS gets a monochrome
     // glyph so it can be drawn as a template image (see below).
@@ -51,6 +68,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "toggle" => window::toggle(app),
             "open-folder" => open_captures_folder(app),
+            "settings" => window::open_settings(app.clone()),
             "quit" => app.exit(0),
             _ => {}
         })
