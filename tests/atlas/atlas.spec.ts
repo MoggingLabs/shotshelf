@@ -321,7 +321,7 @@ test("focus walk, labelled", async ({ page }) => {
     const on = await page.evaluate(() => {
       const active = document.activeElement;
       if (!active) return "none";
-      return active.id || String(active.className).split(" ")[0] || active.tagName;
+      return active.id || active.className.split(" ")[0] || active.tagName;
     });
     await shot(page, `focus-${String(step).padStart(2, "0")}-${on.replaceAll(/[^\w-]/g, "_")}`);
   }
