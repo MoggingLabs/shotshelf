@@ -1,11 +1,36 @@
 {
-  "Capture": ["path", "kind", "ts", "context"],
-  "Context": ["label"],
-  "DragSource": ["path", "icon"],
-  "Finding": ["kind", "label", "preview", "severity"],
-  "Findings": ["secrets", "scanned"],
-  "LocalState": ["pinned", "lastCaptureMs"],
-  "PinnedItem": ["path", "kind", "ts"],
+  "Capture": [
+    "path",
+    "kind",
+    "ts",
+    "context"
+  ],
+  "Context": [
+    "label"
+  ],
+  "DragSource": [
+    "path",
+    "icon"
+  ],
+  "Finding": [
+    "kind",
+    "label",
+    "preview",
+    "severity"
+  ],
+  "Findings": [
+    "secrets",
+    "scanned"
+  ],
+  "LocalState": [
+    "pinned",
+    "lastCaptureMs"
+  ],
+  "PinnedItem": [
+    "path",
+    "kind",
+    "ts"
+  ],
   "Settings": [
     "retentionHours",
     "maxItems",
@@ -15,8 +40,16 @@
     "dockCorner",
     "dockMonitor",
     "startAtLogin",
-    "pinned"
+    "pinned",
+    "theme"
   ],
-  "VideoDetails": ["poster", "durationMs", "bytes"],
-  "Watching": ["dirs", "clipboard"]
+  "VideoDetails": [
+    "poster",
+    "durationMs",
+    "bytes"
+  ],
+  "Watching": [
+    "dirs",
+    "clipboard"
+  ]
 }

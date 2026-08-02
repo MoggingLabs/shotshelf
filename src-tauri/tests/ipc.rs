@@ -320,6 +320,7 @@ fn the_new_settings_fields_cross_the_boundary_normalised_and_tolerated() {
             "dockCorner": "under-the-desk",
             "dockMonitor": "the-neighbour's",
             "startAtLogin": true,
+            "theme": "vantablack",
             "pinned": [],
         }}),
     )
@@ -335,6 +336,11 @@ fn the_new_settings_fields_cross_the_boundary_normalised_and_tolerated() {
             .get("dockMonitor")
             .and_then(serde_json::Value::as_str),
         Some("primary"),
+    );
+    assert_eq!(
+        stored.get("theme").and_then(serde_json::Value::as_str),
+        Some("system"),
+        "an unknown theme crossed the boundary unnormalised",
     );
     assert_eq!(
         stored

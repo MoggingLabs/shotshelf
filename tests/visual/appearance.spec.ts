@@ -13,7 +13,18 @@
  * without being looked at is a regression signed off by accident.
  */
 
-import { bootShelf, DAY, expect, FIXTURE, land, NOW, openBrowse, test } from "../harness/app.ts";
+import {
+  bootSettings,
+  bootShelf,
+  DAY,
+  expect,
+  FIXTURE,
+  land,
+  NOW,
+  openBrowse,
+  SETTINGS_VIEWPORT,
+  test,
+} from "../harness/app.ts";
 
 test.describe("appearance", () => {
   test.skip(
@@ -73,15 +84,23 @@ test.describe("appearance", () => {
     await expect(page.locator(".preview")).toHaveScreenshot("preview.png");
   });
 
-  test("the settings panel", async ({ page }) => {
-    // Seven controls, and their layout is the only place the app asks the user
-    // for anything.
-    await bootShelf(page);
-    await openBrowse(page);
-    await page.locator("#shelf-settings").click();
-    await expect(page.locator("#settings-panel")).toBeVisible();
-    await settled(page);
-    await expect(page.locator("#settings-panel")).toHaveScreenshot("settings.png");
+  test("the settings window, section by section", async ({ page }) => {
+    // The one place the app asks the user for anything, now a real window —
+    // photographed at the size the OS will actually give it, one image per
+    // section so a layout break anywhere in the form is a diff somewhere.
+    await page.setViewportSize(SETTINGS_VIEWPORT);
+    await bootSettings(page);
+
+    for (const section of ["general", "capturing", "appearance", "shortcuts", "about"]) {
+      await page.locator(`button[data-section="${section}"]`).click();
+      await expect(page.locator(`section[data-section="${section}"]`)).toBeVisible();
+      await settled(page);
+      // The version is masked: a release bump is not a layout change, and a
+      // golden that invalidates on every tag stops being looked at.
+      await expect(page.locator(".stg")).toHaveScreenshot(`settings-${section}.png`, {
+        mask: [page.locator("#about-version")],
+      });
+    }
   });
 
   test("a card carrying a credential warning", async ({ page }) => {

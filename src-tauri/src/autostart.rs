@@ -20,8 +20,8 @@ use tauri_plugin_autostart::AutoLaunchManager;
 ///
 /// Errors are returned rather than logged-and-swallowed because the caller is
 /// `set_settings`, whose contract is "the OS took it before the file says so" —
-/// a refusal must reach the panel note, exactly as a hotkey another app owns
-/// does.
+/// a refusal must reach the settings window's note, exactly as a hotkey
+/// another app owns does.
 ///
 /// **Tolerates the plugin being absent**, answering `Ok` after a log line: the
 /// IPC gate's mock runtime and the unit tests build apps with no plugins, and a

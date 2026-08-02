@@ -72,6 +72,7 @@ const settings: Settings = {
   dockCorner: "bottom-right",
   dockMonitor: "primary",
   startAtLogin: false,
+  theme: "system",
   pinned: [],
 };
 const videoDetails: VideoDetails = { poster: null, durationMs: null, bytes: 0 };

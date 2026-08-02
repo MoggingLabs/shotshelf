@@ -4,7 +4,8 @@
     "tests/**/*.spec.ts",
     "src/**/*.test.ts",
     "scripts/*.mjs",
-    "!scripts/rust-source.mjs"
+    "!scripts/rust-source.mjs",
+    "src/settings-window/main.ts"
   ],
   "project": [
     "src/**/*.ts",

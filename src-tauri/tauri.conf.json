@@ -27,6 +27,21 @@
         "center": false,
         "focus": false,
         "visible": false
+      },
+      {
+        "label": "settings",
+        "title": "Shotshelf Settings",
+        "url": "settings.html",
+        "width": 720,
+        "height": 520,
+        "minWidth": 560,
+        "minHeight": 420,
+        "resizable": true,
+        "decorations": true,
+        "transparent": false,
+        "center": true,
+        "focus": false,
+        "visible": false
       }
     ],
     "security": {

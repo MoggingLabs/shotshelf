@@ -174,6 +174,13 @@ export function installTauriMock(EVENTS: WindowEvents): void {
     // Read, and there was text — the ordinary case; a spec that wants the
     // no-text answer stubs `false`.
     "copy_capture_text": true,
+    // The gear's whole job is this invoke; the window itself is Rust's.
+    "open_settings": null,
+    // About's button, answered the way Rust answers when nothing is newer.
+    // A spec that wants the update-available sentence stubs its own.
+    "check_for_updates": "You are on the newest version.",
+    // Named link opened in the OS browser — nothing to return.
+    "open_link": null,
     // Read, and nothing found — the ordinary case.
     "describe_capture": { secrets: [], scanned: true },
     ...(window.__shotshelfStubs__ ?? {}),

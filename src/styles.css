@@ -17,6 +17,10 @@
   --stroke: rgba(255, 255, 255, 0.09);
   --stroke-strong: rgba(255, 255, 255, 0.16);
   --stroke-heavy: rgba(255, 255, 255, 0.26);
+  /* The settings window's base: a real decorated window with no acrylic
+     behind it, so it needs a solid surface where the shelf's translucent
+     --panel would wash against white. The panel colour's opaque twin. */
+  --window: #14161e;
   /* The editor and quick look float on this; the canvas sits on the opaque
      twin so a transparent capture cannot show the desktop through the app.
      0.98, not 0.96: at 0.96 the day headings ghosted through behind a quick
@@ -74,6 +78,9 @@
      DPI scale factors, and this UI runs at 100%–200% on three OSes. Roles,
      not sizes, pick the step: xs = micro badges, sm = captions and controls,
      md = the title strip and forms, lg = body and the empty state. */
+  /* xl exists for the settings window's section titles alone — a 720px
+     window needs one step the 225px popover never did. */
+  --font-xl: 16px;
   --font-xs: 10px;
   --font-sm: 11px;
   --font-md: 12px;
@@ -194,8 +201,7 @@ body {
    as it needs, no chrome. Everything the browse view carries — the title
    strip, settings, alerts — is furniture you did not ask for here. */
 
-.shelf[data-mode="column"] .shelf__bar,
-.shelf[data-mode="column"] .settings {
+.shelf[data-mode="column"] .shelf__bar {
   display: none;
 }
 
@@ -303,11 +309,6 @@ body {
 .shelf__btn:hover {
   background: var(--raised);
   color: var(--text);
-}
-
-.shelf__btn--on {
-  background: var(--accent);
-  color: var(--ink-on-fill);
 }
 
 /* Busy is a state the control shows — Compare during its decode. */
@@ -691,115 +692,6 @@ body {
 
 /* ── Settings ──────────────────────────────────────────────────────────── */
 
-/* Scrolls internally rather than squeezing the list to nothing: the panel
-   grew a keyboard map, and `flex: none` was already slicing the empty state
-   mid-word underneath it. `.shelf__body`'s min-height keeps one card's worth
-   of shelf visible below the open panel. */
-.settings {
-  flex: 0 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--stroke-heavy) transparent;
-  padding: 12px;
-  border-top: 1px solid var(--stroke);
-  border-bottom: 1px solid var(--stroke);
-  background: var(--scrim-panel);
-  font-size: var(--font-md);
-}
-
-.settings__row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-/* 84px, not 72: at 72 "Send smaller copies" wrapped to three lines and broke
-   the row rhythm — baselines fell 29/45px apart in a form whose other rows
-   sat at a steady 35. Every label fits two lines at 84. */
-.settings__row > span {
-  flex: none;
-  width: 84px;
-  color: var(--muted);
-}
-
-/* One height for every field. The mixed defaults put selects at 28, text
-   inputs at 26 and checkboxes at 24 — three heights in seven rows, one of
-   them off the grid entirely. Checkboxes get their own rule below. */
-.settings__row select,
-.settings__row input:not([type="checkbox"]) {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  padding: 4px 8px;
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-ctl);
-  background: var(--raised);
-  color: var(--text);
-  font: inherit;
-}
-
-/* A checkbox is a 16px mark, not a field: the field chrome painted these as
-   blank grey rounded squares indistinguishable from an empty text input. The
-   whole `<label>` row stays the hit target, which is what carries the 24px
-   minimum. */
-.settings__row input[type="checkbox"] {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  margin: 6px 0;
-  accent-color: var(--accent);
-}
-
-.settings__row select:hover,
-.settings__row input:hover {
-  background: var(--raised-hover);
-}
-
-/* Inset rather than offset outward: these sit flush in a 225px panel, and an
-   outward ring on the hotkey field would clip against the panel edge. */
-.settings__row input:focus-visible,
-.settings__row select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-}
-
-.settings__note:empty {
-  display: none;
-}
-
-.settings__note {
-  margin: 8px 0 0;
-  color: var(--danger-soft);
-  line-height: var(--leading);
-}
-
-.settings__hint {
-  margin: 8px 0 0;
-  color: var(--muted);
-  font-size: var(--font-sm);
-  line-height: var(--leading);
-}
-
-/* The keyboard map, where someone changing settings will actually see it —
-   the app's whole premise is keys, and they were documented only in a file
-   on GitHub. */
-.settings__keys {
-  margin: 8px 0 0;
-  padding: 8px 0 0;
-  border-top: 1px solid var(--stroke);
-  color: var(--muted);
-  font-size: var(--font-sm);
-  line-height: var(--leading);
-}
-
-.settings__keys kbd {
-  color: var(--text);
-  font: inherit;
-  font-weight: 600;
-}
-
 /* ── Alerts ────────────────────────────────────────────────────────────── */
 /* Only rendered when something actually needs saying, rather than a status
    strip permanently spending 4% of the window on "everything is fine". */
@@ -1116,4 +1008,323 @@ body {
     outline: 1px solid CanvasText;
     outline-offset: -1px;
   }
+}
+
+/* ── The settings window ───────────────────────────────────────────────── */
+/* A real decorated window, not a popover: solid surface, room to breathe,
+   one sidebar and one pane. Everything here sits on the same scales as the
+   shelf — that sameness is what makes two very different windows read as one
+   application. */
+
+.stg {
+  display: flex;
+  height: 100%;
+  background: var(--window);
+}
+
+.stg__nav {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 168px;
+  padding: 16px 8px;
+  border-right: 1px solid var(--stroke);
+}
+
+.stg__tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: none;
+  border-radius: var(--radius-ctl);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-md);
+  font-weight: 600;
+  text-align: left;
+  cursor: default;
+  transition: background var(--motion-fast) ease-out,
+    color var(--motion-fast) ease-out;
+}
+
+.stg__tab:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.stg__tab--on {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.stg__pane {
+  flex: 1;
+  min-width: 0;
+  padding: 24px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--stroke-heavy) transparent;
+}
+
+.stg__title {
+  margin: 0 0 16px;
+  font-size: var(--font-xl);
+  font-weight: 600;
+}
+
+.stg__subtitle {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* One control per row: the label and its hint on the left, the control on
+   the right, vertically centred on the label's first line. */
+.stg__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--stroke);
+}
+
+.stg__row:last-of-type {
+  border-bottom: none;
+}
+
+.stg__label {
+  min-width: 0;
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+
+.stg__hint {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: var(--font-sm);
+  font-weight: 400;
+  line-height: var(--leading);
+}
+
+.stg__label-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stg__group {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--stroke);
+}
+
+.stg__group:last-of-type {
+  border-bottom: none;
+}
+
+.stg__control {
+  flex: none;
+  width: 168px;
+  height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-ctl);
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-md);
+}
+
+.stg__control--narrow {
+  width: 80px;
+}
+
+.stg__control:hover {
+  background: var(--raised-hover);
+}
+
+.stg__control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* A checkbox is a mark, not a field; the row's label is the hit area. */
+.stg__switch {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 6px 0;
+  accent-color: var(--accent);
+}
+
+.stg__button {
+  flex: none;
+  min-height: 28px;
+  padding: 4px 12px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-ctl);
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-md);
+  font-weight: 600;
+  cursor: default;
+  transition: background var(--motion-fast) ease-out;
+}
+
+.stg__button:hover {
+  background: var(--raised-hover);
+}
+
+.stg__button:disabled {
+  opacity: 0.45;
+}
+
+/* The theme picker: three states of one choice, shown as one control. */
+.stg__segments {
+  flex: none;
+  display: flex;
+  padding: 2px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-ctl);
+  background: var(--raised);
+}
+
+.stg__segment {
+  min-height: 24px;
+  padding: 2px 12px;
+  border: none;
+  border-radius: var(--radius-ctl);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-md);
+  font-weight: 600;
+  cursor: default;
+  transition: background var(--motion-fast) ease-out,
+    color var(--motion-fast) ease-out;
+}
+
+.stg__segment:hover {
+  color: var(--text);
+}
+
+.stg__segment[aria-checked="true"] {
+  background: var(--accent);
+  color: var(--ink-on-fill);
+}
+
+/* The corner picker: the setting is spatial, so the control is the space —
+   a miniature screen with a button in each corner. */
+.stg__corners {
+  flex: none;
+  display: grid;
+  grid-template-columns: 24px 24px;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+}
+
+.stg__corner {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--stroke-strong);
+  border-radius: var(--radius-ctl);
+  background: transparent;
+  cursor: default;
+  transition: background var(--motion-fast) ease-out;
+}
+
+.stg__corner:hover {
+  background: var(--raised-hover);
+}
+
+.stg__corner[aria-checked="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The hotkey recorder: a button that shows the combination it holds. */
+.stg__hotkey {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.stg__hotkey--recording {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  color: var(--muted);
+}
+
+.stg__watchlist {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stg__watchitem {
+  padding: 4px 0;
+  color: var(--text);
+  font-size: var(--font-sm);
+}
+
+.stg__watchitem--pending,
+.stg__watchitem--down {
+  color: var(--muted);
+}
+
+.stg__watchitem--down {
+  color: var(--danger-soft);
+}
+
+.stg__keys {
+  margin: 8px 0 0;
+  border-collapse: collapse;
+  font-size: var(--font-sm);
+}
+
+.stg__keys td {
+  padding: 4px 16px 4px 0;
+  color: var(--muted);
+}
+
+.stg__keys td:first-child {
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.stg__keys kbd {
+  font: inherit;
+  font-weight: 600;
+}
+
+.stg__note:empty {
+  display: none;
+}
+
+.stg__note {
+  margin: 16px 0 0;
+  color: var(--danger-soft);
+  font-size: var(--font-md);
+  line-height: var(--leading);
+}
+
+.stg a {
+  color: var(--accent-hover);
+  text-decoration: none;
+}
+
+.stg a:hover {
+  text-decoration: underline;
 }

@@ -1,5 +1,7 @@
 import { defineConfig } from "vite";
 
+import pkg from "./package.json" with { type: "json" };
+
 // Shotshelf is desktop-only (Tauri v2), and this config stays free of Node
 // globals so the bundle it produces has none.
 //
@@ -21,11 +23,24 @@ export default defineConfig({
     },
   },
   envPrefix: ["VITE_", "TAURI_ENV_*"],
+  // The About section's version, inlined at build time — the alternative is a
+  // runtime permission the webview otherwise has no reason to hold.
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   build: {
     // Windows 11 -> WebView2 (Chromium), macOS -> WKWebView (Safari 16+ on the
     // macOS versions Tauri v2 supports). Targeting both keeps one build honest.
     target: ["chrome105", "safari16"],
     // Debug builds keep sources readable; release builds stay small.
     sourcemap: false,
+    // Two pages, two windows: the shelf and the settings window each get an
+    // entry, and Tauri points the settings window at settings.html.
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        settings: "settings.html",
+      },
+    },
   },
 });

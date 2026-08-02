@@ -59,72 +59,9 @@
         ></button>
       </header>
 
-      <section class="settings" id="settings-panel" hidden>
-        <label class="settings__row">
-          <span>Keep for</span>
-          <select id="setting-retention">
-            <option value="">Forever</option>
-            <option value="1">1 hour</option>
-            <option value="8">8 hours</option>
-            <option value="24">24 hours</option>
-          </select>
-        </label>
-        <label class="settings__row">
-          <span>Max items</span>
-          <input id="setting-max" type="number" min="1" max="200" step="1" />
-        </label>
-        <!-- No hidden tooltip help on any row: two rows carried long
-             explanations only a hover could find, five carried none, and
-             nothing marked which was which. What needs saying is said in the
-             visible hints below the form. -->
-        <label class="settings__row">
-          <span>Send smaller copies</span>
-          <input id="setting-downscale" type="checkbox" />
-        </label>
-        <label class="settings__row">
-          <span>Hotkey</span>
-          <input id="setting-hotkey" type="text" spellcheck="false" autocomplete="off" />
-        </label>
-        <!-- The option values are the exact strings Rust's DOCK_CORNERS /
-             DOCK_MONITORS accept — anything else is normalised back to the
-             default by `sanitise`, and the e2e drives every option through the
-             real save to keep the two lists honest. -->
-        <label class="settings__row">
-          <span>Corner</span>
-          <select id="setting-corner">
-            <option value="bottom-right">Bottom right</option>
-            <option value="bottom-left">Bottom left</option>
-            <option value="top-right">Top right</option>
-            <option value="top-left">Top left</option>
-          </select>
-        </label>
-        <label class="settings__row">
-          <span>Monitor</span>
-          <select id="setting-monitor">
-            <option value="primary">Primary</option>
-            <option value="cursor">Where my cursor is</option>
-          </select>
-        </label>
-        <label class="settings__row">
-          <span>Start at login</span>
-          <input id="setting-autostart" type="checkbox" />
-        </label>
-        <p class="settings__note" id="settings-note" role="alert"></p>
-        <!-- Straight quotes: the note above renders Rust-composed text with
-             straight quotes 8px away, and one panel gets one quoting style. -->
-        <p class="settings__hint">
-          Changes apply at once. Captures leave the shelf when "Keep for" or "Max items"
-          says so — the files always stay on disk. Pinned captures ignore both and come
-          back after a restart. Smaller copies suit chats; originals suit design tools.
-          Start at login follows your account.
-        </p>
-        <p class="settings__keys">
-          <kbd>↑↓</kbd> pick · <kbd>Space</kbd> look · <kbd>Enter</kbd> copy ·
-          <kbd>E</kbd> mark up · <kbd>T</kbd> copy text · <kbd>P</kbd> pin ·
-          <kbd>O</kbd> show in folder · <kbd>Del</kbd> remove · <kbd>Ctrl+Z</kbd>
-          bring back · <kbd>Esc</kbd> close
-        </p>
-      </section>
+      <!-- Settings live in their own window now — `open_settings`, wired to
+           the gear. The panel that used to sit here squeezed seven controls
+           into 225px; its whole surface moved to settings.html. -->
 
       <!-- The list and the overlay share one box, and that box is what the
            overlay is allowed to cover. Both halves of that are load-bearing.

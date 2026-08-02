@@ -9,8 +9,7 @@ an always-on-top shelf. This guide takes you from download to first drag-out.
 > does — your IP address to the host, which is GitHub; the version comparison happens locally,
 > so not even your running version is in the URL. No capture, no filename, no metadata, no
 > telemetry, no analytics. Everything else it does happens on local disk, and switching the
-> check off — `checkForUpdates` in `settings.json`, a hand-edit rather than a control in the
-> panel — sends nothing at all.
+> check off — "Check at launch" in the settings window's About section — sends nothing at all.
 
 ---
 
@@ -176,7 +175,7 @@ shows rather defeats the point.
 | `p` | Pin or unpin the picked captures |
 | `o` | Show the picked capture's file in Explorer / Finder / your file manager |
 | `Ctrl+Z` | Undo the last mark while marking up; bring back the last removal otherwise |
-| `Esc` | Close the editor (twice if you have unsaved marks — the first press warns), then the settings panel, then the preview, then the shelf |
+| `Esc` | Close the editor (twice if you have unsaved marks — the first press warns), then the preview, then the shelf |
 
 Escape backs out one level at a time on purpose: one key that closes two things
 at once is one key that loses your place. Every key that needs a pick says
@@ -184,8 +183,8 @@ at once is one key that loses your place. Every key that needs a pick says
 cards clears the pick, and a click on one card of a multi-pick collapses to
 just that card. The title strip counts a live selection ("2 of 7 picked"), and
 in a multi-pick the card the arrows move from carries an extra outer ring. The
-same map is listed at the bottom of the settings panel, and each control's
-tooltip names its key.
+same map is listed in the settings window's Shortcuts section, and each
+control's tooltip names its key.
 
 Recordings show a frame from themselves plus a badge with their length and size. If a recording
 can't be decoded the tile keeps a film icon and still drags out fine.
@@ -257,23 +256,29 @@ never leaves Rust.
 
 ## Settings
 
-The gear in the title strip opens every control there is — seven of them. One setting has no
-control and is hand-edited only: `checkForUpdates`, covered further down. Changes apply the
-moment you make them, and the panel says so when one is adjusted — pick a Max items past 200
-and the note reads "Max items was limited to 200" rather than snapping back in silence. A
-shorter "Keep for" announces how many captures it swept, with the reminder that the files stay
-on disk. Escape closes the panel and discards whatever was half-typed in the focused field; the
-panel's footer carries the keyboard map.
+The gear in the title strip opens the settings window — its own resizable
+window, with a sidebar of five sections: **General**, **Capturing**,
+**Appearance**, **Shortcuts** and **About**. There is no Save button because
+there is nothing it would do: changes apply the moment you make them, in every
+window at once, and the form says so when one is adjusted — pick a Max items
+past 200 and the note reads "Max items was limited to 200" rather than
+snapping back in silence. The hotkey is recorded rather than typed: click the
+control, press the combination you want, Escape to cancel. Capturing shows
+the folders *actually* being watched right now — the watch dot's diagnostic,
+somewhere findable — and About carries the version, the update check, and
+links out (which open through a named allowlist, never a raw URL).
 
-| Setting | What it does |
-| :-- | :-- |
-| **Keep for** | How long unpinned captures stay. Removing them never touches the files |
-| **Max items** | How many unpinned captures the shelf holds |
-| **Send smaller copies** | Hand over a copy no larger than 1568px on its long edge, instead of the original |
-| **Hotkey** | The global show/hide shortcut |
-| **Corner** | Which screen corner the popover docks to. A bottom corner grows the popped column upward; a top corner grows it downward |
-| **Monitor** | Which monitor carries that corner: the primary, or whichever one your cursor is on when the shelf appears |
-| **Start at login** | Registers Shotshelf as a login item so it is already watching at the day's first capture. Follows your account — turn it on once and each machine you log into registers itself at the next launch; turning it off unregisters the same way |
+| Setting | Where | What it does |
+| :-- | :-- | :-- |
+| **Start at login** | General | Registers Shotshelf as a login item so it is already watching at the day's first capture. Follows your account — turn it on once and each machine you log into registers itself at the next launch; turning it off unregisters the same way |
+| **Keep for** | General | How long unpinned captures stay. Removing them never touches the files |
+| **Max items** | General | How many unpinned captures the shelf holds |
+| **Smaller copies** | Capturing | Hand over a copy no larger than 1568px on its long edge, instead of the original |
+| **Theme** | Appearance | System, Light or Dark. System follows the OS setting live |
+| **Corner** | Appearance | Which screen corner the popover docks to — a 2×2 picker. A bottom corner grows the popped column upward; a top corner grows it downward |
+| **Monitor** | Appearance | Which monitor carries that corner: the primary, or whichever one your cursor is on when the shelf appears |
+| **Summon the shelf** | Shortcuts | The global show/hide shortcut, recorded from your keys |
+| **Check at launch** | About | Whether Shotshelf asks GitHub Releases for a newer version once per launch |
 
 **About "Send smaller copies".** Off by default. Every vision model resizes what it is given
 to roughly 1568px before it looks at it, so when you are feeding a chat those extra pixels are
@@ -315,7 +320,7 @@ in the roaming profile, which is the one place a capture path must never persist
 
 **On Linux, a shortcut can look registered without being.** The library behind it grabs keys
 through X11 only, and its register call returns success even when the grab never happened — so
-under Wayland without XWayland the Settings panel shows a live combination that does nothing, and
+under Wayland without XWayland the settings window shows a live combination that does nothing, and
 the log says nothing either. The tray has the same shape: its constructor cannot fail, so a desktop
 with no StatusNotifier host (stock GNOME, without the AppIndicator extension) gets no icon and no
 error. If both are unavailable, there is no way to summon the shelf once it is hidden — so on such
@@ -353,8 +358,10 @@ yet. `clipboard` is the exception and the one to leave alone: Win+Shift+S and �
 
 ## Updates
 
-Set `checkForUpdates` to `false` in the settings file and Shotshelf makes no network request at
-all — not even this one.
+Switch "Check at launch" off in the settings window's About section (it writes
+`checkForUpdates` in the settings file) and Shotshelf makes no network request
+at all — not even this one. "Check now", beside it, asks the same feed on
+demand and answers in place.
 
 On launch Shotshelf asks the project's GitHub Releases whether a newer version exists — one
 fetch of a `latest.json` the release pipeline publishes. If one does, it says so once and does

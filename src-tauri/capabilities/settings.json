@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings-window",
+  "description": "What the settings window may do — deliberately less than the shelf. Its whole Tauri JS surface is `invoke` (not ACL-gated) and `listen` for `settings://changed`, so the one permission below is the one with a caller in src/settings-window/. No drag, no window dragging: this window has real decorations and drags by its own title bar, and nothing in it is draggable content. The rule is the main capability's rule: every entry has a caller, and an entry listed 'for later' grants webview reach today.",
+  "windows": ["settings"],
+  "permissions": ["core:event:allow-listen"]
+}

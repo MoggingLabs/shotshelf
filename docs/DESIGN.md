@@ -28,7 +28,7 @@ on purpose — that is the entire process.
 
 ## Type scale
 
-Four whole-pixel steps. Fractional sizes (the file used to carry 9.5px and
+Five whole-pixel steps. Fractional sizes (the file used to carry 9.5px and
 10.5px) rasterise differently across the 100%–200% DPI factors this app runs
 at. Roles pick the step, never taste:
 
@@ -38,6 +38,7 @@ at. Roles pick the step, never taste:
 | `--font-sm` | 11px | Captions and compact controls: tile label, hints, alert strip, editor toolbar, Edit/Compare |
 | `--font-md` | 12px | The title strip and forms: window title, settings rows and inputs |
 | `--font-lg` | 13px | Body: base size, empty-state title |
+| `--font-xl` | 16px | The settings window's section titles — the one step a 720px window needs that the 225px popover never did |
 
 Weight does hierarchy inside a step: 600 for anything that names or acts, 400
 for prose, 700 only for the single-glyph `?` marker. Multi-line text takes

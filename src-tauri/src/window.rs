@@ -796,6 +796,29 @@ pub fn preview_shelf<R: Runtime>(app: AppHandle<R>, aspect: f64) -> Result<(), S
     preview(&app, aspect)
 }
 
+/// The settings window's label — declared in `tauri.conf.json`, like [`SHELF`].
+pub const SETTINGS_WINDOW: &str = "settings";
+
+/// Show and focus the settings window.
+///
+/// The window is declared in the config (hidden at start, centered) rather
+/// than created on demand: create-on-demand needs a builder call that can
+/// fail in six ways, and a second click racing the first can build two. A
+/// declared window exists exactly once for the life of the app, so this is
+/// show-and-focus and nothing else — the same reason the shelf itself is
+/// declared. Closing it hides it (see the on-close handler in `lib.rs`), so
+/// every open after the first is instant and keeps whatever section was
+/// showing.
+#[tauri::command]
+pub fn open_settings<R: Runtime>(app: AppHandle<R>) {
+    let Some(window) = app.get_webview_window(SETTINGS_WINDOW) else {
+        crate::diag::warn("the settings window is not declared");
+        return;
+    };
+    attempt("show the settings window", window.show());
+    attempt("focus the settings window", window.set_focus());
+}
+
 #[cfg(test)]
 mod tests {
     use super::{wanted, Wanted};

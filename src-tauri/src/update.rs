@@ -52,27 +52,59 @@ pub fn check_on_launch<R: Runtime>(app: &AppHandle<R>, wanted: bool) {
     let app = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        // A deadline, because the plugin's default is none.
-        //
-        // The feed is github.com, which is exactly the kind of host that can
-        // accept a connection and then dribble — a stalled fetch with no
-        // deadline would leave this task alive for the life of the app.
-        let updater = app.updater_builder().timeout(CHECK_TIMEOUT).build();
-        match updater {
-            Ok(updater) => match updater.check().await {
-                Ok(Some(update)) => {
-                    crate::diag::info(&format!(
-                        "update {} available (running {})",
-                        update.version, update.current_version
-                    ));
-                    // Told, not done. The shelf mentions it once; nothing is
-                    // downloaded and nothing is replaced.
-                    let _ = app.emit(UPDATE_EVENT, update.version.clone());
-                }
-                Ok(None) => crate::diag::info("already up to date"),
-                Err(err) => crate::diag::warn(&format!("update check failed: {err}")),
-            },
-            Err(err) => crate::diag::warn(&format!("updater unavailable: {err}")),
-        }
+        // Quietly: an unreachable feed is the normal offline case, and the
+        // launch is not the moment to say so. The shelf still hears about a
+        // real update through the event `check` emits.
+        let _ = check(&app).await;
     });
+}
+
+/// Ask the feed once, on demand — the settings window's "Check now" button.
+///
+/// Returns a sentence for the button to show inline, because a click deserves
+/// an answer where it happened; a *newer version* additionally goes out on
+/// [`UPDATE_EVENT`] exactly as the launch check's does, so the shelf says it
+/// too. Unlike the launch check, an unreachable feed here is worth wording —
+/// the user asked, and silence would read as a dead button.
+#[tauri::command]
+pub async fn check_for_updates<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
+    check(&app).await
+}
+
+/// The one check, shared by the launch and the button.
+async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<String, String> {
+    // A deadline, because the plugin's default is none.
+    //
+    // The feed is github.com, which is exactly the kind of host that can
+    // accept a connection and then dribble — a stalled fetch with no
+    // deadline would leave this task alive for the life of the app.
+    let updater = app
+        .updater_builder()
+        .timeout(CHECK_TIMEOUT)
+        .build()
+        .map_err(|err| {
+            crate::diag::warn(&format!("updater unavailable: {err}"));
+            "the update check is not available in this build".to_owned()
+        })?;
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            crate::diag::info(&format!(
+                "update {} available (running {})",
+                update.version, update.current_version
+            ));
+            // Told, not done. The shelf mentions it once; nothing is
+            // downloaded and nothing is replaced.
+            let _ = app.emit(UPDATE_EVENT, update.version.clone());
+            Ok(format!("Shotshelf {} is available.", update.version))
+        }
+        Ok(None) => {
+            crate::diag::info("already up to date");
+            Ok("You are on the newest version.".to_owned())
+        }
+        Err(err) => {
+            crate::diag::warn(&format!("update check failed: {err}"));
+            Err("The release feed could not be reached.".to_owned())
+        }
+    }
 }

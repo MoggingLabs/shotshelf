@@ -81,6 +81,13 @@ export const PROBLEM_EVENT = windowEvents.problem;
  * as well would be an unread symbol, which `knip` correctly refuses.
  */
 export const HIDDEN_EVENT = windowEvents.hidden;
+/**
+ * A save's broadcast, exported for the same reason again: Rust pins the name
+ * against the fixture, the shelf and the settings window both listen for it,
+ * and a spec that models a save from the other window emits it by this name
+ * or models an event the app does not have.
+ */
+export const SETTINGS_CHANGED_EVENT = windowEvents.settings;
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 
@@ -174,6 +181,20 @@ export const BOUNDS = JSON.parse(
   readFileSync(path.join(FIXTURES, "settings-bounds.json"), "utf8"),
 ) as { maxItems: { min: number; max: number } };
 
+/**
+ * The settings window's real size, read from the Tauri config the same way
+ * `playwright.config.ts` reads the shelf's. A screenshot of the page is only
+ * meaningful at the size the OS will actually give the window.
+ */
+export const SETTINGS_VIEWPORT = (() => {
+  const conf = JSON.parse(
+    readFileSync(path.join(FIXTURES, "..", "..", "src-tauri", "tauri.conf.json"), "utf8"),
+  ) as { app: { windows: { label?: string; width: number; height: number }[] } };
+  const declared = conf.app.windows.find((w) => w.label === "settings");
+  if (!declared) throw new Error("tauri.conf.json declares no settings window");
+  return { width: declared.width, height: declared.height };
+})();
+
 export async function bootShelf(page: Page, options: BootOptions = {}): Promise<void> {
   await page.addInitScript((seed) => {
     // Merged, not assigned. A spec that seeds its own start-up stubs runs its
@@ -189,6 +210,28 @@ export async function bootShelf(page: Page, options: BootOptions = {}): Promise<
   await page.goto("/");
   await expect(page.locator(".shelf")).toBeVisible();
   await page.waitForFunction(() => window.__shotshelf__.callsTo("catch_watch_dirs").length > 0);
+}
+
+/**
+ * The settings window's page, booted under the same mock.
+ *
+ * Readiness is the form being *filled*, not the page being up: the hotkey
+ * button shows the stored accelerator only after `loadSettings` resolves, so
+ * waiting for its text is what stops a spec racing the boot and reading a
+ * control the store has not written yet.
+ */
+export async function bootSettings(page: Page, options: BootOptions = {}): Promise<void> {
+  const seed = { ...DEFAULT_SETTINGS, ...options.settings };
+  await page.addInitScript((stub) => {
+    const existing = window.__shotshelfStubs__ ?? {};
+    window.__shotshelfStubs__ = { get_settings: stub, ...existing };
+  }, seed);
+
+  await page.addInitScript(installTauriMock, WINDOW_EVENTS);
+  await serveFixtures(page);
+  await page.goto("/settings.html");
+  await expect(page.locator(".stg")).toBeVisible();
+  await expect(page.locator("#setting-hotkey")).toHaveText(String(seed["hotkey"]));
 }
 
 /** Deliver a `capture://new` event exactly as Rust would. */

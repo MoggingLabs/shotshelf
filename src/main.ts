@@ -22,9 +22,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { el } from "./dom.ts";
 import { icon } from "./icons.ts";
 import { Popover } from "./popover.ts";
-import { closeSettings, currentSettings, initSettings, settingsOpen } from "./settings.ts";
+import {
+  currentSettings,
+  loadSettings,
+  onSettingsChanged,
+  openSettingsWindow,
+} from "./settings.ts";
 import { textRecognitionAvailable } from "./shelf/bridge.ts";
 import { Shelf, type Capture } from "./shelf/index.ts";
+import { applyTheme } from "./theme.ts";
 import { until, type Wait } from "./retry.ts";
 import {
   noteScanUnavailable,
@@ -83,14 +89,12 @@ const shelf = new Shelf(
 );
 
 const popover = new Popover(root, shelf, {
-  // An OS drag steals focus, the settings panel is a deliberate act, and an
-  // open editor is someone's unsaved work; a launch appearance must not vanish
-  // out from under any of them. The overlay was missing from this list, so the
-  // four-second launch timer discarded an editor opened inside it.
-  busy: () => shelf.dragging || shelf.overlayOpen || settingsOpen(),
-  onHidden: () => {
-    closeSettings();
-  },
+  // An OS drag steals focus and an open editor is someone's unsaved work; a
+  // launch appearance must not vanish out from under either. The overlay was
+  // missing from this list once, so the four-second launch timer discarded an
+  // editor opened inside it. (The settings panel used to be a third term —
+  // it is its own window now, with its own lifetime.)
+  busy: () => shelf.dragging || shelf.overlayOpen,
 });
 
 shelf.start();
@@ -133,8 +137,6 @@ document.addEventListener("keydown", (event) => {
   ) {
     return;
   }
-  // Typing a hotkey into the settings panel is not a shelf command.
-  if (settingsOpen() && event.key !== "Escape") return;
   // While marking up a capture, the arrows and Delete belong to the editor's
   // own surface, not to the list underneath it.
   // Lower-cased because `key` reports the character produced: with CapsLock
@@ -147,12 +149,9 @@ document.addEventListener("keydown", (event) => {
     case "Escape":
       // Escape backs out one level at a time: the editor, then a preview,
       // then the shelf. One key that closes two things at once is one key
-      // that loses your place.
-      // Settings is a rung on this ladder, and was missing from it: Escape
-      // reached `dismiss()` with the panel still logically open, and every
-      // shelf key stayed dead for the rest of the session.
+      // that loses your place. (Settings was once a rung here; it is its own
+      // window now, with the OS's own close.)
       if (shelf.closeEditor()) return;
-      if (closeSettings()) return;
       if (!shelf.closePreview()) popover.dismiss();
       return;
 
@@ -396,10 +395,32 @@ subscribe(
 
 // ── Start-up ─────────────────────────────────────────────────────────────
 
+// The gear opens the settings window; the shelf holds no form of its own.
+settingsButton.addEventListener("click", () => {
+  void openSettingsWindow().catch((error: unknown) => {
+    console.error("[shotshelf] could not open the settings window", error);
+    say("The settings window could not be opened.");
+  });
+});
+
+// A save in the settings window reaches the shelf through Rust's event —
+// limits re-apply, the theme re-stamps, and `currentSettings()` already
+// answers the new truth by the time this runs.
+subscribe(
+  onSettingsChanged((settings) => {
+    applyTheme(settings.theme);
+    shelf.applySettings();
+  }),
+  "Settings changed in their window may not reach the shelf. Restarting should fix it.",
+);
+
 // Settings first: the shelf reads its limits from them, and pinned captures
 // have to be back before anything new lands on top.
-void initSettings(() => shelf.applySettings())
-  .then((settings) => shelf.restorePinned(settings))
+void loadSettings()
+  .then((settings) => {
+    applyTheme(settings.theme);
+    shelf.restorePinned(settings);
+  })
   .catch((error: unknown) => {
     console.error("[shotshelf] could not load settings", error);
     say("Settings could not be loaded — running on defaults.");

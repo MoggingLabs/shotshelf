@@ -5,5 +5,6 @@
   "problem": "capture://problem",
   "update": "update://available",
   "deliberate": true,
-  "launch": false
+  "launch": false,
+  "settings": "settings://changed"
 }

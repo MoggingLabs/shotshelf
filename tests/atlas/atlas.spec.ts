@@ -20,6 +20,7 @@ import { dirname, resolve } from "node:path";
 import type { Page, Locator } from "@playwright/test";
 
 import {
+  bootSettings,
   bootShelf,
   expect,
   FIXTURE,
@@ -28,6 +29,7 @@ import {
   NOW,
   openBrowse,
   PROBLEM_EVENT,
+  SETTINGS_VIEWPORT,
   test,
   UPDATE_EVENT,
 } from "../harness/app.ts";
@@ -246,18 +248,27 @@ test("quick look and editor", async ({ page }) => {
   await shot(page, "overlay-04-editor-save-failed");
 });
 
-test("settings panel states", async ({ page }) => {
-  await bootShelf(page);
-  await openBrowse(page);
-  await page.locator("#shelf-settings").click();
+test("settings window states", async ({ page }) => {
+  // The window's own page, at the size the OS gives it: every section, the
+  // recorder mid-recording, and a save error with Rust's sentence in it.
+  await page.setViewportSize(SETTINGS_VIEWPORT);
+  await bootSettings(page);
   await settled(page);
-  await shot(page, "settings-00-open");
+  await shot(page, "settings-00-general");
 
-  await page.locator("#settings-panel").evaluate((panel) => {
-    panel.scrollTop = panel.scrollHeight;
-  });
-  await shot(page, "settings-01-scrolled-to-keys");
+  for (const section of ["capturing", "appearance", "shortcuts", "about"]) {
+    await page.locator(`button[data-section="${section}"]`).click();
+    await settled(page);
+    await shot(page, `settings-01-${section}`);
+  }
 
+  await page.locator('button[data-section="shortcuts"]').click();
+  await page.locator("#setting-hotkey").click();
+  await expect(page.locator("#setting-hotkey")).toHaveText("Press keys…");
+  await shot(page, "settings-02-hotkey-recording");
+  await page.keyboard.press("Escape");
+
+  await page.locator('button[data-section="general"]').click();
   await page.evaluate(() =>
     window.__shotshelf__.reject(
       "set_settings",
@@ -267,7 +278,7 @@ test("settings panel states", async ({ page }) => {
   await page.locator("#setting-max").fill("120");
   await page.locator("#setting-max").dispatchEvent("change");
   await expect(page.locator("#settings-note")).not.toHaveText("");
-  await shot(page, "settings-02-save-error-note");
+  await shot(page, "settings-03-save-error-note");
 });
 
 test("the strip's vocabulary", async ({ page }) => {
@@ -363,7 +374,11 @@ test.describe("emulations", () => {
       await openBrowse(page);
       await settled(page);
       await shot(page, "emulate-02-browse-2x");
-      await page.locator("#shelf-settings").click();
+    });
+    test("the settings window at retina", async ({ page }) => {
+      await page.setViewportSize(SETTINGS_VIEWPORT);
+      await bootSettings(page);
+      await settled(page);
       await shot(page, "emulate-03-settings-2x");
     });
   });

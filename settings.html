@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shotshelf Settings</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <!-- The settings window: a real window with real decorations, so unlike
+         the shelf nothing here fights the OS chrome. One sidebar, one pane;
+         the pane shows exactly one section. Controls save on change and the
+         `settings://changed` event keeps every window honest — there is no
+         Save button because there is nothing it would do. -->
+    <div class="stg">
+      <nav class="stg__nav" aria-label="Settings sections">
+        <button class="stg__tab" data-section="general" type="button">General</button>
+        <button class="stg__tab" data-section="capturing" type="button">Capturing</button>
+        <button class="stg__tab" data-section="appearance" type="button">Appearance</button>
+        <button class="stg__tab" data-section="shortcuts" type="button">Shortcuts</button>
+        <button class="stg__tab" data-section="about" type="button">About</button>
+      </nav>
+
+      <main class="stg__pane">
+        <section class="stg__section" data-section="general">
+          <h1 class="stg__title">General</h1>
+
+          <div class="stg__row">
+            <div class="stg__label">
+              <span>Start at login</span>
+              <p class="stg__hint">Follows your account — each machine registers itself.</p>
+            </div>
+            <input id="setting-autostart" type="checkbox" class="stg__switch" />
+          </div>
+
+          <div class="stg__row">
+            <div class="stg__label">
+              <span>Keep for</span>
+              <p class="stg__hint">Captures leave the shelf when their time is up. Files always stay on disk.</p>
+            </div>
+            <select id="setting-retention" class="stg__control">
+              <option value="">Forever</option>
+              <option value="1">1 hour</option>
+              <option value="8">8 hours</option>
+              <option value="24">24 hours</option>
+            </select>
+          </div>
+
+          <div class="stg__row">
+            <div class="stg__label">
+              <span>Max items</span>
+              <p class="stg__hint">Pinned captures don't count against the cap.</p>
+            </div>
+            <input id="setting-max" type="number" min="1" max="200" step="1" class="stg__control stg__control--narrow" />
+          </div>
+        </section>
+
+        <section class="stg__section" data-section="capturing" hidden>
+          <h1 class="stg__title">Capturing</h1>
+
+          <div class="stg__group">
+            <h2 class="stg__subtitle">Watched</h2>
+            <p class="stg__hint">What is really being watched right now — not what was meant to be.</p>
+            <ul class="stg__watchlist" id="watch-list">
+              <li class="stg__watchitem stg__watchitem--pending">Asking the catch engine…</li>
+            </ul>
+          </div>
+
+          <div class="stg__row">
+            <div class="stg__label">
+              <span>Smaller copies</span>
+              <p class="stg__hint">Hand over at most 1568px on the long edge — what vision models resize to anyway. Originals are never touched.</p>
+            </div>
+            <input id="setting-downscale" type="checkbox" class="stg__switch" />
+          </div>
+        </section>
+
+        <section class="stg__section" data-section="appearance" hidden>
+          <h1 class="stg__title">Appearance</h1>
+
+          <div class="stg__row">
+            <div class="stg__label">
+              <span>Theme</span>
+            </div>
+            <div class="stg__segments" role="radiogroup" aria-label="Theme" id="setting-theme">
+              <button type="button" class="stg__segment" data-theme-choice="system" role="radio" aria-checked="false">System</button>
+              <button type="button" class="stg__segment" data-theme-choice="light" role="radio" aria-checked="false">Light</button>
+              <button type="button" class="stg__segment" data-theme-choice="dark" role="radio" aria-checked="false">Dark</button>
+            </div>
+          </div>
+
+          <div class="stg__row">
+            <div class="stg__label">
+              <span>Corner</span>
+              <p class="stg__hint">Where the shelf parks.</p>
+            </div>
+            <!-- A 2×2 picker, not a dropdown: the setting IS spatial, so the
+                 control is the space. The values are Rust's DOCK_CORNERS. -->
+            <div class="stg__corners" role="radiogroup" aria-label="Corner" id="setting-corner">
+              <button type="button" class="stg__corner" data-corner="top-left" role="radio" aria-checked="false" aria-label="Top left"></button>
+              <button type="button" class="stg__corner" data-corner="top-right" role="radio" aria-checked="false" aria-label="Top right"></button>
+              <button type="button" class="stg__corner" data-corner="bottom-left" role="radio" aria-checked="false" aria-label="Bottom left"></button>
+              <button type="button" class="stg__corner" data-corner="bottom-right" role="radio" aria-checked="false" aria-label="Bottom right"></button>
+            </div>
+          </div>
+
+          <div class="stg__row">
+            <div class="stg__label">
+              <span>Monitor</span>
+            </div>
+            <select id="setting-monitor" class="stg__control">
+              <option value="primary">Primary</option>
+              <option value="cursor">Where my cursor is</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="stg__section" data-section="shortcuts" hidden>
+          <h1 class="stg__title">Shortcuts</h1>
+
+          <div class="stg__row">
+            <div class="stg__label">
+              <span>Summon the shelf</span>
+              <p class="stg__hint">Click, then press the combination you want.</p>
+            </div>
+            <button id="setting-hotkey" type="button" class="stg__control stg__hotkey" aria-label="Global shortcut — click, then press the combination"></button>
+          </div>
+
+          <div class="stg__group">
+            <h2 class="stg__subtitle">On the shelf</h2>
+            <table class="stg__keys">
+              <tbody>
+                <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Pick a capture</td></tr>
+                <tr><td><kbd>Space</kbd></td><td>Quick look</td></tr>
+                <tr><td><kbd>Enter</kbd></td><td>Copy to the clipboard</td></tr>
+                <tr><td><kbd>E</kbd></td><td>Mark up</td></tr>
+                <tr><td><kbd>T</kbd></td><td>Copy the text in it</td></tr>
+                <tr><td><kbd>P</kbd></td><td>Pin or unpin</td></tr>
+                <tr><td><kbd>O</kbd></td><td>Show in folder</td></tr>
+                <tr><td><kbd>Del</kbd></td><td>Take off the shelf</td></tr>
+                <tr><td><kbd>Ctrl+Z</kbd></td><td>Bring back the removed</td></tr>
+                <tr><td><kbd>Esc</kbd></td><td>Back out, one level at a time</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="stg__section" data-section="about" hidden>
+          <h1 class="stg__title">About</h1>
+
+          <div class="stg__row">
+            <div class="stg__label">
+              <span>Shotshelf <span id="about-version"></span></span>
+              <p class="stg__hint">Local-only. Captures never leave this machine.</p>
+            </div>
+          </div>
+
+          <div class="stg__row">
+            <div class="stg__label">
+              <span>Updates</span>
+              <p class="stg__hint" id="update-answer">Checked once at launch, from GitHub Releases.</p>
+            </div>
+            <div class="stg__label-actions">
+              <input id="setting-updates" type="checkbox" class="stg__switch" aria-label="Check at launch" />
+              <button id="about-check" type="button" class="stg__button">Check now</button>
+            </div>
+          </div>
+
+          <div class="stg__group">
+            <h2 class="stg__subtitle">Links</h2>
+            <p class="stg__hint">
+              <a href="https://github.com/MoggingLabs/shotshelf" target="_blank" rel="noreferrer">Repository</a>
+              ·
+              <a href="https://github.com/MoggingLabs/shotshelf/blob/main/docs/USAGE.md" target="_blank" rel="noreferrer">Usage guide</a>
+              ·
+              <a href="https://github.com/MoggingLabs/shotshelf/issues/new/choose" target="_blank" rel="noreferrer">Report an issue</a>
+            </p>
+          </div>
+        </section>
+
+        <p class="stg__note" id="settings-note" role="alert"></p>
+      </main>
+    </div>
+
+    <script type="module" src="/src/settings-window/main.ts"></script>
+  </body>
+</html>

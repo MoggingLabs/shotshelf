@@ -19,6 +19,8 @@ on:
     paths:
       - src/styles.css
       - index.html
+      - settings.html
+      - "src/settings-window/**"
       - "tests/visual/**"
       - .github/workflows/goldens.yml
 

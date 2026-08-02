@@ -39,5 +39,8 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         crate::window::show_shelf,
         crate::window::preview_shelf,
         crate::window::hide_shelf,
+        crate::window::open_settings,
+        crate::update::check_for_updates,
+        crate::links::open_link,
     ]
 }

@@ -28,20 +28,13 @@ const LAUNCH_MS = 4000;
 export interface PopoverOptions {
   /**
    * Whether something is mid-flight that must not be interrupted — an OS
-   * drag, an open editor or quick look, or the settings panel. Checked before
-   * the launch appearance puts itself away.
+   * drag, or an open editor or quick look. Checked before the launch
+   * appearance puts itself away.
    *
    * The overlay is in that list because the launch timer discarded an editor
    * opened inside its four seconds, marks and all.
    */
   busy(): boolean;
-  /**
-   * The window has gone. Put away anything that only makes sense on screen.
-   *
-   * A callback rather than an import, for the same reason `busy` is one: this
-   * class owns the window and knows nothing about panels.
-   */
-  onHidden(): void;
 }
 
 export class Popover {
@@ -147,12 +140,11 @@ export class Popover {
    */
   showProblem(): void {
     if (this.#opened) return;
-    // Nor while anything is mid-flight. `showColumn` sets the column shape, and
-    // the stylesheet hides the settings panel and the title strip in it — so a
-    // failed clipboard write arriving while someone was typing a new hotkey
-    // took the panel off screen and left `settingsOpen()` true, which swallows
-    // every shelf key until Escape. Each of these states already has the window
-    // up with the strip readable, so there is nothing to raise.
+    // Nor while anything is mid-flight. `showColumn` sets the column shape,
+    // and the states `busy()` names — a drag, an open overlay — already have
+    // the window up with the strip readable, so there is nothing to raise.
+    // (This guard once also protected the in-shelf settings panel from being
+    // reshaped off screen; that panel is its own window now.)
     // `#showing` as well as `busy()`: the guard is about not taking something
     // off screen, and there is nothing on screen to take. Without it, any state
     // that leaves `busy()` true while the window is down — which is every state
@@ -202,6 +194,12 @@ export class Popover {
     // And `busy()`, because that dismissal took an open editor's unsaved marks
     // with it through `adoptHidden`. That is verbatim the failure `resizeColumn`
     // was extracted to prevent, reintroduced on the other edge of one signal.
+    //
+    // Since the settings panel became its own window, no e2e can hold an
+    // *empty* launch appearance open past an alert's twelve seconds — every
+    // remaining busy state needs a card, and a card makes `columnIsEmpty`
+    // the deciding guard instead. The mode term stays as defence in depth;
+    // popover.spec.ts records why it is no longer separately falsifiable.
     if (this.#root.dataset["mode"] !== "column") return;
     if (this.#options.busy()) return;
     this.dismiss();
@@ -297,20 +295,10 @@ export class Popover {
     // landed on top, and kept Edit lit for a capture nobody remembered
     // choosing. A popover's selection is as transient as the popover.
     this.#shelf.clearSelection();
-    // The settings panel closes with the window, like the overlay above it.
-    //
-    // Nothing else did. `dismiss()` from the hide button, the tray, the hotkey
-    // and the column's own expiry all reach here, and only Escape had a rung
-    // that closed the panel — so "open the shelf, open settings, put the shelf
-    // away" left `settingsOpen()` true for the rest of the session, on a window
-    // that was not on screen.
-    //
-    // Two things read that flag and both then misbehaved: `main.ts`'s keydown
-    // guard swallowed every shelf key, and `busy()` stayed true, which is what
-    // made a lost-capture message unreachable through `showProblem` — the exact
-    // failure the last two rounds were spent fixing, reached through a
-    // different guard.
-    this.#options.onHidden();
+    // (The settings panel used to close here too, with a paragraph of
+    // history about the session-killing flag it left behind. The panel is
+    // its own window now, with the OS's own lifetime — a whole class of
+    // open-state bugs retired by making the state real.)
     // Whatever shape it was in, the next capture gets the column.
     this.#shelf.setMode("column");
   }
@@ -349,8 +337,8 @@ export class Popover {
     // `#opened` is false during the launch appearance — nobody asked for it —
     // but the shape is browse and the column is legitimately empty. Without this
     // check, anything that took a capture off the shelf in those four seconds
-    // hid the window: a × on a backfilled card, or choosing a retention window,
-    // whose sweep drops cards the user is looking at the settings panel about.
+    // hid the window: a × on a backfilled card, or a retention change saved
+    // in the settings window, whose sweep drops cards mid-look.
     //
     // The guard is the mode rather than `columnIsEmpty` because those are
     // different questions, and answering the second in place of the first is

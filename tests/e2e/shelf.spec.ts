@@ -628,23 +628,23 @@ test("a shelf the user dismissed is not put back by an alert", async ({ page }) 
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("show_shelf").length)).toBe(0);
 });
 
-test("Escape in the settings panel closes the panel, not the shelf", async ({ page }) => {
-  // Escape had no settings rung, so it fell through to `dismiss()` while
-  // `settingsOpen()` stayed true — and `main.ts`'s first guard then swallowed
-  // every shelf key for the rest of the session.
+test("the gear asks Rust for the settings window and keeps the shelf's keyboard", async ({
+  page,
+}) => {
+  // Settings are their own window now: the gear's whole job is one invoke,
+  // and no panel state is left behind to swallow shelf keys — the class of
+  // bug the old panel produced three separate times, through three guards.
   await bootShelf(page);
   await land(page, FIXTURE.wide);
   await openBrowse(page);
+
   await page.locator("#shelf-settings").click();
-  await expect(page.locator(".settings")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("open_settings").length))
+    .toBe(1);
 
+  // The keyboard stays the shelf's: Escape still backs out as ever.
   await page.evaluate(() => window.__shotshelf__.clearCalls());
-  await page.keyboard.press("Escape");
-
-  await expect(page.locator(".settings")).toBeHidden();
-  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
-
-  // And the keyboard is alive again: Escape now reaches the shelf.
   await page.keyboard.press("Escape");
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(1);
 });
@@ -903,24 +903,17 @@ test("an ordinary notice does not dismiss the shelf when its message times out",
   page,
 }) => {
   // `dismissIfEmpty` was written for one job — putting away the strip-only
-  // window `showProblem` raises — and shipped without the two guards the rest
-  // of the file applies. `#opened` is false for the whole launch appearance
-  // while the shape is *browse* and the column is legitimately empty, so any
-  // message at all reached it on the falling edge twelve seconds later.
-  //
-  // An update notice is the ordinary case: the app raises it about itself,
-  // nobody asked, and the shelf should be exactly where it was afterwards.
+  // window `showProblem` raises — and shipped without the guards the rest of
+  // the file applies. An update notice is the ordinary case: the app raises
+  // it about itself, nobody asked, and the shelf should be exactly where it
+  // was afterwards — even over a browse view that is legitimately empty,
+  // which is the state the `#opened` guard exists to protect. (The old
+  // version of this test held a launch appearance open with the in-shelf
+  // settings panel; that panel is its own window now, and the deliberate
+  // empty browse is the state that remains reachable.)
   await page.clock.install();
   await bootShelf(page);
-  await launchAppearance(page);
-
-  // Settings open inside the four seconds, so `busy()` blocks the launch
-  // dismissal. That is the state the window gets stuck in — showing, not
-  // opened, browse shape, no cards — and it persists for the session.
-  await page.locator("#shelf-settings").click();
-  await expect(page.locator("#settings-panel")).toBeVisible();
-  await page.clock.runFor(5_000);
-  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
+  await openBrowse(page);
 
   await page.evaluate(
     ([event, version]) => window.__shotshelf__.emit(event, version),
@@ -933,29 +926,14 @@ test("an ordinary notice does not dismiss the shelf when its message times out",
 
   await expect(page.locator("#shelf-alert")).toBeHidden();
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
-  await expect(page.locator("#settings-panel")).toBeVisible();
 });
 
-test("a lost-capture message does not take the settings panel off screen", async ({ page }) => {
-  // `showProblem` switches the window to the column shape, and the stylesheet
-  // hides `.settings` and the title strip in that shape — so a failed clipboard
-  // write arriving while someone was typing a new hotkey took the panel away
-  // and left `settingsOpen()` true, which swallows every shelf key until
-  // Escape. The panel is one of the states `busy()` already names.
-  await bootShelf(page);
-  await launchAppearance(page);
-  await page.locator("#shelf-settings").click();
-  await expect(page.locator("#settings-panel")).toBeVisible();
-
-  await page.evaluate(
-    ([event, message]) => window.__shotshelf__.emit(event, message),
-    [PROBLEM_EVENT, "That capture could not be saved — it existed only in the clipboard."] as const,
-  );
-
-  // The message still lands — the window is already on screen, strip and all.
-  await expect(page.locator("#shelf-alert")).toContainText(/could not be saved/i);
-  await expect(page.locator("#settings-panel")).toBeVisible();
-});
+// Two tests about the in-shelf settings panel stood here: a lost-capture
+// message must not reshape the panel off screen, and must still be raised
+// after a hide left `settingsOpen()` true on a window that was down. The
+// panel is its own OS window now, so neither state exists to defend — the
+// guards they pinned survive for the drag and the overlay, and the drag test
+// below is the one that keeps `busy()`'s remaining terms falsifiable.
 
 // The "one capture, one card" rule is enforced in Rust, not here.
 //
@@ -971,36 +949,6 @@ test("a lost-capture message does not take the settings panel off screen", async
 // own folder's watcher-start moment, so the two paths cannot both claim one
 // capture. `catch::tests::each_folder_hands_over_at_its_own_watchers_start` is
 // the gate.
-
-test("a lost-capture message is raised even when the shelf was put away with settings open", async ({
-  page,
-}) => {
-  // Nothing closed the settings panel when the window went down, so
-  // `settingsOpen()` — and `busy()` with it — stayed true for the rest of the
-  // session on a window that was not on screen. `showProblem` returned at that
-  // guard, and the one message a user cannot afford to miss was unreachable
-  // again, through a different guard than the last two rounds fixed.
-  await bootShelf(page);
-  await openBrowse(page);
-  await page.locator("#shelf-settings").click();
-  await expect(page.locator("#settings-panel")).toBeVisible();
-
-  await page.locator("#shelf-hide").click();
-  await page.evaluate((event) => window.__shotshelf__.emit(event, null), HIDDEN_EVENT);
-  // The panel goes with the window, which is the root of it.
-  await expect(page.locator("#settings-panel")).toBeHidden();
-  await page.evaluate(() => window.__shotshelf__.clearCalls());
-
-  await page.evaluate(
-    ([event, message]) => window.__shotshelf__.emit(event, message),
-    [PROBLEM_EVENT, "That capture could not be saved — it existed only in the clipboard."] as const,
-  );
-
-  await expect(page.locator("#shelf-alert")).toContainText(/could not be saved/i);
-  await expect
-    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("show_shelf").length))
-    .toBe(1);
-});
 
 test("a lost-capture message survives the launch dismissal", async ({ page }) => {
   // `Popover.catch` was given `#standDown` for exactly this; `showProblem`
@@ -1052,9 +1000,9 @@ test("a lost capture is reported even with a drag still in flight", async ({ pag
   // Two guards at once, both of which were unfalsifiable and one of which was
   // written off as ungateable.
   //
-  // `busy()` is `dragging || overlayOpen || settingsOpen()`. Two of the three
-  // do not survive a hide — `adoptHidden` discards the overlay and closes the
-  // panel — so `#dragging` is the only state that leaves `busy()` true with the
+  // `busy()` is `dragging || overlayOpen`. The overlay does not survive a
+  // hide — `adoptHidden` discards it — so `#dragging` is the only state that
+  // leaves `busy()` true with the
   // window down. The note that stood here said the harness offered no way to
   // hold it across a hide. It does: `hang("plugin:drag|start_drag")` leaves the
   // drag in flight and nothing on the hide path clears `Shelf#dragging`.

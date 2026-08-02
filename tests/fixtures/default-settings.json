@@ -7,5 +7,6 @@
   "dockCorner": "bottom-right",
   "dockMonitor": "primary",
   "startAtLogin": false,
-  "pinned": []
+  "pinned": [],
+  "theme": "system"
 }

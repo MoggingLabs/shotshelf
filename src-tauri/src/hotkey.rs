@@ -10,7 +10,7 @@
 //! `if let Ok(result) = rx.recv() { result?; } Ok(())`: when the worker
 //! thread is gone, because there is no reachable X display, `recv` returns
 //! `Err`, the arm is skipped and `Ok(())` is returned anyway. So under
-//! Wayland without XWayland the settings panel shows a live shortcut that
+//! Wayland without XWayland the settings window shows a live shortcut that
 //! does nothing, and `shotshelf.log` stays silent — against
 //! `docs/USAGE.md`'s promise that a taken combination "says so in its log".
 //!
@@ -47,7 +47,7 @@ pub fn register<R: Runtime>(app: &AppHandle<R>, accelerator: &str) -> Result<(),
         })
         .map_err(|err| {
             // "may own it", not "probably owns it". This string is rendered
-            // verbatim in the settings panel and the plugin flattens every
+            // verbatim in the settings window and the plugin flattens every
             // cause into one opaque `GlobalHotkey(String)`, so the specific
             // claim was a guess presented to the user as a diagnosis. The one
             // cause we *can* identify is checked above, by name.
@@ -89,7 +89,7 @@ pub fn rebind<R: Runtime>(app: &AppHandle<R>, previous: &str, next: &str) -> Res
     // Refused rather than continued. Registering the new combination on top of
     // an old one that is still live leaves *both* toggling the shelf, with the
     // old one still stolen from every other app for the life of the process —
-    // and `settings.rs` would store the new one, so the panel would show a
+    // and `settings.rs` would store the new one, so the window would show a
     // combination that is only half true. Returning the error keeps the stored
     // setting equal to what the OS actually has.
     unregister(app, previous).inspect_err(|err| {

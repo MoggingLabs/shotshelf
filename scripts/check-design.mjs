@@ -10,8 +10,8 @@
 //
 // Four rules, all mechanical:
 //
-//   A. `font-size` uses a type-scale token. There are four sizes; a fifth is
-//      a decision, not a tweak.
+//   A. `font-size` uses a type-scale token. There are five sizes (xl joined
+//      for the settings window's titles); a sixth is a decision, not a tweak.
 //   B. Spacing (`margin`, `padding`, `gap`, offsets) sits on the 4px grid,
 //      with 2px half-steps below 8. The grid is what makes unrelated screens
 //      look related.
@@ -76,7 +76,7 @@ lines.forEach((line, i) => {
   // ── A: font sizes come off the type scale ──
   for (const [, value] of line.matchAll(/font-size\s*:\s*([^;]+);/g)) {
     counts.fontSize += 1;
-    if (!/^var\(--font-(?:xs|sm|md|lg)\)$/.test(value.trim())) {
+    if (!/^var\(--font-(?:xs|sm|md|lg|xl)\)$/.test(value.trim())) {
       problems.push(`  ${at}: font-size is "${value.trim()}", not a --font-* token`);
     }
   }

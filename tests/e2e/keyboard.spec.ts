@@ -11,12 +11,13 @@
 
 import {
   bootShelf,
-  BOUNDS,
+  DEFAULT_SETTINGS,
   expect,
   FIXTURE,
   HIDDEN_EVENT,
   land,
   openBrowse,
+  SETTINGS_CHANGED_EVENT,
   test,
 } from "../harness/app.ts";
 
@@ -211,38 +212,14 @@ test("delete takes it off the shelf without touching the file", async ({ page })
   expect([...new Set(commands)].filter((cmd) => !allowed.has(cmd))).toEqual([]);
 });
 
-test("the shelf keys do not fire while the settings panel is open", async ({ page }) => {
-  await threeOpen(page);
-
-  // Something has to be picked for Delete to have anything to remove.
-  // Without this the test passed with the settings guard deleted, because
-  // Delete on an empty selection removes nothing either way — it asserted a
-  // property of the fixture rather than of the code.
-  await page.keyboard.press("ArrowDown");
-  await expect(page.locator(".tile--picked")).toHaveCount(1);
-
-  await page.locator("#shelf-settings").click();
-  await expect(page.locator("#settings-panel")).toBeVisible();
-
-  // Typing a hotkey into the settings panel is not a shelf command.
-  await page.keyboard.press("Delete");
-  await expect(page.locator(".tile")).toHaveCount(3);
-
-  // And it is genuinely only the panel holding it back: closing it lets the
-  // same keystroke through. Closed with the button rather than Escape, which
-  // is bound to backing out of the shelf itself.
-  await page.locator("#shelf-settings").click();
-  await expect(page.locator("#settings-panel")).toBeHidden();
-  await page.keyboard.press("Delete");
-  await expect(page.locator(".tile")).toHaveCount(2);
-});
-
-test("changing a setting saves it and applies it to the shelf", async ({ page }) => {
-  // The settings panel's write path had no test of any kind: not the save, not
-  // the clamp coming back from Rust, not the error surface, and not the
-  // `loaded` guard that stops an empty pinned list overwriting the user's
-  // pins. Its twin in `persistPinned` was covered, which made the gap look
-  // deliberate.
+test("a save in the settings window reaches the shelf through the changed event", async ({
+  page,
+}) => {
+  // The form lives in its own window now, so the shelf's half of a save is
+  // the `settings://changed` broadcast: adopt what Rust stored and apply it
+  // immediately, not at next launch. The panel-era version of this test drove
+  // the form directly; the form's own writes are gated in
+  // `settings-window.spec.ts`, and this is the seam between the two.
   await bootShelf(page, { settings: { maxItems: 50 } });
   await land(page, FIXTURE.wide, { ts: 1 });
   await land(page, FIXTURE.tall, { ts: 2 });
@@ -250,61 +227,14 @@ test("changing a setting saves it and applies it to the shelf", async ({ page })
   await openBrowse(page);
   await expect(page.locator(".tile")).toHaveCount(3);
 
-  // Rust clamps and returns what it stored; the front end adopts **that**
-  // answer, not the value it sent.
-  //
-  // The stub answers with something different from the request on purpose.
-  // It used to echo `args["settings"]` straight back, which made request and
-  // response identical — so a `save()` that ignored the result entirely and
-  // kept `{...current, ...patch}` passed a test named for adopting the answer.
-  await page.evaluate(() =>
-    window.__shotshelf__.respondWith("set_settings", (args) => ({
-      ...(args["settings"] as Record<string, unknown>),
-      maxItems: 1,
-    })),
+  const stored = { ...DEFAULT_SETTINGS, maxItems: 1 };
+  await page.evaluate(
+    ([event, settings]) => window.__shotshelf__.emit(event, settings),
+    [SETTINGS_CHANGED_EVENT, stored] as const,
   );
-  await page.locator("#shelf-settings").click();
-  await page.locator("#setting-max").fill("25");
-  await page.locator("#setting-max").dispatchEvent("change");
 
-  const saved = await page.evaluate(
-    () => window.__shotshelf__.callsTo("set_settings").at(-1)?.args,
-  );
-  expect((saved?.["settings"] as Record<string, unknown>)["maxItems"]).toBe(25);
-
-  // One tile rather than three: the shelf honoured the 1 that came back, not
-  // the 25 it asked for, and did it immediately rather than at next launch.
+  // One tile rather than three: the shelf honoured the 1 the event carried.
   await expect(page.locator(".tile")).toHaveCount(1);
-});
-
-test("a settings save that fails says so in the panel", async ({ page }) => {
-  await bootShelf(page);
-  await page.evaluate(() => window.__shotshelf__.reject("set_settings", "disk is full"));
-
-  await page.locator("#shelf-settings").click();
-  await page.locator("#setting-max").fill("12");
-  await page.locator("#setting-max").dispatchEvent("change");
-
-  await expect(page.locator("#settings-note")).not.toBeEmpty();
-});
-
-test("the item-cap control offers exactly the range Rust will accept", async ({ page }) => {
-  // The fifth and sixth declarations of the same rule: `settings.rs` clamps to
-  // `MIN_ITEMS..=MAX_ITEMS`, and `index.html` writes `min`/`max` on the number
-  // input. Two hand-maintained copies in two languages with nothing checking
-  // they agreed — raise the clamp and the control still refuses the new
-  // values; lower it and it offers values that are silently clamped with no
-  // explanation.
-  //
-  // Joined through `tests/fixtures/settings-bounds.json`, which a Rust test
-  // asserts the constants against. The pattern is already used for the default
-  // settings and the secret kinds; it just had not been extended here.
-  await bootShelf(page);
-  await page.locator("#shelf-settings").click();
-
-  const input = page.locator("#setting-max");
-  await expect(input).toHaveAttribute("min", String(BOUNDS.maxItems.min));
-  await expect(input).toHaveAttribute("max", String(BOUNDS.maxItems.max));
 });
 
 test("the arrows walk the order on screen, not the order captures arrived", async ({ page }) => {
@@ -354,75 +284,6 @@ test("backspace takes it off the shelf, the same as delete", async ({ page }) =>
   await page.keyboard.press("Backspace");
 
   await expect(page.locator(".tile")).toHaveCount(2);
-});
-
-test("each settings control writes the field it is labelled for", async ({ page }) => {
-  // Three of the original four controls had no gate at all.
-  //
-  // Only `#setting-max` was ever driven by a spec, so the readers behind
-  // "Keep for", "Send smaller copies" and the hotkey field could be rewritten
-  // to return anything — a reviewer replaced the retention reader with a
-  // constant `null` and every browser test, every unit test, eslint and `tsc`
-  // stayed green. The retention tests elsewhere seed the value through
-  // `bootShelf`, so they gate the sweep *reading* its limits and not the
-  // control the user actually touches.
-  //
-  // One test for every control, driven through the real panel, asserting on what
-  // reaches `set_settings` — which is the boundary a wrong reader crosses.
-  await threeOpen(page);
-  // Echo the patch back, the way Rust does. Without this the mock answers with
-  // the seeded defaults, the panel re-fills from that answer, and the control
-  // snaps back to its old value before the next assertion — which is a test
-  // measuring the stub rather than the reader.
-  await page.evaluate(() =>
-    window.__shotshelf__.respondWith("set_settings", (args) => args["settings"]),
-  );
-  await page.locator("#shelf-settings").click();
-  await expect(page.locator("#settings-panel")).toBeVisible();
-
-  const saved = async (): Promise<Record<string, unknown>> => {
-    const call = await page.evaluate(
-      () => window.__shotshelf__.callsTo("set_settings").at(-1)?.args,
-    );
-    return (call?.["settings"] ?? {}) as Record<string, unknown>;
-  };
-
-  await page.locator("#setting-retention").selectOption("8");
-  expect((await saved())["retentionHours"]).toBe(8);
-
-  // "Forever" is the empty option, and it must reach Rust as null rather than
-  // as 0 — which would expire every capture the moment it landed.
-  await page.locator("#setting-retention").selectOption("");
-  expect((await saved())["retentionHours"]).toBeNull();
-
-  await page.locator("#setting-downscale").check();
-  expect((await saved())["downscaleExports"]).toBe(true);
-
-  await page.locator("#setting-downscale").uncheck();
-  expect((await saved())["downscaleExports"]).toBe(false);
-
-  // Trimmed: a stray space makes the accelerator unparseable, and the failure
-  // lands in `hotkey::rebind` where the user cannot see it.
-  await page.locator("#setting-hotkey").fill("  CommandOrControl+Shift+K  ");
-  await page.locator("#setting-hotkey").dispatchEvent("change");
-  expect((await saved())["hotkey"]).toBe("CommandOrControl+Shift+K");
-
-  // Every corner option, not one: the option values are the join with Rust's
-  // DOCK_CORNERS, and the option most likely to drift is the one no test
-  // selects. Same for the two monitors.
-  for (const corner of ["bottom-left", "top-right", "top-left", "bottom-right"]) {
-    await page.locator("#setting-corner").selectOption(corner);
-    expect((await saved())["dockCorner"]).toBe(corner);
-  }
-  for (const monitor of ["cursor", "primary"]) {
-    await page.locator("#setting-monitor").selectOption(monitor);
-    expect((await saved())["dockMonitor"]).toBe(monitor);
-  }
-
-  await page.locator("#setting-autostart").check();
-  expect((await saved())["startAtLogin"]).toBe(true);
-  await page.locator("#setting-autostart").uncheck();
-  expect((await saved())["startAtLogin"]).toBe(false);
 });
 
 test("the pick does not survive the shelf hiding", async ({ page }) => {
@@ -539,21 +400,3 @@ test("the cursor card is marked when more than one is picked", async ({ page }) 
   await expect(page.locator(".tile").last()).toHaveClass(/tile--cursor/);
 });
 
-test("escape in the settings panel discards the half-typed field", async ({ page }) => {
-  // Escape is the universal cancel, and it was the one key that *committed*:
-  // hiding the panel blurred the focused field, the native change event
-  // fired, and a half-typed shortcut was saved.
-  await bootShelf(page);
-  await openBrowse(page);
-  await page.locator("#shelf-settings").click();
-
-  const hotkey = page.locator("#setting-hotkey");
-  await hotkey.fill("CommandOrControl+Shift+");
-  await page.keyboard.press("Escape");
-
-  await expect(page.locator("#settings-panel")).toBeHidden();
-  expect(await page.evaluate(() => window.__shotshelf__.callsTo("set_settings").length)).toBe(0);
-  // And the field shows the stored value again on reopen, not the abandoned edit.
-  await page.locator("#shelf-settings").click();
-  await expect(hotkey).toHaveValue("CommandOrControl+Shift+S");
-});

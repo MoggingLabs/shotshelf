@@ -1,26 +1,26 @@
 /**
- * The settings surface.
+ * The settings client, shared by both windows.
  *
- * Deliberately small, and this is the whole list: how long captures stay, how
- * many the shelf holds, whether copies are downscaled on the way out, the
- * shortcut that summons it, which corner of which monitor it parks in, and
- * whether it starts at login.
+ * Rust owns the store; this module is every window's view of it. The shelf
+ * loads it at boot and reacts to changes; the settings window edits it. The
+ * two stay honest through `settings://changed`, which Rust emits after every
+ * successful save — so a save made in either window moves both, and a value
+ * Rust clamped comes back as what was actually stored.
  *
- * "Where the shelf sits" used to head that sentence, was retracted when no
- * field held it any more, and is now true again — `dockCorner`/`dockMonitor`
- * are exactly that, brought back as a deliberate setting rather than the
- * leftover the original was. Everything lives in a local JSON file — no
- * accounts, no sync, nothing leaves the device.
+ * The form itself lives in `src/settings-window/` — this file deliberately
+ * holds no DOM beyond nothing at all, because it is imported by both pages.
+ * Everything lives in a local JSON file — no accounts, no sync, nothing
+ * leaves the device.
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 import { until, type Wait } from "./retry.ts";
-
-import { el } from "./dom.ts";
 // The neutral types module, not the shelf itself: the shelf imports this file
 // for `persistPinned`, and pointing back at it would be a cycle.
 import type { CaptureKind } from "./shelf/types.ts";
+import type { WatchState } from "./status.ts";
 
 export interface PinnedItem {
   path: string;
@@ -43,17 +43,14 @@ export interface Settings {
    */
   downscaleExports: boolean;
   /**
-   * Ask the release feed whether a newer build exists, at launch.
-   *
-   * The only network call Shotshelf makes. Off means it opens no socket at
-   * all, which is the point of the setting existing at all — it is hand-edited, not a control in the panel to someone who chose this
-   * app for being local-only.
+   * Ask the release feed whether a newer build exists, at launch. The only
+   * network call Shotshelf makes; off means it opens no socket at all.
    */
   checkForUpdates: boolean;
   /**
    * Which corner the popover docks to. The four spellings are pinned to
-   * Rust's `DOCK_CORNERS` by the panel's own options and the e2e that drives
-   * them; an unknown value comes back normalised to the default.
+   * Rust's `DOCK_CORNERS` by the corner picker and the e2e that drives it;
+   * an unknown value comes back normalised to the default.
    */
   dockCorner: "bottom-right" | "bottom-left" | "top-right" | "top-left";
   /** Which monitor carries the corner: the primary, or the one the cursor is on. */
@@ -64,6 +61,11 @@ export interface Settings {
    * machine's login item is reconciled to it at launch.
    */
   startAtLogin: boolean;
+  /**
+   * Which palette the UI wears. `"system"` follows the OS; the spellings are
+   * pinned to Rust's `THEMES` and an unknown value comes back normalised.
+   */
+  theme: "system" | "light" | "dark";
   pinned: PinnedItem[];
 }
 
@@ -80,14 +82,11 @@ export const DEFAULTS: Settings = {
   dockCorner: "bottom-right",
   dockMonitor: "primary",
   startAtLogin: false,
+  theme: "system",
   pinned: [],
 };
 
 let current: Settings = DEFAULTS;
-let announce: (settings: Settings) => void = () => {};
-
-const panel = () => el<HTMLElement>("#settings-panel");
-const note = () => el<HTMLElement>("#settings-note");
 
 export function currentSettings(): Settings {
   return current;
@@ -116,9 +115,7 @@ let loaded = false;
  *
  * Five seconds rather than the catch engine's minute, and the difference is
  * the point: this waits only for a file read a few statements into `setup`,
- * while the engine resolves and opens watches on possibly-remote folders. Both
- * budgets now sit at their call sites in front of one shared loop, so the
- * difference is a decision someone made rather than two loops that drifted.
+ * while the engine resolves and opens watches on possibly-remote folders.
  *
  * Giving up early is not merely a slow start: `persistPinned` refuses to write
  * when settings were never loaded — that guard is what stops an empty list
@@ -134,53 +131,49 @@ const SETTINGS_WAIT: Wait = {
   transient: () => true,
 };
 
-async function readStored(): Promise<Settings> {
-  return until(() => invoke<Settings>("get_settings"), SETTINGS_WAIT);
-}
-
-export async function initSettings(
-  onChange: (settings: Settings) => void,
-): Promise<Settings> {
-  announce = onChange;
-
-  // Wired before the read, not after.
-  //
-  // Doing it afterwards meant a failed `get_settings` threw past all of this,
-  // so the Settings button had no listener and the panel could not be opened
-  // at all — a dead control with no explanation. Bound first, clicking it
-  // shows the panel and `save` refuses with a reason.
-  el<HTMLButtonElement>("#shelf-settings").addEventListener("click", toggle);
-
-  bind<HTMLSelectElement>("#setting-retention", (input) => ({
-    retentionHours: input.value === "" ? null : Number(input.value),
-  }));
-  bind<HTMLInputElement>("#setting-max", (input) => ({ maxItems: Number(input.value) }));
-  bind<HTMLInputElement>("#setting-hotkey", (input) => ({ hotkey: input.value.trim() }));
-  bind<HTMLInputElement>("#setting-downscale", (input) => ({
-    downscaleExports: input.checked,
-  }));
-  bind<HTMLSelectElement>("#setting-corner", (input) => ({
-    dockCorner: input.value as Settings["dockCorner"],
-  }));
-  bind<HTMLSelectElement>("#setting-monitor", (input) => ({
-    dockMonitor: input.value as Settings["dockMonitor"],
-  }));
-  bind<HTMLInputElement>("#setting-autostart", (input) => ({
-    startAtLogin: input.checked,
-  }));
-
-  current = await readStored();
+/** Read the stored settings, retrying while Rust's setup is still going. */
+export async function loadSettings(): Promise<Settings> {
+  current = await until(() => invoke<Settings>("get_settings"), SETTINGS_WAIT);
   loaded = true;
-  fill();
-
   return current;
 }
 
-export function settingsOpen(): boolean {
-  return !panel().hasAttribute("hidden");
+/**
+ * Save a patch on top of the current settings. Resolves with what Rust
+ * actually stored — clamps and normalisations included — and rejects with
+ * Rust's own sentence when the save was refused (a hotkey another app owns,
+ * a login item the OS would not take).
+ */
+export async function saveSettings(patch: Partial<Settings>): Promise<Settings> {
+  // Same rule as `persistPinned`: this sends the whole settings object,
+  // `pinned` included, so writing it before the stored one was read would
+  // replace the user's pins with an empty list.
+  if (!loaded) {
+    throw new Error("Settings could not be loaded, so they cannot be saved.");
+  }
+  current = await invoke<Settings>("set_settings", {
+    settings: { ...current, ...patch },
+  });
+  return current;
 }
 
-/** Pins are edited from the tiles, not from this panel. */
+/**
+ * Hear about every successful save, from any window.
+ *
+ * The payload is what Rust stored. `current` is updated before the callback
+ * runs, so `currentSettings()` inside a listener already answers the new
+ * truth. The registration promise is the caller's to watch — a subscription
+ * that failed is a window that silently stops tracking the store.
+ */
+export function onSettingsChanged(changed: (settings: Settings) => void): Promise<unknown> {
+  return listen<Settings>("settings://changed", ({ payload }) => {
+    current = payload;
+    loaded = true;
+    changed(payload);
+  });
+}
+
+/** Pins are edited from the tiles, never from the settings window. */
 export async function persistPinned(pinned: PinnedItem[]): Promise<void> {
   // Refuses to write a list built on defaults.
   //
@@ -193,14 +186,6 @@ export async function persistPinned(pinned: PinnedItem[]): Promise<void> {
   }
 
   current = { ...current, pinned };
-  // Rethrown, not only logged.
-  //
-  // `set_pinned` used to return `()` on the Rust side, so this could never
-  // reject and the `catch` was decoration: on a full disk or a read-only
-  // profile the star lit, nothing was said, and the pin was gone at the next
-  // launch — against the promise that pins are the one thing that survives a
-  // restart. The console line stays for the diagnosis; the caller decides what
-  // the user is told.
   try {
     await invoke("set_pinned", { pinned });
   } catch (error) {
@@ -209,124 +194,26 @@ export async function persistPinned(pinned: PinnedItem[]): Promise<void> {
   }
 }
 
+/** Show and focus the settings window — the gear's whole job now. */
+export function openSettingsWindow(): Promise<void> {
+  return invoke("open_settings");
+}
 
-/**
- * Put the panel away if it is up. `true` if it was.
- *
- * Exported so Escape has a rung for it. Without one, Escape in the settings
- * panel fell straight through to `popover.dismiss()`: the window went away and
- * `settingsOpen()` stayed true, because `toggle` is the only thing that
- * restores the `hidden` attribute. From then on `main.ts`'s first guard
- * swallowed every shelf key — arrows, space, Enter, Delete, `e` — and
- * `popover.busy()` stayed true so the launch dismissal never fired, against a
- * panel the column shape renders invisible anyway.
- */
-export function closeSettings(): boolean {
-  if (!settingsOpen()) return false;
-  toggle();
-  return true;
+/** Ask the feed once, for the About section's button. Resolves to a sentence. */
+export function checkForUpdatesNow(): Promise<string> {
+  return invoke<string>("check_for_updates");
 }
 
 /**
- * True while the panel is being put away, so the blur that hiding causes
- * cannot save. Escape is the universal cancel, and it was the one key that
- * *committed*: `hidden` → `display: none` → the focused hotkey field blurred
- * → native `change` fired → a half-typed shortcut was saved. Fields already
- * changed before the close were saved by their own `change` events and stay
- * saved; only the in-flight edit is discarded.
+ * What the catch engine is really watching — the Capturing section's list.
+ * Rejects with the engine's "still starting" sentence while it comes up; the
+ * caller retries, exactly as the shelf's boot does.
  */
-let closing = false;
-
-function toggle(): void {
-  const open = panel().hasAttribute("hidden");
-  if (open) {
-    panel().removeAttribute("hidden");
-  } else {
-    closing = true;
-    const focused = document.activeElement;
-    if (focused instanceof HTMLElement && panel().contains(focused)) focused.blur();
-    closing = false;
-    panel().setAttribute("hidden", "");
-    // Whatever the abandoned edit left on screen, the fields show the store.
-    fill();
-  }
-  el<HTMLElement>("#shelf-settings").classList.toggle("shelf__btn--on", open);
+export function watchStateNow(): Promise<WatchState> {
+  return invoke<WatchState>("catch_watch_dirs");
 }
 
-function bind<T extends HTMLElement & { value: string }>(
-  selector: string,
-  read: (input: T) => Partial<Settings>,
-): void {
-  const input = el<T>(selector);
-  input.addEventListener("change", () => {
-    if (closing) return;
-    void save(read(input));
-  });
-}
-
-async function save(patch: Partial<Settings>): Promise<void> {
-  // Same rule as `persistPinned`: this sends the whole settings object,
-  // `pinned` included, so writing it before the stored one was read would
-  // replace the user's pins with an empty list.
-  if (!loaded) {
-    note().textContent = "Settings could not be loaded, so they cannot be saved.";
-    return;
-  }
-
-  try {
-    // The Rust side returns what it actually stored, so any clamping — or a
-    // rejected shortcut — is reflected rather than assumed.
-    const asked = patch.maxItems;
-    current = await invoke<Settings>("set_settings", {
-      settings: { ...current, ...patch },
-    });
-    // A clamp is applied out loud. `fill()` below snaps the field to what was
-    // stored, and with no sentence beside it a 500 that became 200 read as
-    // the app ignoring the user.
-    note().textContent =
-      asked !== undefined && asked !== current.maxItems
-        ? `Max items was limited to ${current.maxItems}.`
-        : "";
-    announce(current);
-  } catch (error) {
-    // `String(error)` shipped an "Error: " prefix to the user whenever the
-    // rejection was a real Error. Rust's refusals arrive as plain sentences;
-    // anything else gets its message extracted and the detail logged.
-    console.error("[shotshelf] settings could not be saved", error);
-    note().textContent = error instanceof Error ? error.message : String(error);
-  }
-  fill();
-}
-
-function option(value: string, label: string): HTMLOptionElement {
-  const node = document.createElement("option");
-  node.value = value;
-  node.textContent = label;
-  return node;
-}
-
-function fill(): void {
-  // A hand-edited file can hold a value the presets don't cover — show it
-  // rather than silently falling back to "Forever".
-  const retention = el<HTMLSelectElement>("#setting-retention");
-  const held = current.retentionHours === null ? "" : String(current.retentionHours);
-  if (![...retention.options].some((choice) => choice.value === held)) {
-    retention.append(option(held, `${held} hours`));
-  }
-  retention.value = held;
-
-  el<HTMLInputElement>("#setting-max").value = String(current.maxItems);
-  const hotkey = el<HTMLInputElement>("#setting-hotkey");
-  hotkey.value = current.hotkey;
-  // The field is ~120px and the default value is 24 characters — an <input>
-  // clips without an ellipsis, so the tooltip is the only place the user can
-  // read the shortcut they are looking at.
-  hotkey.title = current.hotkey;
-  el<HTMLInputElement>("#setting-downscale").checked = current.downscaleExports;
-  // These two can trust their options: Rust's `sanitise` normalises an unknown
-  // spelling to the default before it ever comes back here, so unlike the
-  // retention preset there is no hand-edited value to preserve.
-  el<HTMLSelectElement>("#setting-corner").value = current.dockCorner;
-  el<HTMLSelectElement>("#setting-monitor").value = current.dockMonitor;
-  el<HTMLInputElement>("#setting-autostart").checked = current.startAtLogin;
+/** Open one of the About links in the system browser, by name. */
+export function openLink(which: "repo" | "usage" | "issues"): Promise<void> {
+  return invoke("open_link", { which });
 }

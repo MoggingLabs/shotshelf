@@ -25,6 +25,7 @@ mod handoff;
 mod hotkey;
 mod imaging;
 mod limits;
+mod links;
 mod poster;
 // `pub` for one reason: `tests/ipc.rs` is the only executable gate the IPC
 // tier has, and an integration test is the only kind cargo will attach the
@@ -189,21 +190,31 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|shelf, event| {
-            // The shelf has no close button, but Alt+F4 / ⌘W still fire.
-            // Hiding instead of closing keeps the app alive in the tray.
-            //
-            // Through `window::hide` rather than `shelf.hide()`: hiding is not
-            // just making the window invisible. It clears the opened flag and
-            // emits `shelf://hidden`, without which the front-end goes on
-            // believing the shelf is open — so every later capture is filed
-            // away silently instead of popping the column, and a hover hold
-            // left armed by hiding under the cursor freezes the column's
-            // expiry for the rest of the session. One keystroke, two features
-            // dead, no error anywhere.
+        .on_window_event(|window, event| {
+            // This closure fires for every window, so it branches by label —
+            // before the settings window existed it treated any close as the
+            // shelf's, and closing settings would have hidden the shelf.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // The settings window closes into hiding, so the next open is
+                // instant and keeps whatever section was showing.
+                if window.label() == window::SETTINGS_WINDOW {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    return;
+                }
+                // The shelf has no close button, but Alt+F4 / ⌘W still fire.
+                // Hiding instead of closing keeps the app alive in the tray.
+                //
+                // Through `window::hide` rather than `window.hide()`: hiding is
+                // not just making the window invisible. It clears the opened
+                // flag and emits `shelf://hidden`, without which the front-end
+                // goes on believing the shelf is open — so every later capture
+                // is filed away silently instead of popping the column, and a
+                // hover hold left armed by hiding under the cursor freezes the
+                // column's expiry for the rest of the session. One keystroke,
+                // two features dead, no error anywhere.
                 api.prevent_close();
-                window::hide(shelf.app_handle());
+                window::hide(window.app_handle());
             }
         })
         .run(tauri::generate_context!())

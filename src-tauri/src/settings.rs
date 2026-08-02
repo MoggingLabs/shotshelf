@@ -68,9 +68,9 @@ pub struct Settings {
     /// Ask the release feed whether a newer build exists, at launch.
     ///
     /// On by default, and the only network call the app makes. Off means the
-    /// app opens no socket at all. Hand-edited only — the panel offers seven
-    /// controls and this is not among them, which `docs/USAGE.md` says and these
-    /// two docstrings used to contradict.
+    /// app opens no socket at all. "Check at launch" in the settings window's
+    /// About section — hand-edited only until that window existed, which
+    /// `docs/USAGE.md` recorded and now no longer needs to.
     pub check_for_updates: bool,
     /// Which screen corner the popover docks to. One of [`DOCK_CORNERS`];
     /// anything else is put back to the default by `sanitise`.
@@ -96,6 +96,11 @@ pub struct Settings {
     /// your account, not about one machine, so `lib.rs` reconciles the OS
     /// login-item to this value at launch wherever you log in.
     pub start_at_login: bool,
+    /// Which palette the UI wears: follow the OS, or pin light or dark. One
+    /// of [`THEMES`]; anything else is put back to the default by `sanitise`.
+    /// Same string-not-enum reasoning as [`Settings::dock_corner`] — a
+    /// misspelled theme should cost the theme, not the settings file.
+    pub theme: String,
     pub pinned: Vec<PinnedItem>,
 }
 
@@ -103,6 +108,8 @@ pub struct Settings {
 pub const DOCK_CORNERS: [&str; 4] = ["bottom-right", "bottom-left", "top-right", "top-left"];
 /// Which monitor carries the corner. First entry is the default.
 pub const DOCK_MONITORS: [&str; 2] = ["primary", "cursor"];
+/// The palettes the UI can wear. First entry is the default.
+pub const THEMES: [&str; 3] = ["system", "light", "dark"];
 
 impl Default for Settings {
     fn default() -> Self {
@@ -115,6 +122,7 @@ impl Default for Settings {
             dock_corner: DOCK_CORNERS[0].to_owned(),
             dock_monitor: DOCK_MONITORS[0].to_owned(),
             start_at_login: false,
+            theme: THEMES[0].to_owned(),
             pinned: Vec::new(),
         }
     }
@@ -225,7 +233,7 @@ impl SettingsStore {
     ///
     /// Returns whether the preferences half was written, for the same reason
     /// `persist_local` does: a settings change is something the user just asked
-    /// for and is watching. On a full disk the panel repainted as though it had
+    /// for and is watching. On a full disk the form repainted as though it had
     /// taken, said nothing, and the change was gone at the next launch — with
     /// the new hotkey already taken from every other app for the session. That
     /// is the sibling of the `set_pinned` bug fixed a round earlier, left in
@@ -746,12 +754,26 @@ fn sanitise(mut settings: Settings) -> Settings {
     if !DOCK_MONITORS.contains(&settings.dock_monitor.as_str()) {
         settings.dock_monitor = DOCK_MONITORS[0].to_owned();
     }
+    if !THEMES.contains(&settings.theme.as_str()) {
+        settings.theme = THEMES[0].to_owned();
+    }
     settings
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_changed_event_name_matches_the_shared_fixture() {
+        // The same join the window events use: the front end reads the name
+        // from `tests/fixtures/window-events.json`, so a rename here fails
+        // this test rather than silently detaching every listener.
+        let shared: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/window-events.json"))
+                .expect("the shared fixture parses");
+        assert_eq!(shared["settings"].as_str(), Some(CHANGED_EVENT));
+    }
 
     fn pin(path: &str) -> PinnedItem {
         PinnedItem {
@@ -1568,6 +1590,7 @@ mod tests {
             hotkey: "   ".to_owned(),
             dock_corner: "under-the-desk".to_owned(),
             dock_monitor: "the-neighbour's".to_owned(),
+            theme: "vantablack".to_owned(),
             ..Settings::default()
         };
 
@@ -1586,6 +1609,14 @@ mod tests {
         // furthest option would quietly snap back to the default.
         assert_eq!(safe.dock_corner, "bottom-right");
         assert_eq!(safe.dock_monitor, "primary");
+        assert_eq!(safe.theme, "system", "an unknown theme costs the theme");
+        for theme in THEMES {
+            let kept = sanitise(Settings {
+                theme: theme.to_owned(),
+                ..Settings::default()
+            });
+            assert_eq!(kept.theme, theme, "a valid theme was rewritten");
+        }
         for corner in DOCK_CORNERS {
             let kept = sanitise(Settings {
                 dock_corner: corner.to_owned(),
@@ -1652,8 +1683,24 @@ pub fn set_settings<R: Runtime>(
         crate::window::reposition(&app);
     }
 
+    // Every window learns the new truth at once. The reply below reaches only
+    // the caller, and there are two windows now — the shelf and the settings
+    // window are two views of one store, and a save made in either must move
+    // both. A failed emit is logged, not fatal: the save itself succeeded.
+    if let Err(err) = tauri::Emitter::emit(&app, CHANGED_EVENT, &stored) {
+        crate::diag::warn(&format!("settings change not announced: {err}"));
+    }
+
     Ok(stored)
 }
+
+/// Emitted after every successful save, carrying the stored settings.
+///
+/// The name is joined to the front end through
+/// `tests/fixtures/window-events.json`, like the window events — a test on
+/// each side reads the fixture, so a rename fails somewhere rather than
+/// detaching the listener silently.
+const CHANGED_EVENT: &str = "settings://changed";
 
 #[tauri::command]
 /// Reports a failed write rather than swallowing it.
