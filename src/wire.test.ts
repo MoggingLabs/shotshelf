@@ -75,6 +75,7 @@ const settings: Settings = {
   theme: "system",
   watchAdded: [],
   watchRemoved: [],
+  clipboardKeepDays: null,
   pinned: [],
 };
 const videoDetails: VideoDetails = { poster: null, durationMs: null, bytes: 0 };

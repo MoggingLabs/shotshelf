@@ -801,6 +801,12 @@ fn as_ms(at: SystemTime) -> u64 {
 /// replace the list outright. Deriving it from the resolved watch list keeps
 /// one source of truth — the shelf can read exactly what the engine watches,
 /// non-recursively, and nothing else.
+/// Forwarded for `lib.rs`'s sweep loop and `set_settings`'s apply-now hook —
+/// the folder and its rules are `clipboard.rs`'s own.
+pub fn prune_clipboard<R: Runtime>(app: &AppHandle<R>) {
+    clipboard::prune_clipboard(app);
+}
+
 /// One line per folder, with its depth said when it is not the default —
 /// the log is the diagnostic USAGE points at, and "is my subfolder covered"
 /// is exactly the question a user with an added tree brings to it.

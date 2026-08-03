@@ -81,6 +81,19 @@ test("each settings control writes the field it is labelled for", async ({ page 
   await page.locator("#setting-downscale").check();
   expect((await saved(page))["downscaleExports"]).toBe(true);
 
+  // Every option, because the values are the join with the Rust sweep — and
+  // Forever must cross as null, not 0, for the same reason retention's does:
+  // zero days would be "delete everything now".
+  for (const [label, days] of [
+    ["30 days", 30],
+    ["90 days", 90],
+    ["Forever", null],
+  ] as const) {
+    await page.locator("#setting-clipboard-keep-button").click();
+    await page.getByRole("option", { name: label, exact: true }).click();
+    expect((await saved(page))["clipboardKeepDays"]).toBe(days);
+  }
+
   await page.locator('button[data-section="about"]').click();
   await page.locator("#setting-updates").uncheck();
   expect((await saved(page))["checkForUpdates"]).toBe(false);

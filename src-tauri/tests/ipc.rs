@@ -325,6 +325,9 @@ fn the_new_settings_fields_cross_the_boundary_normalised_and_tolerated() {
             // working directory — so the command must drop them, not store them.
             "watchAdded": ["not-an-absolute-path"],
             "watchRemoved": ["also/relative"],
+            // Negative days must come back as "forever", not as a deletion
+            // schedule — this is the one field that gates file removal.
+            "clipboardKeepDays": -1.0,
             "pinned": [],
         }}),
     )
@@ -360,6 +363,12 @@ fn the_new_settings_fields_cross_the_boundary_normalised_and_tolerated() {
             .and_then(serde_json::Value::as_array)
             .map(Vec::len),
         Some(0),
+    );
+    assert!(
+        stored
+            .get("clipboardKeepDays")
+            .is_some_and(serde_json::Value::is_null),
+        "a negative keep crossed the boundary unnormalised: {stored}",
     );
     assert_eq!(
         stored

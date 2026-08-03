@@ -284,6 +284,7 @@ allowlist, never a raw URL).
 | **Keep for** | General | How long unpinned captures stay. Removing them never touches the files |
 | **Max items** | General | How many unpinned captures the shelf holds |
 | **Watched folders** | Capturing | Add any folder to the watch — it is watched with everything inside it, subfolders included, while the stock screenshot folders stay top-level. Stop watching any folder, stock or added. Additions apply live and roam with your account — a machine where the path doesn't exist just skips it, the way an absent OneDrive folder is skipped. One honest limit: the launch backfill looks only at each watched folder's top level, so a capture written *into a subfolder* while Shotshelf was not running is not brought back — anything written there while it runs is caught |
+| **Keep clipboard captures** | Capturing | How long the app keeps its own copies of clipboard-only captures (Win+Shift+S / ⌘⌃⇧4) — the one place those exist. Forever by default; a limit lets old **unpinned** ones go, and pinned captures always stay. The only file deletion the app ever performs, and only on files it made itself |
 | **Smaller copies** | Capturing | Hand over a copy no larger than 1568px on its long edge, instead of the original |
 | **Theme** | Appearance | System, Light, Dark — or a named palette: Solarized (both halves), Nord, Dracula, Gruvbox Dark, Catppuccin Mocha. System follows the OS setting live; every palette holds the same contrast bars the stock two do |
 | **Corner** | Appearance | Which screen corner the popover docks to — a 2×2 picker. A bottom corner grows the popped column upward; a top corner grows it downward |
@@ -363,7 +364,7 @@ clearing that folder is your call and not the app's. `posters` holds one frame p
 the 60 most recent. Both are caches and are safe to delete at any time.
 
 Deleting `edits`, `posters` and `handoff` costs you saved edits (comparisons are written there too), poster frames and sized copies you have not dragged out
-yet. `clipboard` is the exception and the one to leave alone: Win+Shift+S and ⌘⌃⇧4 captures exist nowhere else, so deleting that folder destroys them. Everything else Shotshelf shows lives wherever the OS put it, and Shotshelf never moves or deletes it.
+yet. `clipboard` is the exception and the one to leave alone: Win+Shift+S and ⌘⌃⇧4 captures exist nowhere else, so deleting that folder destroys them. By default it grows forever; "Keep clipboard captures" in Settings → Capturing is the opt-in limit that lets old unpinned ones go. Everything else Shotshelf shows lives wherever the OS put it, and Shotshelf never moves or deletes it.
 
 ---
 

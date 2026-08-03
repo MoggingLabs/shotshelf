@@ -87,6 +87,12 @@ export interface Settings {
    * just clearing it — stock folders come back, added ones stay.
    */
   watchRemoved: string[];
+  /**
+   * How long clipboard captures keep their file, in days; `null` keeps them
+   * forever (the default). The one deletion the app may ever perform, and
+   * only on files it made itself — pinned captures are always exempt.
+   */
+  clipboardKeepDays: number | null;
   pinned: PinnedItem[];
 }
 
@@ -106,6 +112,7 @@ export const DEFAULTS: Settings = {
   theme: "system",
   watchAdded: [],
   watchRemoved: [],
+  clipboardKeepDays: null,
   pinned: [],
 };
 

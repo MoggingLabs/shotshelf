@@ -119,6 +119,9 @@ function fill(): void {
   const theme = el<HTMLSelectElement>("#setting-theme");
   theme.value = current.theme;
   refreshSelect(theme);
+  const keep = el<HTMLSelectElement>("#setting-clipboard-keep");
+  keep.value = current.clipboardKeepDays === null ? "" : String(current.clipboardKeepDays);
+  refreshSelect(keep);
   el<HTMLButtonElement>("#setting-hotkey").textContent = prettyHotkey(current.hotkey);
 
   for (const corner of document.querySelectorAll<HTMLButtonElement>("[data-corner]")) {
@@ -157,6 +160,12 @@ function bindControls(): void {
 
   el<HTMLSelectElement>("#setting-theme").addEventListener("change", (event) => {
     void save({ theme: (event.currentTarget as HTMLSelectElement).value as Settings["theme"] });
+  });
+  el<HTMLSelectElement>("#setting-clipboard-keep").addEventListener("change", (event) => {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    // "Forever" is the empty option and must reach Rust as null — the same
+    // null-not-zero rule the retention control writes down.
+    void save({ clipboardKeepDays: value === "" ? null : Number(value) });
   });
   for (const corner of document.querySelectorAll<HTMLButtonElement>("[data-corner]")) {
     corner.addEventListener("click", () => {
@@ -417,6 +426,7 @@ initWatchControls();
 enhanceSelect(el<HTMLSelectElement>("#setting-retention"));
 enhanceSelect(el<HTMLSelectElement>("#setting-monitor"));
 enhanceSelect(el<HTMLSelectElement>("#setting-theme"));
+enhanceSelect(el<HTMLSelectElement>("#setting-clipboard-keep"));
 
 // A save from any window — including this one — refreshes the form with what
 // was actually stored. The registration promise is watched: a window that

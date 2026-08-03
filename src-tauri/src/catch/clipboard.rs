@@ -5,11 +5,11 @@
 //! rather than polling, write the image out, and treat it as a normal capture.
 
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{hash_map::DefaultHasher, HashSet},
     hash::{Hash, Hasher},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{mpsc, Arc},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use tauri::{AppHandle, Listener, Manager, Runtime};
@@ -203,11 +203,12 @@ pub(super) fn capture_dir<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
 
 /// Clipboard captures have no file of their own, so give them one.
 ///
-/// Nothing prunes this folder, and that is deliberate rather than pending: a
-/// clipboard capture is an original with no copy anywhere else, so an
-/// automatic sweep here would be the only thing in the app that destroys a
-/// capture. It grows until the user clears it, and the usage guide says so
-/// plainly in the uninstall section.
+/// By default nothing prunes this folder: a clipboard capture is an original
+/// with no copy anywhere else, so it grows until the user clears it — or
+/// opts into a keep limit ("Keep clipboard captures" in Settings →
+/// Capturing), which is the one sweep in the app allowed to delete a
+/// capture, spelled out on [`prune_clipboard`]. The usage guide covers both
+/// in the uninstall section.
 fn write_capture<R: Runtime>(app: &AppHandle<R>, bytes: &[u8]) -> Result<PathBuf, String> {
     // `dirs::local` creates it; saying so again here made the contract
     // unreadable from the call site.
@@ -219,9 +220,110 @@ fn write_capture<R: Runtime>(app: &AppHandle<R>, bytes: &[u8]) -> Result<PathBuf
     Ok(path)
 }
 
+/// Let go of clipboard captures past the owner's chosen keep.
+///
+/// The one deletion the app ever performs, and only on files it made itself:
+/// a clipboard capture exists nowhere but this folder, so without a limit it
+/// grows for as long as the machine lives. Opt-in — `clipboard_keep_days`
+/// defaults to `None`, which is today's keep-forever — and pinned captures
+/// are always spared, whatever their age: a pin is the user saying "this one
+/// matters", and no housekeeping outranks that.
+pub(super) fn prune_clipboard<R: Runtime>(app: &AppHandle<R>) {
+    let Some(store) = app.try_state::<crate::settings::SettingsStore>() else {
+        return;
+    };
+    let settings = store.get();
+    let Some(days) = settings.clipboard_keep_days else {
+        return;
+    };
+    let Some(dir) = capture_dir(app) else {
+        return;
+    };
+    // `checked_sub` because a huge keep on a young clock underflows, and
+    // "cannot compute the cutoff" must mean "delete nothing".
+    let Some(cutoff) = SystemTime::now().checked_sub(Duration::from_secs_f64(days * 86_400.0))
+    else {
+        return;
+    };
+    let pinned: HashSet<PathBuf> = settings
+        .pinned
+        .iter()
+        .map(|pin| PathBuf::from(&pin.path))
+        .collect();
+    let gone = sweep_keep(&dir, &pinned, cutoff);
+    if gone > 0 {
+        crate::diag::info(&format!(
+            "{gone} clipboard captures past their keep were let go"
+        ));
+    }
+}
+
+/// The sweep itself, separable so a test can drive it against a real
+/// directory: everything under `dir` last written before `cutoff` goes,
+/// except pinned paths. Flat on purpose — this folder has no tree.
+fn sweep_keep(dir: &Path, pinned: &HashSet<PathBuf>, cutoff: SystemTime) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut gone = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() || pinned.contains(&path) {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .is_some_and(|written| written < cutoff);
+        if old && std::fs::remove_file(&path).is_ok() {
+            gone += 1;
+        }
+    }
+    gone
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_keep_sweep_spares_the_pinned_and_the_new() {
+        // Filesystem mtimes cannot be set portably from std, so age is
+        // simulated from the other side: a cutoff in the future makes every
+        // file "old", a cutoff in the past makes every file "new". The two
+        // runs together pin the comparison's direction and the pin
+        // exemption — the property that matters most, because this is the
+        // one sweep in the app that deletes a capture's only copy.
+        let dir = std::env::temp_dir().join(format!("shotshelf-keep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        let stale = dir.join("stale.png");
+        let precious = dir.join("pinned.png");
+        std::fs::write(&stale, b"x").expect("writable");
+        std::fs::write(&precious, b"x").expect("writable");
+        let pinned: HashSet<PathBuf> = [precious.clone()].into_iter().collect();
+
+        let future = SystemTime::now() + Duration::from_secs(3600);
+        assert_eq!(
+            sweep_keep(&dir, &pinned, future),
+            1,
+            "one stale, one pinned"
+        );
+        assert!(!stale.exists(), "the stale unpinned file is gone");
+        assert!(precious.exists(), "a pin outranks any keep");
+
+        std::fs::write(&stale, b"x").expect("writable");
+        let past = SystemTime::now() - Duration::from_secs(3600);
+        assert_eq!(
+            sweep_keep(&dir, &pinned, past),
+            0,
+            "nothing is younger than its keep"
+        );
+        assert!(stale.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn the_echo_window_outlasts_the_grace_the_worker_sleeps() {

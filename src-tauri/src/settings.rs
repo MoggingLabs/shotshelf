@@ -114,6 +114,19 @@ pub struct Settings {
     /// materialised list, so "Restore defaults" is just clearing this —
     /// bringing every stock folder back without touching what was added.
     pub watch_removed: Vec<String>,
+    /// How long clipboard captures keep their file, in days. `None` — the
+    /// default — keeps them forever, which was the only behaviour until the
+    /// owner chose an opt-in limit (2026-08-03).
+    ///
+    /// This is the one place the app may delete a capture file, and only
+    /// because these are the files it *made*: a Win+Shift+S capture exists
+    /// nowhere but the app's own `clipboard/` folder, so without a limit
+    /// that folder grows for as long as the machine lives. Pinned captures
+    /// are always exempt — see `catch::clipboard::prune_clipboard`.
+    /// Fractional values are honoured for the same reason
+    /// [`Settings::retention_hours`]'s are: it is the only practical way to
+    /// exercise the sweep without waiting a month.
+    pub clipboard_keep_days: Option<f64>,
     pub pinned: Vec<PinnedItem>,
 }
 
@@ -151,6 +164,7 @@ impl Default for Settings {
             theme: THEMES[0].to_owned(),
             watch_added: Vec::new(),
             watch_removed: Vec::new(),
+            clipboard_keep_days: None,
             pinned: Vec::new(),
         }
     }
@@ -771,6 +785,12 @@ fn sanitise(mut settings: Settings) -> Settings {
     settings.retention_hours = settings
         .retention_hours
         .filter(|hours| hours.is_finite() && *hours > 0.0);
+    // Same shape as retention: a negative or absurd keep is no keep at all,
+    // and "no keep" here means forever — the safe direction for the one
+    // setting that gates file deletion.
+    settings.clipboard_keep_days = settings
+        .clipboard_keep_days
+        .filter(|days| days.is_finite() && *days > 0.0);
     if settings.hotkey.trim().is_empty() {
         settings.hotkey = DEFAULT_HOTKEY.to_owned();
     }
@@ -1640,6 +1660,7 @@ mod tests {
             dock_corner: "under-the-desk".to_owned(),
             dock_monitor: "the-neighbour's".to_owned(),
             theme: "vantablack".to_owned(),
+            clipboard_keep_days: Some(-3.0),
             ..Settings::default()
         };
 
@@ -1659,6 +1680,10 @@ mod tests {
         assert_eq!(safe.dock_corner, "bottom-right");
         assert_eq!(safe.dock_monitor, "primary");
         assert_eq!(safe.theme, "system", "an unknown theme costs the theme");
+        assert_eq!(
+            safe.clipboard_keep_days, None,
+            "a negative keep is no keep, and no keep means forever"
+        );
         for theme in THEMES {
             let kept = sanitise(Settings {
                 theme: theme.to_owned(),
@@ -1773,6 +1798,15 @@ pub fn set_settings<R: Runtime>(
     {
         let handle = app.clone();
         tauri::async_runtime::spawn_blocking(move || crate::catch::rewatch(&handle));
+    }
+
+    // A newly chosen keep applies now, not at the next half-hour sweep —
+    // picking "30 days" and watching nothing happen reads as a broken
+    // control. Same worker treatment as the rewatch: a directory sweep has
+    // no business on the thread that answers the form.
+    if stored.clipboard_keep_days != previous.clipboard_keep_days {
+        let handle = app.clone();
+        tauri::async_runtime::spawn_blocking(move || crate::catch::prune_clipboard(&handle));
     }
 
     // Every window learns the new truth at once. The reply below reaches only

@@ -43,7 +43,8 @@
     "pinned",
     "theme",
     "watchAdded",
-    "watchRemoved"
+    "watchRemoved",
+    "clipboardKeepDays"
   ],
   "VideoDetails": [
     "poster",

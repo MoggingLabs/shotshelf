@@ -9,6 +9,7 @@
   "startAtLogin": false,
   "watchAdded": [],
   "watchRemoved": [],
+  "clipboardKeepDays": null,
   "pinned": [],
   "theme": "system"
 }

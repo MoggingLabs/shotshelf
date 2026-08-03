@@ -42,10 +42,14 @@ mod wire;
 
 use tauri::Manager;
 
-/// How often the derived caches are swept.
+/// How often the derived caches — and the one opt-in capture keep — are swept.
 ///
-/// Both hold re-derivable copies under the app's own cache directory, and
-/// neither sweep touches anything the shelf presents as a capture.
+/// The cache sweeps hold re-derivable copies under the app's own cache
+/// directory and touch nothing the shelf presents as a capture. The clipboard
+/// keep is the stated exception: it deletes clipboard captures past the age
+/// the owner chose in Settings, never pinned ones, and does nothing at all on
+/// the default `Forever` — `catch::clipboard::prune_clipboard` carries the
+/// full argument.
 const PRUNE_EVERY: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
 /// Sweep the poster and hand-off caches now, and keep doing it.
@@ -62,6 +66,7 @@ fn prune_caches<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                 poster::prune_cache(&sweeping);
                 handoff::prune(&sweeping);
                 share::prune_ghosts(&sweeping);
+                catch::prune_clipboard(&sweeping);
             })
             .await;
             tokio::time::sleep(PRUNE_EVERY).await;
