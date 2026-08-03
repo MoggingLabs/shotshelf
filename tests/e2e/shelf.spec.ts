@@ -58,18 +58,18 @@ test("the column is sized to exactly the cards it holds", async ({ page }) => {
 
   await land(page, FIXTURE.wide, { ts: 1 });
   await expect(page.locator(".tile")).toHaveCount(1);
-  // 112 for the card + 26 of padding and border, written as numbers rather
+  // 112 for the card + 26 of padding and border + 24 of peek cap, written rather
   // than re-derived from `geometry.ts` — an independent second statement, so a
   // constant edited by mistake fails here instead of moving both sides.
-  expect(await cardHeight(page)).toBe(138);
+  expect(await cardHeight(page)).toBe(162);
 
   await land(page, FIXTURE.tall, { ts: 2 });
   await expect(page.locator(".tile")).toHaveCount(2);
-  expect(await cardHeight(page)).toBe(258);
+  expect(await cardHeight(page)).toBe(282);
 
   await land(page, FIXTURE.square, { ts: 3 });
   await expect(page.locator(".tile")).toHaveCount(3);
-  expect(await cardHeight(page)).toBe(378);
+  expect(await cardHeight(page)).toBe(402);
 });
 
 test("the column never grows past what fits on screen", async ({ page }) => {
@@ -77,7 +77,7 @@ test("the column never grows past what fits on screen", async ({ page }) => {
   for (let index = 0; index < 9; index += 1) await land(page, FIXTURE.wide, { ts: index });
 
   // Five cards' worth, and it scrolls beyond that rather than growing off the top.
-  expect(await cardHeight(page)).toBe(5 * 112 + 4 * 8 + 26);
+  expect(await cardHeight(page)).toBe(24 + 5 * 112 + 4 * 8 + 26);
 });
 
 test("a card leaves the column after its minute but stays on the shelf", async ({ page }) => {
@@ -1273,4 +1273,24 @@ test("a delete that fails leaves the card exactly where it was", async ({ page }
   await expect(page.locator("#shelf-alert")).toContainText(/could not be deleted/);
   await expect(page.locator(".tile")).toHaveCount(1);
   await expect(page.locator("#shelf-undo")).toBeHidden();
+});
+
+test("the peek column can be put away by hand, keeping its captures", async ({ page }) => {
+  // The popup's cap: a transient window owes you a way out that is not
+  // waiting out its minute. Dismissing hides the window and nothing else —
+  // the capture is on the shelf next time it opens.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
+  await expect(page.locator(".shelf__peekbar")).toBeVisible();
+
+  await page.locator("#peek-dismiss").click();
+
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length))
+    .toBe(1);
+  await openBrowse(page);
+  await expect(page.locator(".tile")).toHaveCount(1);
+  // And the cap is browse-mode furniture nobody asked for: it leaves.
+  await expect(page.locator(".shelf__peekbar")).toBeHidden();
 });

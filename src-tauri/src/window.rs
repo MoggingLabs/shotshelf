@@ -450,6 +450,84 @@ pub(crate) fn fitted_browse_height(content: Option<f64>) -> f64 {
 const MAX_COLUMN_HEIGHT: f64 = 4000.0;
 pub const COLUMN_WIDTH: f64 = BROWSE_SIZE.0;
 
+/// How long a shape change takes to arrive, mirroring the stylesheet's
+/// `--motion-state`. Deliberately one beat: the OS reduced-motion preference
+/// cannot be read portably from here, and 160ms of ease-out is below the
+/// threshold where motion becomes a journey — that limit is stated rather
+/// than hidden.
+const GLIDE_MS: u64 = 160;
+const GLIDE_STEPS: u32 = 10;
+
+/// Supersession: each glide claims an epoch, and a newer claim ends it —
+/// cards landing faster than the animation would otherwise queue fights
+/// over the same window.
+static GLIDE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The eased fraction at `step` of `steps` — ease-out, exact at both ends.
+fn glide_fraction(step: u32, steps: u32) -> f64 {
+    let x = f64::from(step) / f64::from(steps);
+    1.0 - (1.0 - x) * (1.0 - x)
+}
+
+/// Move the shelf to `size` smoothly when it is visible, instantly when not.
+///
+/// The `set_size`/`place` pair every shape change already makes, played over
+/// ten corner-anchored frames: `place` runs per frame, so a bottom-anchored
+/// window keeps its bottom edge still and growth reads as the top edge
+/// travelling — the one-to-two-to-three of the fitted shelf, the column
+/// taking a card, and the popup becoming the browse view all move instead of
+/// snapping. Hidden windows jump: nothing should grow out of nowhere. A
+/// newer resize supersedes mid-flight, and the last frame is the exact
+/// target — the animation is presentation, never a different answer.
+fn glide<R: Runtime>(shelf: &WebviewWindow<R>, what: &'static str, size: (f64, f64)) {
+    let from = shelf
+        .outer_size()
+        .ok()
+        .zip(shelf.scale_factor().ok())
+        .map(|(current, scale)| {
+            (
+                f64::from(current.width) / scale,
+                f64::from(current.height) / scale,
+            )
+        });
+    let visible = shelf.is_visible().unwrap_or(false);
+    // Anything not worth animating — hidden, unreadable, or already there —
+    // takes the exact pair the call sites used to make.
+    let close_enough =
+        from.is_some_and(|from| (from.0 - size.0).abs() < 1.0 && (from.1 - size.1).abs() < 1.0);
+    let (Some(from), true, false) = (from, visible, close_enough) else {
+        attempt(
+            what,
+            shelf.set_size(tauri::LogicalSize::new(size.0, size.1)),
+        );
+        place(shelf, size);
+        return;
+    };
+
+    let epoch = GLIDE_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let shelf = shelf.clone();
+    std::thread::spawn(move || {
+        for step in 1..=GLIDE_STEPS {
+            if GLIDE_EPOCH.load(std::sync::atomic::Ordering::Relaxed) != epoch {
+                return;
+            }
+            let t = glide_fraction(step, GLIDE_STEPS);
+            let frame = (
+                from.0 + (size.0 - from.0) * t,
+                from.1 + (size.1 - from.1) * t,
+            );
+            attempt(
+                what,
+                shelf.set_size(tauri::LogicalSize::new(frame.0, frame.1)),
+            );
+            place(&shelf, frame);
+            std::thread::sleep(std::time::Duration::from_millis(
+                GLIDE_MS / u64::from(GLIDE_STEPS),
+            ));
+        }
+    });
+}
+
 /// Open the popover because the user asked: tray, hotkey, dock, or a restore
 /// after the editor closes.
 pub fn open_deliberately<R: Runtime>(app: &AppHandle<R>) {
@@ -483,13 +561,10 @@ fn open<R: Runtime>(app: &AppHandle<R>, appearance: Appearance) {
 
     // The cached fitted height, not the ceiling: the browse window takes the
     // height its content needed last time it was measured, so an open with
-    // one card on the shelf does not flash the full grid first.
+    // one card on the shelf does not flash the full grid first. Gliding when
+    // it was already up is the popup-becomes-shelf morph.
     let size = (BROWSE_SIZE.0, browse_height());
-    attempt(
-        "resize the shelf to the browse grid",
-        shelf.set_size(tauri::LogicalSize::new(size.0, size.1)),
-    );
-    place(&shelf, size);
+    glide(&shelf, "resize the shelf to the browse grid", size);
     attempt("show the shelf", shelf.show());
     attempt("focus the shelf", shelf.set_focus());
     mark_opened(&shelf, appearance);
@@ -514,14 +589,14 @@ pub fn peek<R: Runtime>(app: &AppHandle<R>, height: f64) {
     } else {
         80.0
     };
-    attempt(
+    // Glide rather than jump: the column grows a card at a time, and it is
+    // pinned by its corner, so each frame re-places to keep that corner still
+    // while the far edge travels.
+    glide(
+        &shelf,
         "resize the shelf to the column",
-        shelf.set_size(tauri::LogicalSize::new(COLUMN_WIDTH, height)),
+        (COLUMN_WIDTH, height),
     );
-    // Re-place on every peek: the column grows a card at a time, and it is
-    // pinned by its bottom-right corner, so a taller one has to move up to keep
-    // that corner where it was.
-    place(&shelf, (COLUMN_WIDTH, height));
     attempt("show the column", shelf.show());
 }
 
@@ -860,12 +935,11 @@ pub fn size_browse<R: Runtime>(app: AppHandle<R>, content: Option<f64>) {
     if !shelf.is_visible().unwrap_or(false) {
         return;
     }
-    let size = (BROWSE_SIZE.0, height);
-    attempt(
+    glide(
+        &shelf,
         "fit the browse window to its cards",
-        shelf.set_size(tauri::LogicalSize::new(size.0, size.1)),
+        (BROWSE_SIZE.0, height),
     );
-    place(&shelf, size);
 }
 
 /// Grow the popover to show one capture large.
@@ -902,6 +976,24 @@ pub fn open_settings<R: Runtime>(app: AppHandle<R>) {
 #[cfg(test)]
 mod tests {
     use super::{fitted_browse_height, wanted, Wanted, BROWSE_SIZE};
+
+    #[test]
+    fn a_glide_lands_exactly_and_only_moves_forward() {
+        // The last frame must be the target itself — the animation is
+        // presentation, never a different answer — and the fraction must
+        // never back up, or a growing window would visibly stutter.
+        assert!(
+            (super::glide_fraction(super::GLIDE_STEPS, super::GLIDE_STEPS) - 1.0).abs()
+                < f64::EPSILON,
+            "the final frame is the target, not near it"
+        );
+        let mut last = 0.0;
+        for step in 1..=super::GLIDE_STEPS {
+            let f = super::glide_fraction(step, super::GLIDE_STEPS);
+            assert!(f > last, "the glide never backs up");
+            last = f;
+        }
+    }
 
     #[test]
     fn a_browse_measurement_is_clamped_into_the_honest_range() {

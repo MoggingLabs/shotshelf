@@ -11,7 +11,7 @@
  * why appearance needs gating of its own.
  */
 
-import { CARD_GAP, CARD_HEIGHT, COLUMN_PADDING } from "../../src/shelf/geometry.ts";
+import { CARD_GAP, CARD_HEIGHT, COLUMN_PADDING, PEEK_BAR } from "../../src/shelf/geometry.ts";
 import { SECRET_KINDS } from "../../src/shelf/types.ts";
 import captureMissing from "../fixtures/capture-missing.json" with { type: "json" };
 import {
@@ -264,7 +264,7 @@ test("a failure is readable in the peeked column, where the failures happen", as
   // Through the same constants the stylesheet is mirrored against, so this
   // cannot drift from the card metrics the rest of this file maintains.
   expect(strip).toBeGreaterThan(0);
-  expect(asked).toBe(cards * CARD_HEIGHT + (cards - 1) * CARD_GAP + COLUMN_PADDING + strip);
+  expect(asked).toBe(PEEK_BAR + cards * CARD_HEIGHT + (cards - 1) * CARD_GAP + COLUMN_PADDING + strip);
 });
 
 test("the CSS mirrors the card metrics the column window is sized against", async ({ page }) => {
@@ -301,6 +301,14 @@ test("the CSS mirrors the card metrics the column window is sized against", asyn
 
   expect(measured.gap).toBeCloseTo(CARD_GAP, 1);
   expect(measured.padding).toBeCloseTo(COLUMN_PADDING, 1);
+
+  // The peek cap's mirror is load-bearing the same way the padding's is:
+  // geometry sizes the column window from PEEK_BAR, and the stylesheet's
+  // 24px is the other half of that statement.
+  const cap = await page
+    .locator(".shelf__peekbar")
+    .evaluate((el: HTMLElement) => el.offsetHeight);
+  expect(cap).toBeCloseTo(PEEK_BAR, 0);
 
   // And the rendered card against the constant, not against a literal.
   const card = await page.locator(".tile").first().boundingBox();

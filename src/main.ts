@@ -58,6 +58,7 @@ const settingsButton = el<HTMLButtonElement>("#shelf-settings");
 const hideButton = el<HTMLButtonElement>("#shelf-hide");
 settingsButton.prepend(icon("settings", 16));
 hideButton.prepend(icon("minus", 16));
+el<HTMLButtonElement>("#peek-dismiss").prepend(icon("close", 14));
 
 const shelf = new Shelf(
   el<HTMLElement>("#shelf-items"),
@@ -404,6 +405,9 @@ subscribe(
 // One delegated listener answers every `data-tip` in this window, the
 // editor's included.
 initTooltips();
+
+// The peek cap: the column popup's own way out. Captures stay.
+el<HTMLButtonElement>("#peek-dismiss").addEventListener("click", () => popover.dismiss());
 
 // The gear opens the settings window; the shelf holds no form of its own.
 settingsButton.addEventListener("click", () => {

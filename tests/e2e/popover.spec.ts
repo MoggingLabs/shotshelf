@@ -17,7 +17,7 @@
  * shelf simply stopped popping up, for the rest of the session.
  */
 
-import { CARD_GAP, CARD_HEIGHT, COLUMN_PADDING } from "../../src/shelf/geometry.ts";
+import { CARD_GAP, CARD_HEIGHT, COLUMN_PADDING, PEEK_BAR } from "../../src/shelf/geometry.ts";
 import {
   bootShelf,
   expect,
@@ -353,7 +353,7 @@ test("removing one card of several shrinks the peeked column", async ({ page }) 
   const strip = await page
     .locator("#shelf-alert")
     .evaluate((el: HTMLElement) => (el.hasAttribute("hidden") ? 0 : el.offsetHeight));
-  expect(asked).toBe(2 * CARD_HEIGHT + CARD_GAP + COLUMN_PADDING + strip);
+  expect(asked).toBe(PEEK_BAR + 2 * CARD_HEIGHT + CARD_GAP + COLUMN_PADDING + strip);
 });
 
 test("the front end adopts hidden from the event Rust really emits", async ({ page }) => {

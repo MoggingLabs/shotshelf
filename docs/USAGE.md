@@ -97,7 +97,8 @@ says otherwise — just clear of the taskbar, not a window that sits open all da
   point is dragging out of it and into something else.
 - **When a capture lands** it peeks for about a minute and closes itself. It never takes
   focus, so it can't swallow what you're typing. Hover it and it stays open for as long as you
-  want it.
+  want it — and its slim cap carries a × to put it away right now (the captures stay on the
+  shelf) plus a place to drag the popup by.
 - **Windows:** the icon's tooltip tells you how many captures are on the shelf.
 - **macOS and Linux:** the count sits beside the icon. Linux tooltips are not shown at all — the
   AppIndicator protocol has no equivalent — so the label is where the count goes there.

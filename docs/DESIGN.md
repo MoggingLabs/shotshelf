@@ -94,6 +94,14 @@ press, reveal-on-hover — and `--motion-state` (160ms) for state, the watching
 dot. Motion is never the only signal, which is what lets the global
 `prefers-reduced-motion` rule flatten everything wholesale.
 
+The *window* moves on the same clock: every shape change — the fitted shelf
+taking or losing a card, the column growing, the popup becoming the browse
+view — glides over 160ms of ease-out in `window.rs`, corner-anchored on every
+frame, and jumps instantly when the window was hidden. One stated limit: the
+OS reduced-motion preference is not portably readable from Rust, so the glide
+stays a single beat rather than honouring the flag — short enough not to be a
+journey, and written down here rather than hidden.
+
 ## Palette
 
 Semantic tokens only; `check-design.mjs` refuses a colour literal outside

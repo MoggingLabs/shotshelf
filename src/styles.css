@@ -1595,3 +1595,38 @@ select[data-enhanced] {
 .shelf__undo:hover {
   background: var(--raised-hover);
 }
+
+/* ── The peek column's cap ────────────────────────────────────────────────
+   Only piece of furniture the column carries — see index.html for why it
+   exists at all. 24px: one WCAG target tall, nothing more. `geometry.ts`
+   mirrors the height as PEEK_BAR, and the column window is sized from it. */
+.shelf__peekbar {
+  display: none;
+}
+
+.shelf[data-mode="column"] .shelf__peekbar {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  align-items: center;
+  height: 24px;
+  border-bottom: 1px solid var(--stroke);
+}
+
+.shelf__peekdismiss {
+  width: var(--ctl-tile);
+  height: var(--ctl-tile);
+  display: grid;
+  place-items: center;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: var(--radius-ctl);
+  transition: background var(--motion-fast) ease-out, color var(--motion-fast) ease-out;
+}
+
+.shelf__peekdismiss:hover {
+  background: var(--raised-hover);
+  color: var(--text);
+}

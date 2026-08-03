@@ -63,6 +63,22 @@
            the gear. The panel that used to sit here squeezed seven controls
            into 225px; its whole surface moved to settings.html. -->
 
+      <!-- The peek column's one piece of furniture. The browse strip above is
+           hidden in the column shape on purpose; this slim cap is what the
+           popup gets instead: a drag handle for a frameless window, and the
+           one control a transient popup owes you — a way to put it away by
+           hand rather than waiting out its minute. Dismissing hides the
+           popup; the captures stay on the shelf. -->
+      <div class="shelf__peekbar" data-tauri-drag-region>
+        <button
+          class="shelf__peekdismiss"
+          id="peek-dismiss"
+          type="button"
+          aria-label="Dismiss — captures stay on the shelf"
+          data-tip="Dismiss — captures stay on the shelf"
+        ></button>
+      </div>
+
       <!-- The list and the overlay share one box, and that box is what the
            overlay is allowed to cover. Both halves of that are load-bearing.
 

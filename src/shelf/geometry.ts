@@ -19,6 +19,12 @@ export const CARD_GAP = 8;
 export const COLUMN_PADDING = 26;
 /** Beyond this the column scrolls rather than growing off the screen. */
 export const COLUMN_MAX_CARDS = 5;
+/**
+ * The peek cap — the column's one piece of furniture, a dismiss control and
+ * drag handle in 24px. Mirrors `.shelf__peekbar`'s height in the stylesheet,
+ * and the mirror is load-bearing the same way `COLUMN_PADDING`'s is.
+ */
+export const PEEK_BAR = 24;
 
 
 /**
@@ -49,8 +55,10 @@ export function columnHeight(cards: number, alsoShowing = 0): number {
   //
   // Still floored at one when there is nothing else to show, because a window
   // of pure padding is not a window anyone wants either.
-  if (cards <= 0 && alsoShowing > 0) return COLUMN_PADDING + alsoShowing;
+  // The cap rides every column shape, message-only ones included — which
+  // quietly gives the lost-capture strip a dismiss control too.
+  if (cards <= 0 && alsoShowing > 0) return PEEK_BAR + COLUMN_PADDING + alsoShowing;
 
   const shown = Math.min(Math.max(cards, 1), COLUMN_MAX_CARDS);
-  return shown * CARD_HEIGHT + (shown - 1) * CARD_GAP + COLUMN_PADDING + alsoShowing;
+  return PEEK_BAR + shown * CARD_HEIGHT + (shown - 1) * CARD_GAP + COLUMN_PADDING + alsoShowing;
 }
