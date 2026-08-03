@@ -1,0 +1,11 @@
+# Staged for submission to microsoft/winget-pkgs — deliberately NOT submitted
+# from a session. To submit: copy this directory into a winget-pkgs fork under
+# manifests/m/MoggingLabs/Shotshelf/0.4.0/ and open the PR, or run
+# `wingetcreate submit packaging/winget/MoggingLabs.Shotshelf/0.4.0`.
+# The installer is unsigned; the Sha256 below is the release's own
+# SHA256SUMS.txt entry, which is the integrity statement until signing lands.
+PackageIdentifier: MoggingLabs.Shotshelf
+PackageVersion: 0.4.0
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0
