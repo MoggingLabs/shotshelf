@@ -122,6 +122,10 @@ function fill(): void {
   const keep = el<HTMLSelectElement>("#setting-clipboard-keep");
   keep.value = current.clipboardKeepDays === null ? "" : String(current.clipboardKeepDays);
   refreshSelect(keep);
+  // Disabled means "already automatic" — the button doubles as the answer to
+  // "did my drag get remembered?" without showing raw pixel numbers.
+  el<HTMLButtonElement>("#shelf-size-reset").disabled =
+    current.browseWidth === null && current.browseHeight === null;
   el<HTMLButtonElement>("#setting-hotkey").textContent = prettyHotkey(current.hotkey);
 
   for (const corner of document.querySelectorAll<HTMLButtonElement>("[data-corner]")) {
@@ -156,6 +160,9 @@ function bindControls(): void {
     void save({
       dockMonitor: (event.currentTarget as HTMLSelectElement).value as Settings["dockMonitor"],
     });
+  });
+  el<HTMLButtonElement>("#shelf-size-reset").addEventListener("click", () => {
+    void save({ browseWidth: null, browseHeight: null });
   });
 
   el<HTMLSelectElement>("#setting-theme").addEventListener("change", (event) => {

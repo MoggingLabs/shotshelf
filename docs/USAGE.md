@@ -168,6 +168,13 @@ pointer.
   fits what it holds: one capture gets a one-capture window, two get two,
   and three at a time is the ceiling — past that the list scrolls. An empty
   shelf keeps the full window, because that is where it explains itself.
+  **Drag the window's edges to make it yours**: the width you choose applies
+  whenever the shelf is summoned, and the height becomes the fit's ceiling —
+  one capture still gets a snug window, but a taller drag lets more cards
+  stand before the scroll takes over. It never shrinks below one readable
+  card, the size is remembered across restarts, and **Reset to automatic**
+  in Settings → Appearance puts it all back. The capture popup ignores all
+  of this — it stays its own one-card width.
 
 ### From the keyboard
 
@@ -296,6 +303,7 @@ allowlist, never a raw URL).
 | **Theme** | Appearance | System, Light, Dark — or a named palette: Solarized (both halves), Nord, Dracula, Gruvbox Dark, Catppuccin Mocha. System follows the OS setting live; every palette holds the same contrast bars the stock two do |
 | **Corner** | Appearance | Which screen corner the popover docks to — a 2×2 picker. A bottom corner grows the popped column upward; a top corner grows it downward |
 | **Monitor** | Appearance | Which monitor carries that corner: the primary, or whichever one your cursor is on when the shelf appears |
+| **Shelf size** | Appearance | Not a control but a receipt: the size you drag the summoned shelf to is remembered here, and **Reset to automatic** hands the sizing back to the content fit. Disabled while nothing was ever dragged |
 | **Summon the shelf** | Shortcuts | The global show/hide shortcut, recorded from your keys |
 | **Check at launch** | About | Whether Shotshelf asks GitHub Releases for a newer version once per launch |
 

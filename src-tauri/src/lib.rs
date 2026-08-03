@@ -200,6 +200,22 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // A resize of the main window may be the user's hand on the
+            // browse border — `window::note_resized` owns telling ours from
+            // theirs and remembering theirs. Logical units, because that is
+            // what every size in window.rs speaks; the conversion mirrors
+            // `reposition`'s.
+            if let tauri::WindowEvent::Resized(physical) = event {
+                if window.label() == window::SHELF {
+                    let scale = window.scale_factor().unwrap_or(1.0);
+                    window::note_resized(
+                        window.app_handle(),
+                        f64::from(physical.width) / scale,
+                        f64::from(physical.height) / scale,
+                    );
+                }
+                return;
+            }
             // This closure fires for every window, so it branches by label —
             // before the settings window existed it treated any close as the
             // shelf's, and closing settings would have hidden the shelf.

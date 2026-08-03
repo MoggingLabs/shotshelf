@@ -27,7 +27,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 
 use crate::catch::CaptureKind;
 
@@ -127,6 +127,14 @@ pub struct Settings {
     /// [`Settings::retention_hours`]'s are: it is the only practical way to
     /// exercise the sweep without waiting a month.
     pub clipboard_keep_days: Option<f64>,
+    /// The browse window's size, as the user last dragged it — `None` means
+    /// automatic, which is the fitted behaviour exactly. Width applies
+    /// always; height is the *ceiling* of the adaptive fit, so one capture
+    /// still gets a snug window however tall this is (owner decision,
+    /// 2026-08-03). Recorded by `window::note_resized`'s debounce, cleared
+    /// by the settings window's Reset to automatic.
+    pub browse_width: Option<f64>,
+    pub browse_height: Option<f64>,
     pub pinned: Vec<PinnedItem>,
 }
 
@@ -165,6 +173,8 @@ impl Default for Settings {
             watch_added: Vec::new(),
             watch_removed: Vec::new(),
             clipboard_keep_days: None,
+            browse_width: None,
+            browse_height: None,
             pinned: Vec::new(),
         }
     }
@@ -791,6 +801,17 @@ fn sanitise(mut settings: Settings) -> Settings {
     settings.clipboard_keep_days = settings
         .clipboard_keep_days
         .filter(|days| days.is_finite() && *days > 0.0);
+    // The browse size holds a *drag*, so a finite value is clamped into the
+    // window's honest range rather than discarded — "as small as it goes"
+    // is a real intent — while a non-finite one is nobody's drag at all.
+    settings.browse_width = settings
+        .browse_width
+        .filter(|width| width.is_finite())
+        .map(|width| width.clamp(crate::window::MIN_BROWSE_WIDTH, MAX_BROWSE_DIM));
+    settings.browse_height = settings
+        .browse_height
+        .filter(|height| height.is_finite())
+        .map(|height| height.clamp(crate::window::MIN_BROWSE_HEIGHT, MAX_BROWSE_DIM));
     if settings.hotkey.trim().is_empty() {
         settings.hotkey = DEFAULT_HOTKEY.to_owned();
     }
@@ -809,6 +830,11 @@ fn sanitise(mut settings: Settings) -> Settings {
     settings.watch_removed = allowed_watch_list(std::mem::take(&mut settings.watch_removed));
     settings
 }
+
+/// The largest either browse dimension may claim: a sanity bound well past
+/// any real monitor, mirroring `MAX_COLUMN_HEIGHT`'s reasoning — it exists
+/// so a hand-edited number cannot be absurd.
+const MAX_BROWSE_DIM: f64 = 4000.0;
 
 /// The watch lists may be as many entries as a file can hold; the watcher
 /// registry, the settings window's list and the asset-scope grant all grow
@@ -1661,6 +1687,8 @@ mod tests {
             dock_monitor: "the-neighbour's".to_owned(),
             theme: "vantablack".to_owned(),
             clipboard_keep_days: Some(-3.0),
+            browse_width: Some(10.0),
+            browse_height: Some(f64::NAN),
             ..Settings::default()
         };
 
@@ -1683,6 +1711,15 @@ mod tests {
         assert_eq!(
             safe.clipboard_keep_days, None,
             "a negative keep is no keep, and no keep means forever"
+        );
+        assert_eq!(
+            safe.browse_width,
+            Some(crate::window::MIN_BROWSE_WIDTH),
+            "a tiny drag is clamped to the floor, not discarded — small was the intent"
+        );
+        assert_eq!(
+            safe.browse_height, None,
+            "a NaN is nobody's drag; automatic is the honest reading"
         );
         for theme in THEMES {
             let kept = sanitise(Settings {
@@ -1818,6 +1855,30 @@ pub fn set_settings<R: Runtime>(
     }
 
     Ok(stored)
+}
+
+/// Remember the browse size the user just dragged the window to.
+///
+/// Rust-initiated, so it cannot ride `set_settings` — but it must behave
+/// exactly like a save from either window: persist through `replace` (which
+/// sanitises, clamping the drag into the honest range) and then announce on
+/// [`CHANGED_EVENT`], or the settings window's Reset button would stay
+/// disabled while a size sat stored under it.
+pub(crate) fn remember_browse_size<R: Runtime>(app: &AppHandle<R>, width: f64, height: f64) {
+    let Some(store) = app.try_state::<SettingsStore>() else {
+        return;
+    };
+    let mut next = store.get();
+    next.browse_width = Some(width);
+    next.browse_height = Some(height);
+    match store.replace(next) {
+        Ok(stored) => {
+            if let Err(err) = tauri::Emitter::emit(app, CHANGED_EVENT, &stored) {
+                crate::diag::warn(&format!("browse size change not announced: {err}"));
+            }
+        }
+        Err(err) => crate::diag::warn(&format!("the browse size could not be saved: {err}")),
+    }
 }
 
 /// Emitted after every successful save, carrying the stored settings.

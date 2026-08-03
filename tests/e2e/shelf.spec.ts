@@ -20,6 +20,7 @@ import {
   CAPTURE_EVENT,
   HIDDEN_EVENT,
   PROBLEM_EVENT,
+  SETTINGS_CHANGED_EVENT,
   UPDATE_EVENT,
 } from "../harness/app.ts";
 import engineStarting from "../fixtures/engine-starting.json" with { type: "json" };
@@ -1150,6 +1151,62 @@ test("the browse window asks for exactly the height its cards need", async ({ pa
   // the measurement cuts at the third card's bottom edge.
   await land(page, FIXTURE.wide, { ts: 4 });
   await expect.poll(asked).toBe(one + 240);
+});
+
+test("a user-dragged height lifts the three-card cut and sends the full span", async ({ page }) => {
+  // With a stored `browseHeight` the user's drag is the ceiling, not the
+  // stock three-card viewport — so the measurement stops cutting at the
+  // third card and reports the whole span, leaving Rust to cap it. Asserted
+  // as a relation against the cut's own arithmetic: four cards must ask for
+  // strictly more than one + 240, the exact value the previous test pins as
+  // the automatic shape's ceiling.
+  await page.clock.install();
+  await bootShelf(page, { settings: { browseHeight: 800 } });
+  await openBrowse(page);
+  const asked = () =>
+    page.evaluate(() => window.__shotshelf__.callsTo("size_browse").at(-1)?.args["content"]);
+
+  await land(page, FIXTURE.wide, { ts: 1 });
+  await expect.poll(asked).toBeGreaterThan(0);
+  const one = (await asked()) as number;
+
+  await land(page, FIXTURE.tall, { ts: 2 });
+  await land(page, FIXTURE.square, { ts: 3 });
+  await land(page, FIXTURE.wide, { ts: 4 });
+  await expect.poll(asked).toBeGreaterThan(one + 240);
+});
+
+test("the drag's own save does not refit the window under the hand", async ({ page }) => {
+  // Rust announces the dragged size on the same event every save uses, and
+  // the shelf's handler re-renders — which reports the browse height. Left
+  // alone, the window would refit to its content a moment after the user
+  // let go of the border, undoing the size they had just chosen. So a
+  // change that moved *only* the browse size is ignored here; clearing it
+  // is not, because only Reset to automatic can, and handing the shape back
+  // to the content fit is exactly what that button promises.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide, { ts: 1 });
+  await openBrowse(page);
+  const sizeCalls = () =>
+    page.evaluate(() => window.__shotshelf__.callsTo("size_browse").length);
+  await expect.poll(sizeCalls).toBeGreaterThan(0);
+  const beforeDrag = await sizeCalls();
+
+  const changed = async (settings: Record<string, unknown>): Promise<void> => {
+    await page.evaluate(
+      ([event, payload]) => window.__shotshelf__.emit(event, payload),
+      [SETTINGS_CHANGED_EVENT, { ...DEFAULT_SETTINGS, ...settings }] as const,
+    );
+  };
+
+  await changed({ browseWidth: 320, browseHeight: 700 });
+  // Given a moment to be wrong in: the refit would arrive on the same tick
+  // as the re-render, so an immediate read is enough to catch it, and the
+  // count is polled to keep the assertion from racing the listener.
+  await expect.poll(sizeCalls).toBe(beforeDrag);
+
+  await changed({ browseWidth: null, browseHeight: null });
+  await expect.poll(sizeCalls).toBeGreaterThan(beforeDrag);
 });
 
 test("a message in the strip is part of the fitted height while it shows", async ({ page }) => {

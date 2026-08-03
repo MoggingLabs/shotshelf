@@ -102,6 +102,21 @@ OS reduced-motion preference is not portably readable from Rust, so the glide
 stays a single beat rather than honouring the flag — short enough not to be a
 journey, and written down here rather than hidden.
 
+The browse window is also the one shape a hand may resize. The drag itself is
+the frameless window's invisible edge (tao's), so the affordance is drawn, not
+built: a six-dot diagonal grip in the bottom-right corner — dots on a 4px
+pitch in a 12px box, 4px off the corner, `--stroke-heavy` so it reads as
+chrome rather than content — `pointer-events: none`, browse mode only, and
+revealed on hover at `--motion-fast` like the card controls. Hover-revealed
+for the same reason they are: that corner is somebody's screenshot, and six
+permanent dots on it read as dirt on the picture rather than as chrome. The
+dragged width applies whenever the shelf is summoned; the dragged height is
+the *ceiling* on the adaptive fit, so a snug window stays snug. Floors are
+Rust's: stock width, one readable card of height. The column and the quick
+look are sized by their content and show no grip. There is no snap-back
+mid-gesture — the window stays where the hand left it, and the next capture
+or reopen reconciles through the normal fit.
+
 ## Palette
 
 Semantic tokens only; `check-design.mjs` refuses a colour literal outside

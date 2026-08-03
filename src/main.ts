@@ -27,6 +27,7 @@ import {
   loadSettings,
   onSettingsChanged,
   openSettingsWindow,
+  type Settings,
 } from "./settings.ts";
 import { textRecognitionAvailable } from "./shelf/bridge.ts";
 import { Shelf, type Capture } from "./shelf/index.ts";
@@ -420,8 +421,30 @@ settingsButton.addEventListener("click", () => {
 // A save in the settings window reaches the shelf through Rust's event —
 // limits re-apply, the theme re-stamps, and `currentSettings()` already
 // answers the new truth by the time this runs.
+//
+// With one exception, and it is the resize's whole promise: the browse size
+// is written by the *drag itself*, announced on this same event when Rust's
+// debounce lands. Re-applying then re-renders, and a render reports the
+// browse height, so the window would refit a moment after the hand let go —
+// snapping back to its content while the user was still looking at the size
+// they chose. Nothing in this handler depends on that size, so a change
+// that moved only it is not this window's business.
+//
+// Clearing it *is*, because only Reset to automatic can: the drag writes a
+// size and never a null, so a null arriving here is the settings window
+// handing the shape back to the content fit, and the shelf should take it.
+//
+// Compared against what this window believed a moment ago rather than against
+// a snapshot kept here — a snapshot taken at start-up is `DEFAULTS` until the
+// stored file lands, so on any machine whose settings are not the defaults
+// the very first drag would have looked like a change to everything.
+const sameButForSize = (a: Settings, b: Settings): boolean =>
+  JSON.stringify({ ...a, browseWidth: null, browseHeight: null }) ===
+  JSON.stringify({ ...b, browseWidth: null, browseHeight: null });
 subscribe(
-  onSettingsChanged((settings) => {
+  onSettingsChanged((settings, previous) => {
+    const sized = settings.browseWidth !== null || settings.browseHeight !== null;
+    if (sized && sameButForSize(settings, previous)) return;
     applyTheme(settings.theme);
     shelf.applySettings();
   }),

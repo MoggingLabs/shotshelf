@@ -44,7 +44,9 @@
     "theme",
     "watchAdded",
     "watchRemoved",
-    "clipboardKeepDays"
+    "clipboardKeepDays",
+    "browseWidth",
+    "browseHeight"
   ],
   "VideoDetails": [
     "poster",

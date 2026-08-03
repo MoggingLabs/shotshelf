@@ -76,6 +76,8 @@ const settings: Settings = {
   watchAdded: [],
   watchRemoved: [],
   clipboardKeepDays: null,
+  browseWidth: null,
+  browseHeight: null,
   pinned: [],
 };
 const videoDetails: VideoDetails = { poster: null, durationMs: null, bytes: 0 };

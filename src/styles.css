@@ -232,6 +232,7 @@ body {
    The backdrop is acrylic on Windows and vibrancy on macOS, applied natively;
    this layer only tints it, which is why the alpha is low. */
 .shelf {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -239,6 +240,41 @@ body {
   border: 1px solid var(--stroke-strong);
   border-radius: var(--radius);
   overflow: hidden;
+}
+
+/* The resize grip: six dots in the classic diagonal stair, bottom-right,
+   browse mode only — the one shape a hand may resize. Pure affordance: the
+   actual resize border is the frameless window's own invisible edge (tao's),
+   so this draws where that edge is and takes no events itself. The column
+   and the quick look are sized by Rust and show no grip. Dots at 4px pitch
+   in a 12px box, 4px off the corner — all on the spacing grid.
+
+   Revealed on hover, like the card controls and for the same reason: the
+   bottom-right of this window is a *thumbnail*, and six permanent dots over
+   someone's screenshot read as dirt on the picture rather than as chrome.
+   Nothing is lost — a hand that is about to grab the edge is already over
+   the window. */
+.shelf[data-mode="browse"]::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-fast) ease-out;
+  background:
+    radial-gradient(circle at 10px 2px, var(--stroke-heavy) 1px, transparent 1.5px),
+    radial-gradient(circle at 6px 6px, var(--stroke-heavy) 1px, transparent 1.5px),
+    radial-gradient(circle at 10px 6px, var(--stroke-heavy) 1px, transparent 1.5px),
+    radial-gradient(circle at 2px 10px, var(--stroke-heavy) 1px, transparent 1.5px),
+    radial-gradient(circle at 6px 10px, var(--stroke-heavy) 1px, transparent 1.5px),
+    radial-gradient(circle at 10px 10px, var(--stroke-heavy) 1px, transparent 1.5px);
+}
+
+.shelf[data-mode="browse"]:hover::after {
+  opacity: 1;
 }
 
 /* ── The auto-popup column ─────────────────────────────────────────────── */
@@ -271,9 +307,12 @@ body {
    second hole would have been a third. */
 
 /* Horizontal padding matches the browse view exactly, so a card comes out the
-   same width in both shapes — which is the whole point of the column. The
-   vertical 12px is `COLUMN_PADDING`'s per-edge half in `geometry.ts`, and the
-   mirror is load-bearing: the column window is sized from those constants. */
+   same width in both shapes — which is the whole point of the column. True at
+   the stock width only: a browse window the user has dragged wider grows its
+   cards with it, while the column stays stock — the fluid card is the browse
+   view's promise, the exact mirror is the column's. The vertical 12px is
+   `COLUMN_PADDING`'s per-edge half in `geometry.ts`, and the mirror is
+   load-bearing: the column window is sized from those constants. */
 .shelf[data-mode="column"] .shelf__items {
   padding: 12px;
 }

@@ -328,6 +328,10 @@ fn the_new_settings_fields_cross_the_boundary_normalised_and_tolerated() {
             // Negative days must come back as "forever", not as a deletion
             // schedule — this is the one field that gates file removal.
             "clipboardKeepDays": -1.0,
+            // A browse size below the floor is clamped up, not obeyed and not
+            // discarded — small was the intent, the floor is the limit.
+            "browseWidth": -5.0,
+            "browseHeight": 5000.0,
             "pinned": [],
         }}),
     )
@@ -376,6 +380,20 @@ fn the_new_settings_fields_cross_the_boundary_normalised_and_tolerated() {
             .and_then(serde_json::Value::as_bool),
         Some(true),
         "the stored choice must survive even where no launcher exists to apply it",
+    );
+    assert_eq!(
+        stored
+            .get("browseWidth")
+            .and_then(serde_json::Value::as_f64),
+        Some(225.0),
+        "a below-floor browse width crossed the boundary unclamped: {stored}",
+    );
+    assert_eq!(
+        stored
+            .get("browseHeight")
+            .and_then(serde_json::Value::as_f64),
+        Some(4000.0),
+        "an absurd browse height crossed the boundary unclamped: {stored}",
     );
 }
 

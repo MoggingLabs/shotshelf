@@ -10,6 +10,8 @@
   "watchAdded": [],
   "watchRemoved": [],
   "clipboardKeepDays": null,
+  "browseWidth": null,
+  "browseHeight": null,
   "pinned": [],
   "theme": "system"
 }

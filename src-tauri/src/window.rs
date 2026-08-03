@@ -403,7 +403,7 @@ pub const BROWSE_SIZE: (f64, f64) = (225.0, 420.0);
 /// The shortest browse window: the title strip plus one card with its day
 /// heading and the box's own padding. A report below this is a measurement
 /// bug, not a wish — one card must always be recognisable.
-const MIN_BROWSE_HEIGHT: f64 = 160.0;
+pub(crate) const MIN_BROWSE_HEIGHT: f64 = 160.0;
 
 /// The tallest a fitted browse may ask for: three cards with their strip,
 /// headings and paddings, plus a wrapped alert line of slack. The *fit* is
@@ -411,6 +411,165 @@ const MIN_BROWSE_HEIGHT: f64 = 160.0;
 /// so this is the sanity guard on a value that crosses the IPC boundary,
 /// not the rule itself.
 const MAX_BROWSE_HEIGHT: f64 = 560.0;
+
+/// The smallest the user may drag the browse window: its stock width, and
+/// one recognisable card's worth of height. `settings::sanitise` clamps the
+/// stored size to the same floors, so the two statements cannot disagree.
+pub(crate) const MIN_BROWSE_WIDTH: f64 = BROWSE_SIZE.0;
+
+/// The browse window's width and fit ceiling, honouring the user's dragged
+/// size when one is stored: width applies always, height caps the adaptive
+/// fit — one capture still gets a snug window however tall the ceiling.
+/// Read from state like `paths::resolve_watch_dirs` reads the watch lists;
+/// absent state (bare test apps) means stock.
+fn browse_dims<R: Runtime>(app: &AppHandle<R>) -> (f64, f64) {
+    let (width, ceiling) = app
+        .try_state::<crate::settings::SettingsStore>()
+        .map(|store| {
+            let settings = store.get();
+            (settings.browse_width, settings.browse_height)
+        })
+        .unwrap_or_default();
+    (
+        width.unwrap_or(BROWSE_SIZE.0),
+        ceiling.unwrap_or(MAX_BROWSE_HEIGHT),
+    )
+}
+
+/// The last size this module set, packed as rounded logical (w, h) — the
+/// half of user-resize detection that filters our own work. Written by
+/// [`set_size_noting`], which is the only thing that resizes the window and
+/// says why that matters.
+static LAST_SET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Whether the quick look is up. `mark_opened` fires for previews too, so
+/// `is_opened` alone cannot keep a preview's 72%-of-screen size out of the
+/// remembered browse size; `preview` sets this, `open` clears it.
+static PREVIEWING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// How many glide threads are mid-flight. A glide is ten sizes in 160ms and
+/// the OS delivers their Resized events on its own schedule — an event can
+/// trail [`LAST_SET`] by a whole frame, which is more than the tolerance —
+/// so detection simply stands down while any glide runs. The final event
+/// arrives after the counter drops and matches the recorded target.
+static GLIDING: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Decrements [`GLIDING`] however the glide thread leaves — the superseded
+/// early return included.
+struct GlideGuard;
+impl Drop for GlideGuard {
+    fn drop(&mut self) {
+        GLIDING.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+// Exact by construction: rounded and clamped into [0, u32::MAX] before the
+// cast, so neither truncation nor sign loss can occur — the allow states
+// that rather than restructuring arithmetic three comparisons deep.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn pack_size(width: f64, height: f64) -> u64 {
+    let w = width.round().clamp(0.0, f64::from(u32::MAX)) as u64;
+    let h = height.round().clamp(0.0, f64::from(u32::MAX)) as u64;
+    (w << 32) | h
+}
+
+/// Resize the window, and record that *we* were the ones who did.
+///
+/// One function rather than two statements at each site, because the two are
+/// a single fact and a site that does only the first is silent: the landing
+/// `Resized` event then matches nothing in [`LAST_SET`], `note_resized` reads
+/// the app's own work as the user's hand, and the shelf remembers a size
+/// nobody dragged it to. That is not hypothetical — the per-frame call was
+/// dropped by a bad edit here and nothing in the crate could notice, since
+/// every one of these sites takes a `WebviewWindow` and no test can run them.
+///
+/// Three callers, and they are all of them: `glide`'s instant branch, the
+/// frames of a glide (a glide is ten sizes, and recording only the target
+/// would leave nine of them looking like a hand), and the quick look.
+fn set_size_noting<R: Runtime>(shelf: &WebviewWindow<R>, what: &'static str, size: (f64, f64)) {
+    LAST_SET.store(
+        pack_size(size.0, size.1),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    attempt(
+        what,
+        shelf.set_size(tauri::LogicalSize::new(size.0, size.1)),
+    );
+}
+
+/// Whether a reported size is the one this module just set, within the
+/// couple of pixels DPI rounding moves a logical size by on its round trip
+/// through physical coordinates.
+fn was_programmatic(last: u64, got: (f64, f64)) -> bool {
+    let (last_w, last_h) = unpack_size(last);
+    (last_w - got.0).abs() <= 2.0 && (last_h - got.1).abs() <= 2.0
+}
+
+/// The inverse of [`pack_size`]. Each half fits a u32, which f64 holds
+/// exactly — the allow states the impossibility rather than restructuring.
+#[allow(clippy::cast_precision_loss)]
+fn unpack_size(packed: u64) -> (f64, f64) {
+    (
+        ((packed >> 32) & 0xffff_ffff) as f64,
+        (packed & 0xffff_ffff) as f64,
+    )
+}
+
+/// The user's drag, pending its debounce — packed like [`LAST_SET`], with
+/// zero meaning nothing pending.
+static PENDING_RESIZE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static RESIZE_WRITER_ARMED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// A window resize arrived from the OS. Decide whose it was, and remember
+/// the user's.
+///
+/// Called from `lib.rs`'s window-event hook for the main window only. Our
+/// own resizes are filtered by [`LAST_SET`]; a preview's by [`PREVIEWING`];
+/// anything with the window not deliberately open cannot be a user drag at
+/// all, because the peek keeps `resizable(false)`. What survives is the
+/// user's hand on the border — debounced 600ms before it is persisted,
+/// because `SettingsStore::note_capture` documents exactly what per-event
+/// writes cost, and a drag is a stream of events.
+pub fn note_resized<R: Runtime>(app: &AppHandle<R>, width: f64, height: f64) {
+    if !is_opened() || PREVIEWING.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    if GLIDING.load(std::sync::atomic::Ordering::Relaxed) > 0 {
+        return;
+    }
+    if was_programmatic(
+        LAST_SET.load(std::sync::atomic::Ordering::Relaxed),
+        (width, height),
+    ) {
+        return;
+    }
+
+    PENDING_RESIZE.store(
+        pack_size(width, height),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    if RESIZE_WRITER_ARMED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        RESIZE_WRITER_ARMED.store(false, std::sync::atomic::Ordering::Relaxed);
+        let pending = PENDING_RESIZE.swap(0, std::sync::atomic::Ordering::Relaxed);
+        if pending == 0 {
+            return;
+        }
+        let (width, height) = unpack_size(pending);
+        // Deliberately not written into the fit cache. That cache is what
+        // the next open glides to before the front end has measured
+        // anything, and the dragged height is a ceiling rather than a size:
+        // caching it would open a shelf holding two cards at the full
+        // dragged height and then shrink it the moment the measurement
+        // arrived — the flash the cache exists to prevent.
+        crate::settings::remember_browse_size(&app, width, height);
+    });
+}
 
 /// The browse height the front end last measured, remembered between opens.
 ///
@@ -439,10 +598,19 @@ fn browse_height() -> f64 {
 /// numbers get the same answer for the same reason `peek` rejects them:
 /// the value arrives from the front end, and a window sized to NaN is not
 /// a state.
-pub(crate) fn fitted_browse_height(content: Option<f64>) -> f64 {
+pub(crate) fn fitted_browse_height(content: Option<f64>, ceiling: f64) -> f64 {
+    // The ceiling is the user's dragged height when one is stored — already
+    // sanitised on its way into the settings file — or the stock maximum.
+    // The floor still applies: no ceiling may argue with "one card must be
+    // recognisable".
+    let ceiling = if ceiling.is_finite() {
+        ceiling.max(MIN_BROWSE_HEIGHT)
+    } else {
+        MAX_BROWSE_HEIGHT
+    };
     match content {
-        Some(content) if content.is_finite() => content.clamp(MIN_BROWSE_HEIGHT, MAX_BROWSE_HEIGHT),
-        _ => BROWSE_SIZE.1,
+        Some(content) if content.is_finite() => content.clamp(MIN_BROWSE_HEIGHT, ceiling),
+        _ => BROWSE_SIZE.1.clamp(MIN_BROWSE_HEIGHT, ceiling),
     }
 }
 /// The tallest the popped column may be asked to grow. Generous — a tall
@@ -496,17 +664,16 @@ fn glide<R: Runtime>(shelf: &WebviewWindow<R>, what: &'static str, size: (f64, f
     let close_enough =
         from.is_some_and(|from| (from.0 - size.0).abs() < 1.0 && (from.1 - size.1).abs() < 1.0);
     let (Some(from), true, false) = (from, visible, close_enough) else {
-        attempt(
-            what,
-            shelf.set_size(tauri::LogicalSize::new(size.0, size.1)),
-        );
+        set_size_noting(shelf, what, size);
         place(shelf, size);
         return;
     };
 
     let epoch = GLIDE_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    GLIDING.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let shelf = shelf.clone();
     std::thread::spawn(move || {
+        let _down_when_done = GlideGuard;
         for step in 1..=GLIDE_STEPS {
             if GLIDE_EPOCH.load(std::sync::atomic::Ordering::Relaxed) != epoch {
                 return;
@@ -516,10 +683,7 @@ fn glide<R: Runtime>(shelf: &WebviewWindow<R>, what: &'static str, size: (f64, f
                 from.0 + (size.0 - from.0) * t,
                 from.1 + (size.1 - from.1) * t,
             );
-            attempt(
-                what,
-                shelf.set_size(tauri::LogicalSize::new(frame.0, frame.1)),
-            );
+            set_size_noting(&shelf, what, frame);
             place(&shelf, frame);
             std::thread::sleep(std::time::Duration::from_millis(
                 GLIDE_MS / u64::from(GLIDE_STEPS),
@@ -562,8 +726,27 @@ fn open<R: Runtime>(app: &AppHandle<R>, appearance: Appearance) {
     // The cached fitted height, not the ceiling: the browse window takes the
     // height its content needed last time it was measured, so an open with
     // one card on the shelf does not flash the full grid first. Gliding when
-    // it was already up is the popup-becomes-shelf morph.
-    let size = (BROWSE_SIZE.0, browse_height());
+    // it was already up is the popup-becomes-shelf morph. Width — and the
+    // cap on that cached height — honour the size the user dragged.
+    let (user_width, user_ceiling) = browse_dims(app);
+    let size = (user_width, browse_height().min(user_ceiling));
+    // Before the glide, not after: this is the one shape a hand may resize,
+    // and the minimums are a rule about the window rather than about this
+    // appearance of it — applying them first leaves the glide's own frames
+    // the last word on where it lands. Both come off again in `peek` and
+    // `preview`, whose shapes are Rust's to decide.
+    PREVIEWING.store(false, std::sync::atomic::Ordering::Relaxed);
+    attempt(
+        "allow resizing the browse window",
+        shelf.set_resizable(true),
+    );
+    attempt(
+        "floor the browse window's size",
+        shelf.set_min_size(Some(tauri::LogicalSize::new(
+            MIN_BROWSE_WIDTH,
+            MIN_BROWSE_HEIGHT,
+        ))),
+    );
     glide(&shelf, "resize the shelf to the browse grid", size);
     attempt("show the shelf", shelf.show());
     attempt("focus the shelf", shelf.set_focus());
@@ -589,6 +772,16 @@ pub fn peek<R: Runtime>(app: &AppHandle<R>, height: f64) {
     } else {
         80.0
     };
+    // Transient, and never the user's to resize. The minimums matter as much
+    // as the handle: they are the *browse* floor, and a column asked for at
+    // 80 is a column the OS would refuse to shrink below 160 while they are
+    // still on — so once the shelf had been opened, every later popup would
+    // have come up too tall.
+    attempt("fix the column's size", shelf.set_resizable(false));
+    attempt(
+        "lift the browse minimums off the column",
+        shelf.set_min_size(None::<tauri::LogicalSize<f64>>),
+    );
     // Glide rather than jump: the column grows a card at a time, and it is
     // pinned by its corner, so each frame re-places to keep that corner still
     // while the far edge travels.
@@ -670,10 +863,15 @@ pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) -> Result<(), String
     let width = max_width.min(max_height * aspect).max(BROWSE_SIZE.0);
     let height = (width / aspect).min(max_height).max(200.0);
 
+    // A quick look is sized by Rust, not the hand: mark it so the resize
+    // events it fires are never remembered as the user's browse size.
+    PREVIEWING.store(true, std::sync::atomic::Ordering::Relaxed);
+    attempt("fix the preview's size", shelf.set_resizable(false));
     attempt(
-        "resize the shelf for a preview",
-        shelf.set_size(tauri::LogicalSize::new(width, height)),
+        "lift the browse minimums off the preview",
+        shelf.set_min_size(None::<tauri::LogicalSize<f64>>),
     );
+    set_size_noting(&shelf, "resize the shelf for a preview", (width, height));
     attempt("centre the shelf", shelf.center());
     attempt("show the preview", shelf.show());
     attempt("focus the preview", shelf.set_focus());
@@ -923,7 +1121,8 @@ pub fn hide_shelf<R: Runtime>(app: AppHandle<R>) {
 /// a shorter one moves to keep that corner where it was.
 #[tauri::command]
 pub fn size_browse<R: Runtime>(app: AppHandle<R>, content: Option<f64>) {
-    let height = fitted_browse_height(content);
+    let (user_width, user_ceiling) = browse_dims(&app);
+    let height = fitted_browse_height(content, user_ceiling);
     set_browse_height(height);
 
     if !is_opened() {
@@ -938,7 +1137,7 @@ pub fn size_browse<R: Runtime>(app: AppHandle<R>, content: Option<f64>) {
     glide(
         &shelf,
         "fit the browse window to its cards",
-        (BROWSE_SIZE.0, height),
+        (user_width, height),
     );
 }
 
@@ -978,6 +1177,27 @@ mod tests {
     use super::{fitted_browse_height, wanted, Wanted, BROWSE_SIZE};
 
     #[test]
+    fn our_own_sizes_are_recognised_and_the_hand_is_not() {
+        // The tolerance is the couple of pixels DPI rounding moves a logical
+        // size by on its round trip through physical coordinates — a real
+        // drag moves further than that or it is not a drag.
+        let last = super::pack_size(300.0, 480.0);
+        assert!(super::was_programmatic(last, (300.0, 480.0)));
+        assert!(
+            super::was_programmatic(last, (301.5, 478.5)),
+            "DPI rounding is ours"
+        );
+        assert!(
+            !super::was_programmatic(last, (330.0, 480.0)),
+            "a widened window is a drag"
+        );
+        assert!(
+            !super::was_programmatic(last, (300.0, 520.0)),
+            "a taller one too"
+        );
+    }
+
+    #[test]
     fn a_glide_lands_exactly_and_only_moves_forward() {
         // The last frame must be the target itself — the animation is
         // presentation, never a different answer — and the fraction must
@@ -999,22 +1219,35 @@ mod tests {
     fn a_browse_measurement_is_clamped_into_the_honest_range() {
         // A mid-range measurement passes through untouched — that is the
         // whole feature: one card's height for one card.
-        assert_eq!(fitted_browse_height(Some(300.0)), 300.0);
+        let stock = super::MAX_BROWSE_HEIGHT;
+        assert_eq!(fitted_browse_height(Some(300.0), stock), 300.0);
         assert_eq!(
-            fitted_browse_height(Some(10.0)),
+            fitted_browse_height(Some(10.0), stock),
             160.0,
             "one card must stay recognisable, whatever was measured"
         );
         assert_eq!(
-            fitted_browse_height(Some(9000.0)),
+            fitted_browse_height(Some(9000.0), stock),
             560.0,
             "past the three-card fit the list scrolls; the window stops growing"
         );
+        // The user's dragged height replaces the stock ceiling in both
+        // directions: taller lets more content stand, shorter caps sooner —
+        // and the floor still outranks any ceiling.
+        assert_eq!(fitted_browse_height(Some(900.0), 800.0), 800.0);
+        assert_eq!(fitted_browse_height(Some(300.0), 800.0), 300.0);
+        assert_eq!(fitted_browse_height(Some(500.0), 240.0), 240.0);
+        assert_eq!(
+            fitted_browse_height(Some(500.0), 40.0),
+            160.0,
+            "no ceiling argues with one recognisable card"
+        );
         // `None` is the empty state asking for the ceiling on purpose; a NaN
         // is the front end having a bug, not a wish. Same answer, different
-        // reasons, both stated.
-        assert_eq!(fitted_browse_height(None), BROWSE_SIZE.1);
-        assert_eq!(fitted_browse_height(Some(f64::NAN)), BROWSE_SIZE.1);
+        // reasons, both stated — and the empty state honours a low ceiling.
+        assert_eq!(fitted_browse_height(None, stock), BROWSE_SIZE.1);
+        assert_eq!(fitted_browse_height(Some(f64::NAN), stock), BROWSE_SIZE.1);
+        assert_eq!(fitted_browse_height(None, 300.0), 300.0);
     }
 
     #[test]

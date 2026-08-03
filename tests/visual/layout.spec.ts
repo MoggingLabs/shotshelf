@@ -185,6 +185,41 @@ test("card controls stay out of the way until you hover", async ({ page }) => {
     .toBeGreaterThan(0);
 });
 
+test("the resize grip shows on the shape that resizes, and only on hover", async ({ page }) => {
+  // The grip is the only sign that the summoned shelf can be dragged bigger —
+  // the border that does the dragging is the frameless window's own, and
+  // invisible. Two rules, both of them things a user would notice breaking:
+  // it belongs to the browse shape (the popped column and the quick look are
+  // sized by Rust, and a handle on them would promise something false), and
+  // it stays off the thumbnail underneath it until the pointer is here.
+  // `drawn` rather than opacity alone: a pseudo-element the stylesheet never
+  // generates computes to the *initial* opacity, which is 1 — so reading
+  // opacity by itself would call a missing grip a visible one.
+  const grip = (): Promise<{ drawn: boolean; opacity: number }> =>
+    page.locator(".shelf").evaluate((shelf) => {
+      const style = getComputedStyle(shelf, "::after");
+      return { drawn: style.content !== "none", opacity: Number(style.opacity) };
+    });
+
+  await bootShelf(page);
+  await land(page, FIXTURE.wide, { ts: 1 });
+
+  // The popped column first: its shape is Rust's, not the hand's, and a
+  // handle on it would promise something that does not work.
+  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
+  expect((await grip()).drawn).toBe(false);
+
+  // The browse view, with nothing having moved the pointer yet: the grip is
+  // there and it is not showing.
+  await openBrowse(page);
+  const atRest = await grip();
+  expect(atRest.drawn).toBe(true);
+  expect(atRest.opacity).toBe(0);
+
+  await page.locator(".tile").hover();
+  await expect.poll(async () => (await grip()).opacity).toBe(1);
+});
+
 test("the empty state is centred, and stops being centred once a capture lands", async ({
   page,
 }) => {

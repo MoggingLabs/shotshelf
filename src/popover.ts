@@ -20,6 +20,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+import { currentSettings } from "./settings.ts";
 import { alertHeight, undoHeight } from "./status.ts";
 
 import type { Capture, Shelf } from "./shelf/index.ts";
@@ -45,9 +46,12 @@ function browseContent(bar: HTMLElement, items: HTMLElement): number | null {
   // the third card's bottom edge — whatever day headings fall among them —
   // and the scroll fade takes it from there. (Today's fixed window never
   // actually fit three whole cards; "three at a time" was the intent, and
-  // now it is the measurement.)
+  // now it is the measurement.) When the user has dragged their own height,
+  // that height is the ceiling instead: send the full span and let Rust cap
+  // it, so a tall window shows as many cards as it can actually hold.
   const tiles = items.querySelectorAll(".tile");
-  const third = tiles.length > 3 ? tiles[2] : null;
+  const cutAtThree = currentSettings().browseHeight === null;
+  const third = cutAtThree && tiles.length > 3 ? tiles[2] : null;
   const bottom = (third ?? last).getBoundingClientRect().bottom;
   const span = bottom - first.getBoundingClientRect().top;
   return Math.ceil(bar.offsetHeight + span + padding + alertHeight() + undoHeight());

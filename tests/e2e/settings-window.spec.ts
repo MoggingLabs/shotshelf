@@ -128,6 +128,33 @@ test("each settings control writes the field it is labelled for", async ({ page 
   }
 });
 
+test("the shelf-size reset saves nulls, and is disabled when already automatic", async ({ page }) => {
+  // The button is the settings window's only handle on the dragged size —
+  // the size itself is written by the drag, over in the shelf window — so
+  // its two states are the whole contract: disabled means "already
+  // automatic", enabled-then-click means both fields cross as null.
+  await bootSettings(page, { settings: { browseWidth: 320, browseHeight: 700 } });
+  await echoSaves(page);
+  await page.locator('button[data-section="appearance"]').click();
+
+  const reset = page.locator("#shelf-size-reset");
+  await expect(reset).toBeEnabled();
+  await reset.click();
+
+  const stored = await saved(page);
+  expect(stored["browseWidth"]).toBeNull();
+  expect(stored["browseHeight"]).toBeNull();
+  // The echoed save round-trips through `fill`, which reads "both null" as
+  // automatic and stands the button down again.
+  await expect(reset).toBeDisabled();
+});
+
+test("the shelf-size reset starts disabled on the defaults", async ({ page }) => {
+  await bootSettings(page);
+  await page.locator('button[data-section="appearance"]').click();
+  await expect(page.locator("#shelf-size-reset")).toBeDisabled();
+});
+
 test("no native select is visible anywhere in the window", async ({ page }) => {
   // The owner's rule: the OS's white dropdown never appears. The native
   // elements stay in the DOM as value carriers, hidden by the enhancement.

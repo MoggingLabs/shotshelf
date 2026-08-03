@@ -93,6 +93,15 @@ export interface Settings {
    * only on files it made itself — pinned captures are always exempt.
    */
   clipboardKeepDays: number | null;
+  /**
+   * The browse window's size, as the user dragged it; `null` is automatic —
+   * stock width, stock three-card ceiling. Width applies whenever the shelf
+   * is summoned; height is the *ceiling* on the adaptive fit, so one capture
+   * still gets a snug window however tall the hand left it. Rust clamps both
+   * to its floors, and the peek column ignores them entirely.
+   */
+  browseWidth: number | null;
+  browseHeight: number | null;
   pinned: PinnedItem[];
 }
 
@@ -113,6 +122,8 @@ export const DEFAULTS: Settings = {
   watchAdded: [],
   watchRemoved: [],
   clipboardKeepDays: null,
+  browseWidth: null,
+  browseHeight: null,
   pinned: [],
 };
 
@@ -194,12 +205,21 @@ export async function saveSettings(patch: Partial<Settings>): Promise<Settings> 
  * runs, so `currentSettings()` inside a listener already answers the new
  * truth. The registration promise is the caller's to watch — a subscription
  * that failed is a window that silently stops tracking the store.
+ *
+ * `previous` is what this window believed a moment ago, handed over because
+ * the new truth alone cannot say *what moved* — and one listener has to
+ * know: the shelf ignores a save that only carried the size the user just
+ * dragged its window to. Only this module can answer that, since it is the
+ * one holding the old value when the new one lands.
  */
-export function onSettingsChanged(changed: (settings: Settings) => void): Promise<unknown> {
+export function onSettingsChanged(
+  changed: (settings: Settings, previous: Settings) => void,
+): Promise<unknown> {
   return listen<Settings>("settings://changed", ({ payload }) => {
+    const previous = current;
     current = payload;
     loaded = true;
-    changed(payload);
+    changed(payload, previous);
   });
 }
 

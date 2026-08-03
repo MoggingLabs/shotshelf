@@ -179,10 +179,19 @@ const ALLOWANCES = new Map([
     "clippy::cast_sign_loss",
     "clippy::cast_sign_loss",
   ]],
-  // A `f64` clamped into `i32` range, and a compile-time `size_of_val` of a u32.
+  // A `f64` clamped into `i32` range, and a compile-time `size_of_val` of a u32
+  // — plus the two halves of the resize-size packing. `pack_size` clamps each
+  // logical dimension into `[0, u32::MAX]` and rounds it before narrowing, so
+  // the truncation and the sign loss it silences cannot happen; `unpack_size`
+  // widens the two u32 halves that packing produced back to `f64`, which holds
+  // every u32 exactly, so its precision loss cannot happen either. Both are
+  // statements of impossibility over a value this module owns end to end.
   ["src-tauri/src/window.rs", [
     "clippy::cast_possible_truncation",
     "clippy::cast_possible_truncation",
+    "clippy::cast_possible_truncation",
+    "clippy::cast_precision_loss",
+    "clippy::cast_sign_loss",
   ]],
   // `Duration::as_millis` is a `u128`, and `u64::try_from` is not usable in a
   // const initialiser. Both are const arithmetic over sub-second constants —
