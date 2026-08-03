@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { ColumnQueue, COLUMN_MS } from "./column.ts";
-import { columnHeight, CARD_GAP, CARD_HEIGHT, COLUMN_MAX_CARDS, COLUMN_PADDING } from "./geometry.ts";
+import { columnHeight, CARD_GAP, CARD_HEIGHT, COLUMN_MAX_CARDS, COLUMN_PADDING, PEEK_BAR } from "./geometry.ts";
 
 test("the column shows newest first", () => {
   const column = new ColumnQueue();
@@ -108,8 +108,8 @@ test("the queue holds more than it shows, so expired cards can be replaced", () 
 });
 
 test("column height matches the cards it holds", () => {
-  assert.equal(columnHeight(1), CARD_HEIGHT + COLUMN_PADDING);
-  assert.equal(columnHeight(3), 3 * CARD_HEIGHT + 2 * CARD_GAP + COLUMN_PADDING);
+  assert.equal(columnHeight(1), PEEK_BAR + CARD_HEIGHT + COLUMN_PADDING);
+  assert.equal(columnHeight(3), PEEK_BAR + 3 * CARD_HEIGHT + 2 * CARD_GAP + COLUMN_PADDING);
 });
 
 test("column height is clamped at both ends", () => {
@@ -123,16 +123,16 @@ test("column height is clamped at both ends", () => {
 
 test("the measured window sizes the shelf actually ships", () => {
   // Written out as numbers, not re-derived from the constants — this is the
-  // second, independent statement of what the window should measure. 138 for
-  // one card (112 + 12px padding and 1px border each way), 378 for three
-  // (3×112 + 2×8 gap + 26). The previous figures, 136 and 378, were the
+  // second, independent statement of what the window should measure. 162 for
+  // one card (24 of peek cap + 112 + 12px padding and 1px border each way),
+  // 402 for three (24 + 3×112 + 2×8 gap + 26). The previous figures, 136 and 378, were the
   // pre-design-system 11px padding and 9px gap, verified against the running
   // app; these follow the 4px grid `docs/DESIGN.md` sets — and three cards
   // land on 378 both ways, because the 2px the padding gained is exactly the
   // 2px the two gaps lost. The first draft of this comment said 382, which is
   // the kind of hand arithmetic this second statement exists to catch.
-  assert.equal(columnHeight(1), 138);
-  assert.equal(columnHeight(3), 378);
+  assert.equal(columnHeight(1), 162);
+  assert.equal(columnHeight(3), 402);
 });
 
 test("every hold can be dropped at once when the events that release them cannot arrive", () => {
@@ -221,8 +221,8 @@ test("a column holding only a message is sized for the message", () => {
   const strip = 46;
   assert.equal(
     columnHeight(0, strip),
-    COLUMN_PADDING + strip,
-    "no cards and a strip is padding plus the strip",
+    PEEK_BAR + COLUMN_PADDING + strip,
+    "no cards and a strip is the cap, the padding and the strip",
   );
 
   // The floor still applies when there is nothing else to show — a window of
