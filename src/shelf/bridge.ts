@@ -56,6 +56,24 @@ import { invoke } from "@tauri-apps/api/core";
 import type { CaptureKind, DragSource, Findings, VideoDetails } from "./types.ts";
 
 /** What ffmpeg could tell us about a recording. Rejects if it could not be read. */
+/**
+ * Take the capture's file out of its folder, staged behind the undo toast.
+ * Returns the token the toast settles with, one way or the other.
+ */
+export function deleteCapture(path: string): Promise<string> {
+  return invoke<string>("delete_capture", { path });
+}
+
+/** Put a staged delete back exactly where it came from. */
+export function undoDeleteStaged(token: string): Promise<void> {
+  return invoke("undo_delete", { token });
+}
+
+/** The toast ran out; the staged file goes to the OS recycle bin. */
+export function commitDelete(token: string): Promise<void> {
+  return invoke("commit_delete", { token });
+}
+
 export function videoDetails(path: string): Promise<VideoDetails> {
   return invoke<VideoDetails>("video_details", { path });
 }

@@ -16,6 +16,7 @@ mod catch;
 // `pub` so `tests/ipc.rs` drives the *same* command list the app registers,
 // rather than a second copy of it that could drift apart unnoticed.
 pub mod commands;
+mod delete;
 mod diag;
 mod dirs;
 mod documented;
@@ -67,6 +68,7 @@ fn prune_caches<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                 handoff::prune(&sweeping);
                 share::prune_ghosts(&sweeping);
                 catch::prune_clipboard(&sweeping);
+                delete::settle_leftovers(&sweeping);
             })
             .await;
             tokio::time::sleep(PRUNE_EVERY).await;
@@ -115,6 +117,7 @@ pub fn run() {
             let stored = settings::load(app.handle());
             let current = stored.get();
             app.manage(stored);
+            app.manage(delete::DeleteStage::default());
 
             // The login item follows the account: `startAtLogin` roams, the OS
             // registration does not, and this is where a roamed choice takes

@@ -44,5 +44,8 @@ pub fn handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'stat
         crate::links::open_link,
         crate::pick::choose_watch_folder,
         crate::window::size_browse,
+        crate::delete::delete_capture,
+        crate::delete::undo_delete,
+        crate::delete::commit_delete,
     ]
 }

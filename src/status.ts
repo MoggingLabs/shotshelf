@@ -27,7 +27,7 @@ export interface WatchState {
 }
 
 /** How long a message stays on the strip before it takes itself down. */
-const ALERT_MS = 12_000;
+export const ALERT_MS = 12_000;
 
 let alertTimer: number | undefined;
 
@@ -106,6 +106,46 @@ export function onAlertChange(listener: (showing: boolean) => void): void {
  * that window away when the message goes.
  */
 let resized: ((showing: boolean) => void) | undefined;
+
+// ── The undo toast ───────────────────────────────────────────────────────
+// A second strip under the alert, and unlike the alert it *acts*: the whole
+// strip is one button, because a small "Undo" link inside a sentence is a
+// target nobody hits in the twelve seconds they have. This module owns both
+// strips so the two window shapes can ask one place how much height the
+// messages need.
+
+let undoAction: (() => void) | undefined;
+let undoWired = false;
+
+/** Show the toast. The label carries the whole sentence, Undo included. */
+export function offerUndo(label: string, onClick: () => void): void {
+  const undo = maybeEl<HTMLButtonElement>("#shelf-undo");
+  if (!undo) return;
+  if (!undoWired) {
+    undo.addEventListener("click", () => undoAction?.());
+    undoWired = true;
+  }
+  undo.textContent = label;
+  undo.removeAttribute("hidden");
+  undoAction = onClick;
+  resized?.(true);
+}
+
+/** Take the toast down — settled, superseded, or clicked. */
+export function retractUndo(): void {
+  const undo = maybeEl<HTMLButtonElement>("#shelf-undo");
+  if (!undo) return;
+  undo.setAttribute("hidden", "");
+  undoAction = undefined;
+  resized?.(false);
+}
+
+/** How tall the toast currently is — zero when it is not showing. */
+export function undoHeight(): number {
+  const undo = maybeEl<HTMLElement>("#shelf-undo");
+  if (!undo || undo.hasAttribute("hidden")) return 0;
+  return undo.offsetHeight;
+}
 
 /** Take the strip down, and stop it coming back on an old timer. */
 function hush(): void {

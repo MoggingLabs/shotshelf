@@ -160,12 +160,13 @@ document.addEventListener("keydown", (event) => {
     case "z":
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
-      // Two undos, split by surface: in the editor Ctrl+Z takes back the
-      // last mark; on the shelf it brings back the last removal — the pair
-      // the Delete receipt promises.
+      // Three undos, split by surface and recency: in the editor Ctrl+Z
+      // takes back the last mark; on the shelf a pending *delete* — the one
+      // undo with a clock on it — comes back first, then the last removal,
+      // the pair the Delete receipt promises.
       if (shelf.editing) {
         shelf.undoEdit();
-      } else if (!shelf.restoreRemoved()) {
+      } else if (!shelf.undoDelete() && !shelf.restoreRemoved()) {
         say("Nothing to bring back.");
       }
       return;

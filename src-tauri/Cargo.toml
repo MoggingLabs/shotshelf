@@ -89,6 +89,10 @@ opener = { version = "0.8.5", features = ["reveal"] }
 # receives what the user actually clicked. Default features: on Linux that is
 # the XDG portal, so no GTK link and the desktop's own chooser.
 rfd = "0.15"
+# The delete action's final resting place: after the undo toast runs out, a
+# staged capture goes to the OS recycle bin rather than oblivion — delete.rs
+# carries the whole stage-then-commit argument.
+trash = "5"
 # The login item, as a Settings toggle (off by default). Driven from Rust
 # only through our own set_settings — the webview gains no permission and
 # there is no npm half. See autostart.rs for the account-roams/machine-registers

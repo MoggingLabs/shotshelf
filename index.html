@@ -85,6 +85,12 @@
            because this is the single channel every failure in the app reports
            through, and without a live region none of it was ever announced. -->
       <p class="shelf__alert" id="shelf-alert" role="status" hidden></p>
+
+      <!-- The delete toast. Unlike the alert strip above, this one acts: the
+           whole strip is the Undo button, because a small link inside a
+           sentence is a target nobody hits in the twelve seconds they have.
+           `role="status"` for the same announcement reasoning as the alert. -->
+      <button class="shelf__undo" id="shelf-undo" type="button" role="status" hidden></button>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

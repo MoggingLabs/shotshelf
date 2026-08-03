@@ -181,7 +181,9 @@ the tip.
 Bottom to top: wash (blurred self, 0.5 opacity) → picture → label gradient
 (hover) → duration badge (rest) → actions (hover, top-right) → credential
 marker (always, top-left, the one thing never covered). Actions order: pin
-(state), copy, show-in-folder, remove (destructive last).
+(state), copy, show-in-folder, remove, delete (most destructive outermost —
+and delete is the one act here that touches the file, which its tip says
+before the click lands and its Undo toast can take back after).
 
 The corner grammar, stated once: **top-left** is safety (credential marker or
 the unscanned `?`, mutually exclusive, never covered), **top-right** is action

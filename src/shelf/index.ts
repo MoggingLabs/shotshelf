@@ -38,17 +38,21 @@ import {
 import { persistPinned, type Settings } from "../settings.ts";
 import {
   browseShelf,
+  commitDelete,
   compareCaptures,
   copyCapture,
   copyCaptureText,
+  deleteCapture,
   forgetVideo,
   revealCapture,
   setCaptureCount,
+  undoDeleteStaged,
 } from "./bridge.ts";
 import { ColumnQueue, type HoldReason } from "./column.ts";
 import { armDrag, beginDrag } from "./drag.ts";
+import { fileName } from "../format.ts";
 import { columnHeight } from "./geometry.ts";
-import { alertHeight } from "../status.ts";
+import { ALERT_MS, alertHeight, offerUndo, retractUndo, undoHeight } from "../status.ts";
 import { inHandoverOrder, Selection } from "./selection.ts";
 import { ShelfStore } from "./store.ts";
 import {
@@ -168,6 +172,7 @@ export class Shelf {
     this.#view = new ShelfView(list, count, {
       togglePin: (id) => this.#togglePin(id),
       remove: (id) => this.remove(id),
+      deleteForever: (id) => this.deleteForever(id),
       copy: (id) => this.copy(id),
       reveal: (id) => this.reveal(id),
       armDrag: (node, item, event) => this.#armDrag(node, item, event),
@@ -244,7 +249,7 @@ export class Shelf {
 
   /** Window height the column needs for what it is holding. */
   columnHeight(): number {
-    return columnHeight(this.#column.size, alertHeight());
+    return columnHeight(this.#column.size, alertHeight() + undoHeight());
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
@@ -344,6 +349,92 @@ export class Shelf {
    * the retention window apply to them exactly as if they had just landed,
    * which is what keeps undo from being a way around policy.
    */
+  /** A delete whose toast can still take it back. At most one at a time. */
+  #pendingDelete: { token: string; item: ShelfItem; timer: number } | undefined;
+
+  /**
+   * The tile's trash control: the file leaves its origin folder too.
+   *
+   * Rust stages the file first and answers with a token, so nothing on the
+   * shelf changes unless the file really moved — a delete that fails leaves
+   * the card exactly where it was, with the failure in the strip. The toast
+   * then holds the undo for [`ALERT_MS`]; letting it run out commits the
+   * staged file to the OS recycle bin.
+   */
+  deleteForever(id: string): void {
+    const item = this.#store.items().find((held) => held.id === id);
+    if (!item) return;
+    void deleteCapture(item.path)
+      .then((token) => {
+        // One pending undo at a time is the toast's whole mental model: a
+        // second delete settles the first immediately.
+        this.#settlePendingDelete();
+        const removed = this.#store.remove(id);
+        if (removed) {
+          this.#release(removed);
+          this.#dropFromColumn(id);
+        }
+        this.#refresh();
+        void this.#savePins();
+        const timer = window.setTimeout(() => {
+          this.#pendingDelete = undefined;
+          retractUndo();
+          void commitDelete(token);
+        }, ALERT_MS);
+        this.#pendingDelete = { token, item, timer };
+        offerUndo(`Deleted ${fileName(item.path)} — Undo`, () => this.undoDelete());
+      })
+      .catch((error: unknown) => {
+        console.error("[shotshelf] could not delete the capture", error);
+        this.#options.onProblem("That capture could not be deleted — see the log.");
+      });
+  }
+
+  /** Commit whatever delete is still pending, letting its toast go. */
+  #settlePendingDelete(): void {
+    const pending = this.#pendingDelete;
+    if (!pending) return;
+    window.clearTimeout(pending.timer);
+    this.#pendingDelete = undefined;
+    retractUndo();
+    void commitDelete(pending.token);
+  }
+
+  /**
+   * The toast's click, and Ctrl+Z's first rung after the editor. Returns
+   * false when no delete is pending, so the ladder can move on.
+   *
+   * The file comes back to the exact path it left; the card rejoins the
+   * shelf as an ordinary member, cap and retention applying as if it had
+   * just landed — the same undo-is-not-a-policy-bypass rule
+   * [`Shelf::restoreRemoved`] states.
+   */
+  undoDelete(): boolean {
+    const pending = this.#pendingDelete;
+    if (!pending) return false;
+    window.clearTimeout(pending.timer);
+    this.#pendingDelete = undefined;
+    retractUndo();
+    void undoDeleteStaged(pending.token)
+      .then(() => {
+        this.add(
+          {
+            path: pending.item.path,
+            kind: pending.item.kind,
+            ts: pending.item.ts,
+            context: pending.item.context,
+          },
+          { pinned: pending.item.pinned, render: true },
+        );
+        void this.#savePins();
+      })
+      .catch((error: unknown) => {
+        console.error("[shotshelf] could not undo the delete", error);
+        this.#options.onProblem("The capture could not be brought back — see the log.");
+      });
+    return true;
+  }
+
   restoreRemoved(): boolean {
     const batch = this.#removedBatches.pop();
     if (!batch) return false;

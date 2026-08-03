@@ -20,7 +20,9 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-import { alertHeight } from "./status.ts";
+import { alertHeight, undoHeight } from "./status.ts";
+
+import type { Capture, Shelf } from "./shelf/index.ts";
 
 /**
  * The height the browse shape needs for what it holds, or `null` for "your
@@ -48,10 +50,8 @@ function browseContent(bar: HTMLElement, items: HTMLElement): number | null {
   const third = tiles.length > 3 ? tiles[2] : null;
   const bottom = (third ?? last).getBoundingClientRect().bottom;
   const span = bottom - first.getBoundingClientRect().top;
-  return Math.ceil(bar.offsetHeight + span + padding + alertHeight());
+  return Math.ceil(bar.offsetHeight + span + padding + alertHeight() + undoHeight());
 }
-
-import type { Capture, Shelf } from "./shelf/index.ts";
 
 /** How long the shelf stays up after launch, so a running app looks like one. */
 const LAUNCH_MS = 4000;

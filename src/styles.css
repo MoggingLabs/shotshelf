@@ -1570,3 +1570,28 @@ select[data-enhanced] {
   --live-halo: rgba(166, 227, 161, 0.14);
   color-scheme: dark;
 }
+
+/* ── The delete toast ─────────────────────────────────────────────────────
+   A sibling strip to the alert, and the one interactive strip in the app:
+   the whole thing is the Undo button. Accent, not danger — the danger was
+   the click that already happened; this strip is the way back. */
+.shelf__undo {
+  flex: none;
+  margin: 0;
+  padding: 8px 12px;
+  border: none;
+  border-top: 1px solid var(--stroke);
+  background: var(--raised);
+  color: var(--accent-text);
+  font: inherit;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  line-height: var(--leading);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-fast) ease-out;
+}
+
+.shelf__undo:hover {
+  background: var(--raised-hover);
+}

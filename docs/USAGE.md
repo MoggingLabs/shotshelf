@@ -153,7 +153,13 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
   **older** capture is the "before", whichever order you picked them in — ctrl-clicking and
   shift-selecting produce different pick orders, so pick order is not one rule but two.
 
-Pin, copy, show-in-folder and remove appear on a tile when you hover it; edit and compare live
+Pin, copy, show-in-folder, remove and **delete** appear on a tile when you
+hover it. The two on the end are different acts and look it: remove (×) takes
+the card off the shelf and never touches the file; delete (the trash can)
+takes the file out of its folder too, with a full-width **Undo** toast for
+twelve seconds — click it, or press Ctrl+Z, and both the file and the card
+come back exactly where they were. Let the toast run out and the file goes to
+the OS Recycle Bin, so even then it is recoverable the ordinary way. Edit and compare live
 in the title strip, because they act on what you have picked rather than on the tile under the
 pointer.
 - **Show/hide** — the tray icon, its right-click menu, or the global hotkey

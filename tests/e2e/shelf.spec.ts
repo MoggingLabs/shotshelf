@@ -209,8 +209,8 @@ test("the pin control shows its own state, not whichever button came first", asy
   const pin = page.locator(".tile__action--pin");
   const others = page.locator(".tile__action:not(.tile__action--pin)");
   await expect(pin).toHaveCount(1);
-  // Copy, show-in-folder, remove.
-  await expect(others).toHaveCount(3);
+  // Copy, show-in-folder, remove, delete.
+  await expect(others).toHaveCount(4);
   await expect(pin).not.toHaveClass(/tile__action--on/);
 
   await page.locator(".tile").hover();
@@ -1186,4 +1186,91 @@ test("a message in the strip is part of the fitted height while it shows", async
 
   await page.clock.runFor(13_000);
   await expect.poll(asked).toBe(bare);
+});
+
+test("delete takes the file too, and asks Rust before touching the shelf", async ({ page }) => {
+  // The trash control is the one action that reaches the file itself. The
+  // card must not leave the shelf until Rust says the file really moved —
+  // a delete that fails leaves everything exactly where it was.
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+
+  await page.locator(".tile").hover();
+  await page.locator(".tile__action--delete").click();
+
+  await expect(page.locator(".tile")).toHaveCount(0);
+  const call = await page.evaluate(() => window.__shotshelf__.callsTo("delete_capture").at(-1)?.args);
+  expect(call?.["path"]).toContain("wide.png");
+
+  // The toast is up, the whole strip a button, the name in the sentence.
+  await expect(page.locator("#shelf-undo")).toBeVisible();
+  await expect(page.locator("#shelf-undo")).toContainText(/Deleted .*wide\.png.*Undo/);
+});
+
+test("the toast's click brings the capture back, file and card", async ({ page }) => {
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.locator(".tile").hover();
+  await page.locator(".tile__action--delete").click();
+  await expect(page.locator(".tile")).toHaveCount(0);
+
+  await page.locator("#shelf-undo").click();
+
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("undo_delete").at(-1)?.args["token"]))
+    .toBe("staged-1");
+  await expect(page.locator(".tile")).toHaveCount(1);
+  await expect(page.locator("#shelf-undo")).toBeHidden();
+  // Brought back, not merely re-listed: nothing committed the stage.
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("commit_delete").length)).toBe(0);
+});
+
+test("a toast that runs out commits the delete to the bin", async ({ page }) => {
+  await page.clock.install();
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.locator(".tile").hover();
+  await page.locator(".tile__action--delete").click();
+  await expect(page.locator("#shelf-undo")).toBeVisible();
+
+  await page.clock.runFor(13_000);
+
+  await expect(page.locator("#shelf-undo")).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("commit_delete").at(-1)?.args["token"]))
+    .toBe("staged-1");
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("undo_delete").length)).toBe(0);
+});
+
+test("ctrl+z is the toast's keyboard twin", async ({ page }) => {
+  await bootShelf(page);
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.locator(".tile").hover();
+  await page.locator(".tile__action--delete").click();
+  await expect(page.locator(".tile")).toHaveCount(0);
+
+  await page.keyboard.press("Control+z");
+
+  await expect(page.locator(".tile")).toHaveCount(1);
+  await expect(page.locator("#shelf-undo")).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("undo_delete").length))
+    .toBe(1);
+});
+
+test("a delete that fails leaves the card exactly where it was", async ({ page }) => {
+  await bootShelf(page);
+  await page.evaluate(() => window.__shotshelf__.reject("delete_capture", "the file is locked"));
+  await land(page, FIXTURE.wide);
+  await openBrowse(page);
+  await page.locator(".tile").hover();
+  await page.locator(".tile__action--delete").click();
+
+  await expect(page.locator("#shelf-alert")).toContainText(/could not be deleted/);
+  await expect(page.locator(".tile")).toHaveCount(1);
+  await expect(page.locator("#shelf-undo")).toBeHidden();
 });

@@ -187,6 +187,12 @@ export function installTauriMock(EVENTS: WindowEvents): void {
     // The browse window taking the height it was asked for — nothing to
     // return; the specs assert on the measurements that arrive.
     "size_browse": null,
+    // The delete stage: a token for the toast to settle with, and the two
+    // settlements answering quietly. The token is fixed — a spec that cares
+    // which delete it is stubs its own.
+    "delete_capture": "staged-1",
+    "undo_delete": null,
+    "commit_delete": null,
     // Read, and nothing found — the ordinary case.
     "describe_capture": { secrets: [], scanned: true },
     ...(window.__shotshelfStubs__ ?? {}),

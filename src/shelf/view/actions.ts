@@ -26,6 +26,12 @@ const COPIED_MS = 1100;
 export interface TileHandlers {
   togglePin(id: string): void;
   remove(id: string): void;
+  /**
+   * The one action that touches the file itself: delete it from its origin
+   * folder too, behind the undo toast. Distinct from [`TileHandlers::remove`]
+   * on purpose — that one never touches files, and still does not.
+   */
+  deleteForever(id: string): void;
   copy(id: string): Promise<void>;
   /** Show the capture's real file in the OS file manager. */
   reveal(id: string): Promise<void>;
@@ -136,6 +142,14 @@ function revealButton(id: string, name: string, handlers: TileHandlers): HTMLBut
   return button;
 }
 
+/** The file goes too — the tip says so before the click ever lands. */
+function deleteButton(id: string, name: string, handlers: TileHandlers): HTMLButtonElement {
+  const button = action("trash", `Delete ${name} — removes the file too. Undo has 12 seconds`);
+  button.classList.add("tile__action--delete");
+  button.addEventListener("click", () => handlers.deleteForever(id));
+  return button;
+}
+
 function removeButton(id: string, name: string, handlers: TileHandlers): HTMLButtonElement {
   const button = action("close", `Remove ${name} from the shelf — the file stays on disk (Delete)`);
   button.classList.add("tile__action--remove");
@@ -158,6 +172,9 @@ export function actions(
     copyButton(id, name, handlers),
     revealButton(id, name, handlers),
     removeButton(id, name, handlers),
+    // Outermost: the corner grammar puts the most destructive act last, and
+    // nothing here destroys more than this.
+    deleteButton(id, name, handlers),
   );
   return wrap;
 }

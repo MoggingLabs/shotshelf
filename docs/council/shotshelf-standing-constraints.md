@@ -23,7 +23,13 @@ council seat must not propose one as a fix.
   public visibility is a violation to report.
 - **Drag-out is a copy, never a move.**
 - Remove / retention / expiry are **shelf-only** and must never delete, move or
-  modify a capture file.
+  modify a capture file. Two owner-decided exceptions, both opt-in by the user
+  and both 2026-08-03: the **delete** tile action (distinctly named and marked,
+  beside remove, never replacing it) stages the file, offers a full-toast Undo
+  that restores it byte-identical to its origin path, and commits to the OS
+  recycle bin — never oblivion; and the **clipboard keep** setting (default
+  Forever) may let unpinned files in the app's own `clipboard/` folder go past
+  a user-chosen age. A pin outranks both.
 - No capture path may reach the roaming profile (`%APPDATA%`).
 - All three OSes must work; a per-OS branch wrong on one of them is a blocker.
 - Reuse adopted crates/plugins rather than hand-rolling.
