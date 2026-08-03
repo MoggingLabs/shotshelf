@@ -104,6 +104,12 @@ fixtures — take real captures, or synthesise them as below.
    duration and size.
 5. **Summon it with the hotkey.** The peeked column becomes the full browse view, anchored by the
    same corner. Press it again; it closes.
+5b. **Drag the summoned shelf's own edges.** It resizes from any edge or corner (the border is
+   invisible — the six dots in the bottom-right corner appear when the pointer is over the
+   window and mark where it is), and it refuses to go narrower than one card or shorter than
+   about a card and a half. Let go, wait a second, summon it again: the width is still yours.
+   Settings → Appearance → **Reset to automatic** — now enabled — puts it back. The capture
+   popup is not resizable at all, and stays its own width whatever you did here.
 6. **Drag a capture into another app** — an editor, a chat box, a file manager. The file arrives,
    and the original is still where it was. This is the one step nothing else can substitute for.
 7. **Copy one** with the tile's copy control and paste it somewhere. Then check the shelf did
