@@ -195,6 +195,16 @@ export function installTauriMock(EVENTS: WindowEvents): void {
     "commit_delete": null,
     // Read, and nothing found — the ordinary case.
     "describe_capture": { secrets: [], scanned: true },
+    // The editor's window is Rust's, exactly as the settings window is: the
+    // shelf's whole part in opening it is this invoke. A spec that wants the
+    // refusal — a capture whose file has gone, which Rust checks *before* any
+    // window appears — rejects it.
+    "open_editor": null,
+    "hide_editor": null,
+    // No `edit_target` default, deliberately, and for the same reason as
+    // `get_settings` above: `bootEditor` seeds it with the capture the spec
+    // asked for. A default here would be a second answer to "which capture is
+    // this window for", and the wrong one every time.
     ...(window.__shotshelfStubs__ ?? {}),
   };
 

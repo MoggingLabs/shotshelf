@@ -88,6 +88,22 @@ export const HIDDEN_EVENT = windowEvents.hidden;
  * or models an event the app does not have.
  */
 export const SETTINGS_CHANGED_EVENT = windowEvents.settings;
+/**
+ * A saved edit's broadcast — the join between `edit.rs`, which emits it the
+ * moment the file is written, and `main.ts`, which is the only thing that adds
+ * it to the shelf now that the editor is a window of its own.
+ *
+ * This one is *only* reachable through the fixture. Nothing in the shelf's
+ * window can cause it: it is emitted from Rust as a result of work done in
+ * another window, so a spec that wants to see an edit land has no choice but
+ * to emit it by name, and getting that name from anywhere but here would be
+ * the exact drift the `hidden` note above describes.
+ */
+export const EDITED_EVENT = windowEvents.edited;
+/** What Rust sends the editor's window when the user asks for a capture. */
+export const EDITOR_OPEN_EVENT = windowEvents.editorOpen;
+/** …and when they click its X. See `window::note_editor_close`. */
+export const EDITOR_CLOSE_EVENT = windowEvents.editorClose;
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 
@@ -236,6 +252,66 @@ export async function bootSettings(page: Page, options: BootOptions = {}): Promi
   await expect(page.locator("#setting-hotkey")).toHaveText(
     String(seed["hotkey"]).replace("CommandOrControl", "Ctrl"),
   );
+}
+
+/**
+ * The editor window's real size, read from the config the same way the
+ * settings window's is. The editor lays its canvas out against the box it is
+ * given, so a spec run at the shelf's 225×420 would be measuring a window the
+ * OS will never produce.
+ *
+ * Not exported, unlike `SETTINGS_VIEWPORT`: `bootEditor` applies it itself, so
+ * no spec has to know the number, and an export nothing reads is what `knip`
+ * is for.
+ */
+const EDITOR_VIEWPORT = (() => {
+  const conf = JSON.parse(
+    readFileSync(path.join(FIXTURES, "..", "..", "src-tauri", "tauri.conf.json"), "utf8"),
+  ) as { app: { windows: { label?: string; width: number; height: number }[] } };
+  const declared = conf.app.windows.find((w) => w.label === "editor");
+  if (!declared) throw new Error("tauri.conf.json declares no editor window");
+  return { width: declared.width, height: declared.height };
+})();
+
+/**
+ * The editor window's page, booted on a capture.
+ *
+ * The target is seeded rather than emitted, because that is what the app does:
+ * this window is declared-and-hidden, so its page has been alive since launch
+ * and reads `edit_target` at boot. A spec that wants the *other* path — the
+ * window already up and asked for a second capture — emits `EDITOR_OPEN_EVENT`
+ * after booting.
+ *
+ * Readiness is `.editor[data-capture]` carrying the target. Waiting on the
+ * canvas alone would not be enough on its own — but the editor only builds its
+ * frame *after* `readable()` resolves, so by the time that attribute exists the
+ * picture is decoded and `naturalWidth` is known. Every coordinate in these
+ * specs is an image pixel, and one that starts drawing before the decode is a
+ * spec racing an `<img>` for its own arithmetic.
+ */
+export async function bootEditor(
+  page: Page,
+  options: BootOptions & { target?: string } = {},
+): Promise<void> {
+  const target = options.target ?? FIXTURE.wide;
+  await page.addInitScript(
+    (seed: { settings: unknown; target: string }) => {
+      const existing = window.__shotshelfStubs__ ?? {};
+      window.__shotshelfStubs__ = {
+        get_settings: seed.settings,
+        edit_target: seed.target,
+        ...existing,
+      };
+    },
+    { settings: { ...DEFAULT_SETTINGS, ...options.settings }, target },
+  );
+
+  await page.addInitScript(installTauriMock, WINDOW_EVENTS);
+  await serveFixtures(page);
+  await page.setViewportSize(EDITOR_VIEWPORT);
+  await page.goto("/editor.html");
+  await expect(page.locator(".editor")).toHaveAttribute("data-capture", target);
+  await expect(page.locator(".editor__canvas")).toBeVisible();
 }
 
 /** Deliver a `capture://new` event exactly as Rust would. */

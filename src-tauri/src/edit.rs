@@ -185,9 +185,40 @@ pub async fn save_edit<R: Runtime>(
     }
 
     let owned = png.to_vec();
-    tauri::async_runtime::spawn_blocking(move || write_edit(&app, &source, "edited", &owned))
-        .await
-        .map_err(|err| err.to_string())?
+    let handle = app.clone();
+    let path = tauri::async_runtime::spawn_blocking(move || {
+        write_edit(&handle, &source, "edited", &owned)
+    })
+    .await
+    .map_err(|err| err.to_string())??;
+
+    // The shelf is told, because it can no longer find out for itself. This
+    // used to be a callback inside the shelf's own window — the editor was an
+    // overlay in it — and the editor now has a window of its own, which holds
+    // no list to add a capture to.
+    //
+    // Broadcast rather than `emit_to(SHELF, …)`: a label target does not
+    // narrow delivery to the listeners this app has. Tauri matches a handler
+    // registered with `EventTarget::Any` before consulting the label filter,
+    // and a plain `listen()` registers exactly that — so the targeted form
+    // would reach the same set while claiming otherwise. `window.rs` carries
+    // the same note at the editor's own emit, and `tests/ipc.rs` pins it.
+    //
+    // Emitted from Rust rather than from the editor page so that neither
+    // webview needs `core:event:allow-emit` — the editor's capability stays
+    // listen-only.
+    //
+    // Announced, not returned, and *also* returned: the caller needs the path
+    // to close on, and the shelf needs it to shelve. A failed emit is logged
+    // rather than fatal, exactly as `set_settings`'s is — the file is written
+    // either way, and reporting a failure here would tell the user their save
+    // did not happen when it did.
+    if let Err(err) = tauri::Emitter::emit(&app, crate::window::EDITED_EVENT, &path) {
+        crate::diag::warn(&format!(
+            "a saved edit was not announced to the shelf: {err}"
+        ));
+    }
+    Ok(path)
 }
 
 /// Write a new capture beside the shelf's own data, and hand back its path.

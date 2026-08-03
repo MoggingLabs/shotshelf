@@ -51,11 +51,12 @@ export function paint(
   picture: CanvasImageSource,
   session: EditSession,
   scale: number,
+  origin?: { x: number; y: number },
 ): void {
   context.save();
   // Everything below is in image pixels with the crop's origin at zero, so a
   // mark drawn at (x, y) lands at (x, y) whether or not there is a crop.
-  inImageSpace(context, session, scale);
+  inImageSpace(context, session, scale, origin);
 
   context.drawImage(picture, 0, 0);
 
@@ -94,21 +95,30 @@ export function inkStyle(context: CanvasRenderingContext2D): void {
 }
 
 /**
- * Put the context into image space: capture pixels, crop origin at zero.
+ * Put the context into image space: capture pixels, with `origin` at zero.
  *
  * The caller is responsible for `save`/`restore`. Shared for the same reason
  * as the style — `paint` and the live preview both need it, and a fourth site
  * applied the same correction arithmetically instead, which is where the
  * second-crop bug came from.
+ *
+ * `origin` defaults to the crop's own corner, which is what the **export**
+ * wants: a file starts at the top-left of what was cropped to, always. The
+ * on-screen view passes its own, because it may be zoomed into some other part
+ * of the picture entirely — and that is precisely the difference that must
+ * never leak into the export. It cannot: `saveEditedCapture` omits the
+ * argument, so the file is composited from the session alone.
  */
 export function inImageSpace(
   context: CanvasRenderingContext2D,
   session: EditSession,
   scale: number,
+  origin?: { x: number; y: number },
 ): void {
   const region = session.exportRect();
+  const at = origin ?? region;
   context.scale(scale, scale);
-  context.translate(-region.x, -region.y);
+  context.translate(-at.x, -at.y);
 }
 
 function drawMark(context: CanvasRenderingContext2D, mark: Mark): void {

@@ -162,6 +162,17 @@
             </div>
             <button id="shelf-size-reset" type="button" class="stg__button">Reset to automatic</button>
           </div>
+
+          <div class="stg__row">
+            <div class="stg__label">
+              <span>Editor window</span>
+              <p class="stg__hint">
+                The markup window reopens at the size and place you left it. Reset
+                to have it centred and fitted to each capture instead.
+              </p>
+            </div>
+            <button id="editor-size-reset" type="button" class="stg__button">Reset to automatic</button>
+          </div>
         </section>
 
         <section class="stg__section" data-section="shortcuts" hidden>
@@ -182,13 +193,28 @@
                 <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Pick a capture</td></tr>
                 <tr><td><kbd>Space</kbd></td><td>Quick look</td></tr>
                 <tr><td><kbd>Enter</kbd></td><td>Copy to the clipboard</td></tr>
-                <tr><td><kbd>E</kbd></td><td>Mark up</td></tr>
+                <tr><td><kbd>E</kbd></td><td>Mark up, in the editor&rsquo;s own window</td></tr>
                 <tr><td><kbd>T</kbd></td><td>Copy the text in it</td></tr>
                 <tr><td><kbd>P</kbd></td><td>Pin or unpin</td></tr>
                 <tr><td><kbd>O</kbd></td><td>Show in folder</td></tr>
                 <tr><td><kbd>Del</kbd></td><td>Take off the shelf</td></tr>
                 <tr><td><kbd>Ctrl+Z</kbd></td><td>Bring back the removed</td></tr>
                 <tr><td><kbd>Esc</kbd></td><td>Back out, one level at a time</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="stg__group">
+            <h2 class="stg__subtitle">In the editor</h2>
+            <table class="stg__keys">
+              <tbody>
+                <tr><td><kbd>Ctrl+Z</kbd></td><td>Undo the last mark</td></tr>
+                <tr><td><kbd>Ctrl+S</kbd></td><td>Save as a new capture</td></tr>
+                <tr><td><kbd>+</kbd> <kbd>&minus;</kbd></td><td>Zoom in and out</td></tr>
+                <tr><td><kbd>1</kbd></td><td>Actual size</td></tr>
+                <tr><td><kbd>0</kbd></td><td>Fit the whole capture</td></tr>
+                <tr><td><kbd>Space</kbd></td><td>Hold and drag to pan</td></tr>
+                <tr><td><kbd>Esc</kbd></td><td>Close &mdash; asking first if marks are unsaved</td></tr>
               </tbody>
             </table>
           </div>

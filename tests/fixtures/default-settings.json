@@ -12,6 +12,10 @@
   "clipboardKeepDays": null,
   "browseWidth": null,
   "browseHeight": null,
+  "editorWidth": null,
+  "editorHeight": null,
+  "editorX": null,
+  "editorY": null,
   "pinned": [],
   "theme": "system"
 }

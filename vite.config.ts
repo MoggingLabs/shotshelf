@@ -34,12 +34,17 @@ export default defineConfig({
     target: ["chrome105", "safari16"],
     // Debug builds keep sources readable; release builds stay small.
     sourcemap: false,
-    // Two pages, two windows: the shelf and the settings window each get an
-    // entry, and Tauri points the settings window at settings.html.
+    // Three pages, three windows: the shelf, the settings window and the
+    // editor each get an entry, and `tauri.conf.json` points the latter two at
+    // their own HTML by `url`. A window declared there with no entry here
+    // builds fine and then shows a blank page in the packaged app, because the
+    // dev server serves any file under the root and `dist/` only holds what
+    // rollup was told about.
     rollupOptions: {
       input: {
         main: "index.html",
         settings: "settings.html",
+        editor: "editor.html",
       },
     },
   },

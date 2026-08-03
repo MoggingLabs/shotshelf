@@ -1013,11 +1013,90 @@ body {
   overflow: hidden;
 }
 
+/* The canvas fills the stage and the *view* decides what is drawn in it.
+   It used to be sized to the picture and capped with `max-width`/`max-height`,
+   which is the right shape for a fit-only editor and the wrong one the moment
+   zoom exists: a canvas larger than its box would be scaled down by CSS, so
+   zooming in would have made the picture no bigger and only blurrier. Now the
+   element is always the stage's size, `layout()` gives the backing store the
+   device-pixel count that box deserves, and `render()` draws whatever part of
+   the capture the view is over. */
 .editor__canvas {
-  max-width: 100%;
-  max-height: 100%;
+  display: block;
   /* A checkerboard would imply transparency the capture may not have. */
   background: var(--surface-deep);
+}
+
+/* Space is held: the next drag pans instead of drawing, and the cursor is the
+   one gesture-affordance the design system allows besides `grab` on a card —
+   for the same reason, it names a direct manipulation rather than decorating a
+   control. */
+.editor__stage--pan,
+.editor__stage--pan .editor__canvas {
+  cursor: grab;
+}
+
+/* The question asked before marks are thrown away.
+   In the bar rather than over the picture: it is a question *about* the marks,
+   and covering them to ask it would hide the thing being decided. */
+.editor__ask {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--stroke);
+  background: var(--raised);
+}
+
+.editor__ask-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-sm);
+  color: var(--text);
+}
+
+/* The zoom readout is a button — clicking it is "actual size" — but it reads
+   as a value, so it is the one control in the bar with a fixed width: a
+   percentage that changes width as you scroll makes the whole cluster jump. */
+.editor__zoom {
+  min-width: 56px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── The editor window ───────────────────────────────────────────────────── */
+/* A real decorated window like the settings one, so this page owns a solid
+   surface rather than inheriting the shelf's transparency. `.editor` inside it
+   is still `position: absolute; inset: 0`, which needs a positioned ancestor
+   the full height of the window. */
+.edt {
+  position: relative;
+  height: 100%;
+  background: var(--window);
+}
+
+/* The one thing the page carries before the editor is built, so a failure
+   during load has somewhere to go. Sits above the editor because it is how a
+   save failure is reported, and a save failure must never be painted out. */
+.edt__note {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  z-index: 1;
+  margin: 0;
+  padding: 8px;
+  border-radius: var(--radius-ctl);
+  background: var(--raised);
+  color: var(--danger-soft);
+  font-size: var(--font-sm);
+  text-align: center;
+}
+
+.edt__note:empty {
+  display: none;
 }
 
 /* A capture that could not be read.

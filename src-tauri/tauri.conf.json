@@ -42,6 +42,22 @@
         "center": true,
         "focus": false,
         "visible": false
+      },
+      {
+        "label": "editor",
+        "title": "Shotshelf Editor",
+        "url": "editor.html",
+        "width": 960,
+        "height": 640,
+        "minWidth": 480,
+        "minHeight": 360,
+        "resizable": true,
+        "maximizable": true,
+        "decorations": true,
+        "transparent": false,
+        "center": true,
+        "focus": false,
+        "visible": false
       }
     ],
     "security": {

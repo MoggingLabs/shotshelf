@@ -78,6 +78,10 @@ const settings: Settings = {
   clipboardKeepDays: null,
   browseWidth: null,
   browseHeight: null,
+  editorWidth: null,
+  editorHeight: null,
+  editorX: null,
+  editorY: null,
   pinned: [],
 };
 const videoDetails: VideoDetails = { poster: null, durationMs: null, bytes: 0 };

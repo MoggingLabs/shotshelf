@@ -5,7 +5,8 @@
     "src/**/*.test.ts",
     "scripts/*.mjs",
     "!scripts/rust-source.mjs",
-    "src/settings-window/main.ts"
+    "src/settings-window/main.ts",
+    "src/editor-window/main.ts"
   ],
   "project": [
     "src/**/*.ts",

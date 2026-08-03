@@ -135,6 +135,20 @@ pub struct Settings {
     /// by the settings window's Reset to automatic.
     pub browse_width: Option<f64>,
     pub browse_height: Option<f64>,
+    /// The editor window's size and position, as the user last left them —
+    /// `None` means automatic, which centres it and fits it to the capture.
+    ///
+    /// Unlike the browse shelf's height, a remembered size here is a *size*
+    /// and not a ceiling: the editor is a window you work in, and re-fitting
+    /// it to each capture would undo the user's choice the first time they
+    /// opened a portrait screenshot. The position is remembered too, and is
+    /// the one value that can go stale on its own — see
+    /// `window::position_is_on_screen`, which refuses one pointing at a
+    /// monitor that is no longer there.
+    pub editor_width: Option<f64>,
+    pub editor_height: Option<f64>,
+    pub editor_x: Option<f64>,
+    pub editor_y: Option<f64>,
     pub pinned: Vec<PinnedItem>,
 }
 
@@ -175,6 +189,10 @@ impl Default for Settings {
             clipboard_keep_days: None,
             browse_width: None,
             browse_height: None,
+            editor_width: None,
+            editor_height: None,
+            editor_x: None,
+            editor_y: None,
             pinned: Vec::new(),
         }
     }
@@ -812,6 +830,26 @@ fn sanitise(mut settings: Settings) -> Settings {
         .browse_height
         .filter(|height| height.is_finite())
         .map(|height| height.clamp(crate::window::MIN_BROWSE_HEIGHT, MAX_BROWSE_DIM));
+    // The editor's size is the same kind of value and gets the same treatment.
+    settings.editor_width = settings
+        .editor_width
+        .filter(|width| width.is_finite())
+        .map(|width| width.clamp(crate::window::MIN_EDITOR_SIZE.0, MAX_BROWSE_DIM));
+    settings.editor_height = settings
+        .editor_height
+        .filter(|height| height.is_finite())
+        .map(|height| height.clamp(crate::window::MIN_EDITOR_SIZE.1, MAX_BROWSE_DIM));
+    // Its *position* is only checked for being a number. Clamping it into a
+    // range here would be clamping against whatever monitors existed when the
+    // file was written, which is exactly the fact that goes stale — a screen
+    // is unplugged, or the taskbar moves, and yesterday's legal coordinate is
+    // off-screen today. `window::position_is_on_screen` asks that question at
+    // restore time, against the work area the window is actually opening on,
+    // and centres the window instead when the answer is no. Negative
+    // coordinates survive on purpose: a second monitor left of the primary
+    // one has them, and they are perfectly good places to put a window.
+    settings.editor_x = settings.editor_x.filter(|x| x.is_finite());
+    settings.editor_y = settings.editor_y.filter(|y| y.is_finite());
     if settings.hotkey.trim().is_empty() {
         settings.hotkey = DEFAULT_HOTKEY.to_owned();
     }
@@ -1689,6 +1727,10 @@ mod tests {
             clipboard_keep_days: Some(-3.0),
             browse_width: Some(10.0),
             browse_height: Some(f64::NAN),
+            editor_width: Some(10.0),
+            editor_height: Some(f64::NAN),
+            editor_x: Some(-1200.0),
+            editor_y: Some(f64::INFINITY),
             ..Settings::default()
         };
 
@@ -1720,6 +1762,28 @@ mod tests {
         assert_eq!(
             safe.browse_height, None,
             "a NaN is nobody's drag; automatic is the honest reading"
+        );
+        assert_eq!(
+            safe.editor_width,
+            Some(crate::window::MIN_EDITOR_SIZE.0),
+            "the editor's size is clamped the same way the shelf's is"
+        );
+        assert_eq!(safe.editor_height, None, "and a NaN discarded the same way");
+        // The position is the one pair that is *not* clamped to a range, and
+        // this is the case that proves it: -1200 is a legitimate coordinate on
+        // a second monitor placed left of the primary, and a sanitiser that
+        // clamped it to zero would drag every such window back onto the main
+        // screen. Whether it is reachable *today* is asked at restore time by
+        // `window::position_is_on_screen`, against the monitors that exist
+        // then — which is the fact that goes stale, and cannot be checked here.
+        assert_eq!(
+            safe.editor_x,
+            Some(-1200.0),
+            "a negative coordinate is a monitor to the left, not nonsense"
+        );
+        assert_eq!(
+            safe.editor_y, None,
+            "an infinity is not a coordinate at all"
         );
         for theme in THEMES {
             let kept = sanitise(Settings {
@@ -1879,6 +1943,60 @@ pub(crate) fn remember_browse_size<R: Runtime>(app: &AppHandle<R>, width: f64, h
         }
         Err(err) => crate::diag::warn(&format!("the browse size could not be saved: {err}")),
     }
+}
+
+/// Remember where and how big the user just left the editor window.
+///
+/// The same shape as [`remember_browse_size`], and separate from it for the
+/// same reason the fields are separate: these two windows are resized by the
+/// same hand but mean different things by the number, and one helper taking
+/// four `Option`s would need a discriminant to say which window it was for.
+pub(crate) fn remember_editor_bounds<R: Runtime>(
+    app: &AppHandle<R>,
+    size: (f64, f64),
+    at: (f64, f64),
+) {
+    let Some(store) = app.try_state::<SettingsStore>() else {
+        return;
+    };
+    let mut next = store.get();
+    next.editor_width = Some(size.0);
+    next.editor_height = Some(size.1);
+    next.editor_x = Some(at.0);
+    next.editor_y = Some(at.1);
+    match store.replace(next) {
+        Ok(stored) => {
+            if let Err(err) = tauri::Emitter::emit(app, CHANGED_EVENT, &stored) {
+                crate::diag::warn(&format!("editor bounds change not announced: {err}"));
+            }
+        }
+        Err(err) => crate::diag::warn(&format!("the editor bounds could not be saved: {err}")),
+    }
+}
+
+/// What the editor window should reopen at: `((width, height), (x, y))` in
+/// logical units, each `None` where the user has never said.
+///
+/// A named type because the tuple is four `Option<f64>`s deep and clippy's
+/// `type_complexity` is right that the shape needs a name to be readable. Not
+/// a struct: a struct here would be a *serialising* type the moment anything
+/// returned it over IPC, and `check-wire.mjs` would then want it joined to the
+/// wire manifest for a value that never crosses the wire in this shape.
+pub(crate) type EditorBounds = ((Option<f64>, Option<f64>), (Option<f64>, Option<f64>));
+
+/// What the editor window should reopen at.
+///
+/// Read through `try_state` like `window::browse_dims`, so a call before the
+/// store is managed answers "nothing remembered" rather than panicking.
+pub(crate) fn editor_bounds<R: Runtime>(app: &AppHandle<R>) -> EditorBounds {
+    app.try_state::<SettingsStore>()
+        .map_or(((None, None), (None, None)), |store| {
+            let settings = store.get();
+            (
+                (settings.editor_width, settings.editor_height),
+                (settings.editor_x, settings.editor_y),
+            )
+        })
 }
 
 /// Emitted after every successful save, carrying the stored settings.

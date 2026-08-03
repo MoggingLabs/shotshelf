@@ -49,6 +49,16 @@ fn is_opened() -> bool {
 const OPENED_EVENT: &str = "shelf://opened";
 /// …and the one for the window going down.
 const HIDDEN_EVENT: &str = "shelf://hidden";
+/// A saved edit is a capture of its own, and the shelf is the thing that holds
+/// captures — but the save now happens in the editor's window, which cannot
+/// reach the shelf's list. So Rust tells it. The payload is the new file's
+/// path, a plain string; `edit.rs` emits it, `src/main.ts` listens.
+///
+/// Named in the `capture://` family rather than `shelf://` because it says
+/// what happened rather than which window it happened in, and it lives here
+/// beside its siblings so that one test — and one fixture — holds every event
+/// name in the app.
+pub(crate) const EDITED_EVENT: &str = "capture://edited";
 
 #[cfg(test)]
 const WINDOW_EVENTS: &str = include_str!("../../tests/fixtures/window-events.json");
@@ -800,6 +810,28 @@ pub fn peek<R: Runtime>(app: &AppHandle<R>, height: f64) {
 /// point of a quick look is that it is quick.
 const PREVIEW_FRACTION: f64 = 0.72;
 
+/// Fit a box of `aspect` inside `max` without distorting it, never smaller
+/// than `floor`.
+///
+/// Whichever edge hits first wins. Extracted because the quick look and the
+/// editor window both need it and a second copy would drift: they differ in
+/// their fraction of the screen and in their floors, which are arguments, not
+/// in the arithmetic.
+///
+/// The aspect arrives from outside — the front end for a preview, an image
+/// header for the editor — so a zero, a negative or a NaN is sanitised here
+/// rather than dividing by zero at the call site.
+pub(crate) fn fit_aspect(aspect: f64, max: (f64, f64), floor: (f64, f64)) -> (f64, f64) {
+    let aspect = if aspect.is_finite() && aspect > 0.0 {
+        aspect
+    } else {
+        16.0 / 9.0
+    };
+    let width = max.0.min(max.1 * aspect).max(floor.0);
+    let height = (width / aspect).min(max.1).max(floor.1);
+    (width, height)
+}
+
 /// Show a capture large enough to read.
 ///
 /// The shelf is 225 wide, which is enough to recognise a screenshot and not
@@ -851,17 +883,9 @@ pub fn preview<R: Runtime>(app: &AppHandle<R>, aspect: f64) -> Result<(), String
         f64::from(area.size.height) / scale * PREVIEW_FRACTION,
     );
 
-    // A sane aspect or nothing: a zero or negative one would divide by zero,
-    // and it arrives from the front-end.
-    let aspect = if aspect.is_finite() && aspect > 0.0 {
-        aspect
-    } else {
-        16.0 / 9.0
-    };
-
-    // Fit inside the box without distorting: whichever edge hits first wins.
-    let width = max_width.min(max_height * aspect).max(BROWSE_SIZE.0);
-    let height = (width / aspect).min(max_height).max(200.0);
+    // Fit inside the box without distorting, and sanitise the aspect the front
+    // end sent — both in `fit_aspect`, which the editor window shares.
+    let (width, height) = fit_aspect(aspect, (max_width, max_height), (BROWSE_SIZE.0, 200.0));
 
     // A quick look is sized by Rust, not the hand: mark it so the resize
     // events it fires are never remembered as the user's browse size.
@@ -1172,6 +1196,443 @@ pub fn open_settings<R: Runtime>(app: AppHandle<R>) {
     attempt("focus the settings window", window.set_focus());
 }
 
+/// The editor window's label — declared in `tauri.conf.json`, like [`SHELF`].
+pub const EDITOR_WINDOW: &str = "editor";
+
+/// The smallest the editor window may be dragged to.
+///
+/// Mirrors `minWidth`/`minHeight` on its declaration in `tauri.conf.json`,
+/// which is what the OS actually enforces against a hand. These exist so a
+/// *remembered* size — which never passed through the OS clamp, because it
+/// comes back out of a settings file — cannot reopen the window smaller than
+/// the toolbar can be laid out in.
+pub(crate) const MIN_EDITOR_SIZE: (f64, f64) = (480.0, 360.0);
+
+/// The largest the editor window opens at, as a fraction of the work area.
+///
+/// Larger than the quick look's 0.72: a quick look is a glance you dismiss,
+/// and this is a window you work in. Still not the whole screen — the user
+/// can maximize, and a window that opens maximized has taken that choice away.
+const EDITOR_FRACTION: f64 = 0.85;
+
+/// The capture the editor window is open on, if any.
+///
+/// Rust holds the target rather than sending it and hoping, because the window
+/// is declared-and-hidden: the very first open shows a page that is still
+/// booting, and an event emitted before its listener attaches is simply lost.
+/// The page reads this at boot through `edit_target` and listens for
+/// [`EDITOR_OPEN_EVENT`] for every open after that, so neither path can miss.
+static EDIT_TARGET: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Told to the editor page when it is already up and the user asks for another
+/// capture. Joined to `tests/fixtures/window-events.json`.
+const EDITOR_OPEN_EVENT: &str = "editor://open";
+
+/// Told to the editor page when the user clicked the window's X.
+///
+/// The close is always refused in `lib.rs` and this asks the page what to do
+/// about it, because only the page knows whether there are unsaved marks.
+const EDITOR_CLOSE_EVENT: &str = "editor://close-requested";
+
+/// When the editor's close was last refused, as milliseconds since the epoch,
+/// or 0 for never.
+///
+/// The second X inside [`CLOSE_CONFIRM_MS`] hides the window without asking
+/// again. That is the same "press again" idiom the editor's Escape already
+/// used for unsaved marks, and it is here rather than only in the page so that
+/// X still works if the page is wedged — a window whose close button depends
+/// on a healthy webview is a window the user cannot get rid of.
+static CLOSE_REFUSED_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How long a refused close stands before the next X asks the page again.
+const CLOSE_CONFIRM_MS: u64 = 4000;
+
+/// Milliseconds since the epoch, saturating to 0 if the clock is before it.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+        })
+}
+
+/// The size and position to open the editor window at.
+///
+/// Pure, so the decision is testable — no `WebviewWindow` can be built in a
+/// unit test. `remembered` is what the user last dragged the window to, if
+/// anything; `aspect` is the capture's own shape; `work` is the logical work
+/// area as `(width, height)`.
+///
+/// A remembered size wins outright and is only floored, never re-fitted: the
+/// user chose it, and re-fitting it to each capture would silently undo the
+/// choice on the first portrait screenshot. With nothing remembered the
+/// capture's own shape decides, capped to [`EDITOR_FRACTION`] of the screen.
+pub(crate) fn editor_size(
+    remembered: (Option<f64>, Option<f64>),
+    aspect: f64,
+    work: (f64, f64),
+) -> (f64, f64) {
+    if let (Some(width), Some(height)) = remembered {
+        if width.is_finite() && height.is_finite() {
+            return (
+                width.clamp(MIN_EDITOR_SIZE.0, work.0.max(MIN_EDITOR_SIZE.0)),
+                height.clamp(MIN_EDITOR_SIZE.1, work.1.max(MIN_EDITOR_SIZE.1)),
+            );
+        }
+    }
+    fit_aspect(
+        aspect,
+        (work.0 * EDITOR_FRACTION, work.1 * EDITOR_FRACTION),
+        MIN_EDITOR_SIZE,
+    )
+}
+
+/// Whether a remembered position still lands on screen, given the work area's
+/// origin and size and the window's own size.
+///
+/// A monitor that has been unplugged leaves a position pointing into nothing,
+/// and a window restored there is a window the user cannot reach. The rule is
+/// deliberately loose — the window's top-left need only be inside the work
+/// area, so a window hanging off the right edge is allowed the way the OS
+/// allows one you dragged there — but a top-left outside it is refused and the
+/// window centres instead.
+pub(crate) fn position_is_on_screen(at: (f64, f64), origin: (f64, f64), work: (f64, f64)) -> bool {
+    at.0.is_finite()
+        && at.1.is_finite()
+        && at.0 >= origin.0
+        && at.1 >= origin.1
+        && at.0 < origin.0 + work.0
+        && at.1 < origin.1 + work.1
+}
+
+/// Open the editor window on a capture.
+///
+/// The window is declared in the config and shown here, for the same reasons
+/// `open_settings` gives: create-on-demand can fail in six ways and a second
+/// click racing the first can build two of them.
+///
+/// The capture's dimensions are read from its header rather than by decoding
+/// it — sizing a window is no reason to hold a 4K bitmap in memory — and a
+/// file that cannot be read at all is not an error here: the window opens at
+/// a sane shape and the page reports the failure it hits when it tries to
+/// display the thing.
+#[tauri::command]
+pub fn open_editor<R: Runtime>(app: AppHandle<R>, path: String) -> Result<(), String> {
+    // Checked before anything appears, through the same door every other
+    // capture-path command uses. The shelf offers Edit for any single picked
+    // capture, including one whose file has since gone — an emptied Recycle
+    // Bin, a cleared temp folder — and refusing here means the shelf says so
+    // with no window flashing up and back down again to say it.
+    let path = crate::webview_path::existing_file(&app, &path)?
+        .to_string_lossy()
+        .into_owned();
+
+    let Some(window) = app.get_webview_window(EDITOR_WINDOW) else {
+        return Err("the editor window is not there".to_owned());
+    };
+
+    // Stored before the window is shown, so a page that boots fast enough to
+    // ask for the target before this call returns still gets the new one.
+    if let Ok(mut target) = EDIT_TARGET.lock() {
+        *target = Some(path.clone());
+    }
+
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map_or_else(|| path.clone(), |name| name.to_string_lossy().into_owned());
+    attempt(
+        "name the editor window",
+        window.set_title(&format!("{name} — Shotshelf")),
+    );
+
+    // Only size it when it is not already on screen. Re-sizing a window the
+    // user is working in, because they asked for a second capture, would move
+    // it under their hand for no reason they asked for.
+    if !window.is_visible().unwrap_or(false) {
+        size_editor(&app, &window, &path);
+    }
+
+    // The shelf gets out of the way. It is `alwaysOnTop` and docked in a
+    // corner, so without this it sits over the editor permanently — and there
+    // is no gesture that raises the editor above it, because always-on-top is
+    // the shelf's whole point. A 225px column stapled over the corner of a
+    // maximized editor is not a window arrangement anyone would choose.
+    //
+    // Through `hide` rather than `window.hide()` for the reason `lib.rs`'s
+    // close branch gives at length: hiding clears the opened flag and
+    // announces `shelf://hidden`, without which the front end goes on
+    // believing the shelf is up and files every later capture away silently.
+    hide(&app);
+
+    show_editor_chrome(&app, true);
+    attempt("show the editor window", window.show());
+    attempt("focus the editor window", window.set_focus());
+
+    // For the page that is already up. A page still booting will not hear this
+    // and does not need to — it reads `edit_target` instead.
+    //
+    // Broadcast, not `emit_to(EDITOR_WINDOW, …)`, because targeting here would
+    // be a claim the runtime does not honour. Tauri's `match_any_or_filter`
+    // short-circuits on a listener registered with `EventTarget::Any` — it
+    // matches before the label filter is consulted — and a plain `listen()`
+    // from `@tauri-apps/api/event` registers exactly that, which is every
+    // listener in this app. So `emit_to` would deliver to precisely the same
+    // set while reading as though it narrowed it, and the next person would
+    // believe the other windows could not hear this.
+    //
+    // Pinned by `tests/ipc.rs`, "targeting a window does not narrow delivery
+    // to a plain listener", which exists because this comment first said the
+    // opposite and the test disagreed.
+    attempt(
+        "tell the editor which capture to open",
+        tauri::Emitter::emit(&app, EDITOR_OPEN_EVENT, path),
+    );
+    Ok(())
+}
+
+/// Place and size the editor window for a fresh open.
+fn size_editor<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>, path: &str) {
+    let Some(monitor) = monitor_for(window) else {
+        // No monitor to measure against, so the declared size stands. Unlike
+        // the quick look this is not worth refusing over: the window is a real
+        // one with real decorations, and whatever size it opens at the user can
+        // drag or maximize.
+        crate::diag::warn("no monitor could be identified, so the editor keeps its declared size");
+        return;
+    };
+    let scale = monitor.scale_factor();
+    let area = monitor.work_area();
+    let work = (
+        f64::from(area.size.width) / scale,
+        f64::from(area.size.height) / scale,
+    );
+
+    let remembered = crate::settings::editor_bounds(app);
+    let aspect = crate::imaging::aspect_of(std::path::Path::new(path)).unwrap_or(16.0 / 9.0);
+    let size = editor_size(remembered.0, aspect, work);
+    attempt(
+        "size the editor window",
+        window.set_size(tauri::LogicalSize::new(size.0, size.1)),
+    );
+
+    let origin = (
+        f64::from(area.position.x) / scale,
+        f64::from(area.position.y) / scale,
+    );
+    match remembered.1 {
+        (Some(x), Some(y)) if position_is_on_screen((x, y), origin, work) => {
+            attempt(
+                "put the editor window back where it was",
+                window.set_position(tauri::LogicalPosition::new(x, y)),
+            );
+        }
+        _ => attempt("centre the editor window", window.center()),
+    }
+
+    // Remember what we just did, so the events it fires are not mistaken for
+    // the user's hand. Read back rather than assumed: `center()` picks a
+    // position only the OS knows, and `set_size` can be adjusted by the
+    // window's own minimums.
+    if let Ok(mut last) = LAST_EDITOR_SET.lock() {
+        *last = editor_geometry(&window.as_ref().window());
+    }
+}
+
+/// Which capture the editor window should be showing, for a page that has just
+/// booted and cannot have heard [`EDITOR_OPEN_EVENT`].
+#[tauri::command]
+pub fn edit_target() -> Option<String> {
+    EDIT_TARGET.lock().ok().and_then(|target| target.clone())
+}
+
+/// Take the editor window off screen because the page says it is ready to go.
+///
+/// Hidden rather than closed, like the settings window: the declared window
+/// exists once for the life of the app, so the next open is instant.
+#[tauri::command]
+pub fn hide_editor<R: Runtime>(app: AppHandle<R>) {
+    take_editor_off_screen(&app);
+}
+
+/// The editor window's X was clicked.
+///
+/// Never actually closes: the caller has already prevented it, and this
+/// decides between asking the page (which owns the answer to "are there
+/// unsaved marks?") and hiding regardless because the user has now asked
+/// twice. See [`CLOSE_REFUSED_AT`] for why the second press does not consult
+/// the page at all.
+pub fn note_editor_close<R: Runtime>(window: &tauri::Window<R>) {
+    let app = window.app_handle();
+    let now = now_ms();
+    let refused = CLOSE_REFUSED_AT.load(std::sync::atomic::Ordering::Relaxed);
+    if refused != 0 && now.saturating_sub(refused) < CLOSE_CONFIRM_MS {
+        take_editor_off_screen(app);
+        return;
+    }
+    CLOSE_REFUSED_AT.store(now, std::sync::atomic::Ordering::Relaxed);
+    attempt(
+        "ask the editor whether it can close",
+        tauri::Emitter::emit(app, EDITOR_CLOSE_EVENT, ()),
+    );
+}
+
+/// Hide the editor window and forget what it was open on.
+///
+/// The one place the window leaves the screen, so the one place the app's
+/// macOS activation policy goes back down — see [`show_editor_chrome`].
+fn take_editor_off_screen<R: Runtime>(app: &AppHandle<R>) {
+    CLOSE_REFUSED_AT.store(0, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut target) = EDIT_TARGET.lock() {
+        *target = None;
+    }
+    if let Some(window) = app.get_webview_window(EDITOR_WINDOW) {
+        attempt("hide the editor window", window.hide());
+    }
+    show_editor_chrome(app, false);
+}
+
+/// Make the app a regular one while the editor is up, and an accessory again
+/// when it goes.
+///
+/// macOS only, and it is the difference between the owner's decision being
+/// delivered on three platforms and on two. `skipTaskbar` is a Windows/Linux
+/// setting; the macOS equivalent is the *application's* activation policy, and
+/// `lib.rs` sets it to `Accessory` so the tray-resident shelf has no Dock icon
+/// and no ⌘-Tab entry. That is right for a shelf and wrong for an editor: a
+/// window you work in for minutes has to be findable when another app covers
+/// it, and under `Accessory` ⌘-Tab cannot see it at all.
+///
+/// So the policy follows the editor. Windows and Linux need none of this — the
+/// editor's declaration simply does not carry `skipTaskbar` — and the whole
+/// function compiles to nothing there.
+fn show_editor_chrome<R: Runtime>(app: &AppHandle<R>, regular: bool) {
+    // Consumed rather than silenced with an `allow`: an `unused_variables`
+    // allowance would switch the lint off for everything below it in the file,
+    // and `check-dirs.mjs` is right to make that a decision rather than a
+    // formality. This says the same thing in one line and switches nothing off.
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, regular);
+
+    #[cfg(target_os = "macos")]
+    {
+        let policy = if regular {
+            tauri::ActivationPolicy::Regular
+        } else {
+            tauri::ActivationPolicy::Accessory
+        };
+        attempt(
+            "set the app's activation policy",
+            app.set_activation_policy(policy),
+        );
+    }
+}
+
+/// Remember where and how big the user just left the editor window.
+///
+/// Debounced like the browse shelf's, and for the same reason: a drag is a
+/// stream of events and `SettingsStore::note_capture` documents what a write
+/// per event costs. Unlike the shelf's, this needs no our-resize-versus-theirs
+/// filtering — Rust sizes this window exactly once, at a fresh open, and never
+/// glides it.
+///
+/// A **maximized** window is deliberately not recorded. Maximizing fires a
+/// `Resized` carrying the maximized size, and storing that would overwrite the
+/// restored size the user actually chose — so the next open would come up
+/// screen-filling with no way back to the size they had. The shelf's
+/// `note_resized` has no equivalent guard because the shelf cannot be
+/// maximized at all.
+pub fn note_editor_bounds<R: Runtime>(window: &tauri::Window<R>) {
+    if !window.is_visible().unwrap_or(false) || window.is_maximized().unwrap_or(false) {
+        return;
+    }
+    let Some(bounds) = editor_geometry(window) else {
+        return;
+    };
+
+    // Ours, not theirs.
+    //
+    // Sizing and centring the window at a fresh open fires exactly the events
+    // this handler reads, so without this the *automatic* shape is written
+    // into settings the instant it is used — and "automatic" then never
+    // happens again, because a remembered size is there to be found. Observed
+    // live on the first open this feature ever had: the window came up fitted
+    // to the capture and `settings.json` immediately held its size and place
+    // as though a hand had put them there.
+    //
+    // The same idea as the browse shelf's `LAST_SET`, and the same ±2px
+    // tolerance, for the same reason: a logical size makes a lossy round trip
+    // through physical coordinates, and a real drag moves further than that.
+    if let Ok(last) = LAST_EDITOR_SET.lock() {
+        if let Some(ours) = *last {
+            if near(ours.0, bounds.0) && near(ours.1, bounds.1) {
+                return;
+            }
+        }
+    }
+
+    if let Ok(mut pending) = PENDING_EDITOR_BOUNDS.lock() {
+        *pending = Some(bounds);
+    }
+    if EDITOR_WRITER_ARMED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let app = window.app_handle().clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        EDITOR_WRITER_ARMED.store(false, std::sync::atomic::Ordering::Relaxed);
+        let taken = PENDING_EDITOR_BOUNDS.lock().ok().and_then(|mut p| p.take());
+        if let Some((size, at)) = taken {
+            crate::settings::remember_editor_bounds(&app, size, at);
+        }
+    });
+}
+
+/// A window's geometry as `((width, height), (x, y))`, logical units — the
+/// settled form of [`crate::settings::EditorBounds`], with the "never said"
+/// case already resolved.
+type Geometry = ((f64, f64), (f64, f64));
+
+/// The editor geometry waiting for the debounce to expire.
+static PENDING_EDITOR_BOUNDS: std::sync::Mutex<Option<Geometry>> = std::sync::Mutex::new(None);
+
+/// The geometry *we* last put the editor window at, so its own events can be
+/// told from the user's. See [`note_editor_bounds`].
+static LAST_EDITOR_SET: std::sync::Mutex<Option<Geometry>> = std::sync::Mutex::new(None);
+
+/// Whether two logical points are the same within DPI rounding.
+///
+/// The pair version of [`was_programmatic`]'s tolerance, and the same number:
+/// a logical value makes a lossy round trip through physical coordinates, and
+/// a hand that meant to move something moves it further than two pixels.
+pub(crate) fn near(a: (f64, f64), b: (f64, f64)) -> bool {
+    (a.0 - b.0).abs() <= 2.0 && (a.1 - b.1).abs() <= 2.0
+}
+
+/// A window's current size and position in logical units.
+///
+/// Inner size with outer position, deliberately: `set_size` sets the inner
+/// size and `set_position` sets the outer one, so reading them back this way
+/// is the pair that round-trips through a restore unchanged. Mixing them the
+/// other way would drift the window down and right by the title bar's height
+/// on every reopen.
+fn editor_geometry<R: Runtime>(window: &tauri::Window<R>) -> Option<Geometry> {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let (Ok(size), Ok(at)) = (window.inner_size(), window.outer_position()) else {
+        return None;
+    };
+    Some((
+        (
+            f64::from(size.width) / scale,
+            f64::from(size.height) / scale,
+        ),
+        (f64::from(at.x) / scale, f64::from(at.y) / scale),
+    ))
+}
+
+/// Whether a debounce thread is already counting down for the editor.
+static EDITOR_WRITER_ARMED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 #[cfg(test)]
 mod tests {
     use super::{fitted_browse_height, wanted, Wanted, BROWSE_SIZE};
@@ -1195,6 +1656,148 @@ mod tests {
             !super::was_programmatic(last, (300.0, 520.0)),
             "a taller one too"
         );
+    }
+
+    #[test]
+    fn a_remembered_editor_size_wins_and_a_fresh_one_takes_the_captures_shape() {
+        let work = (1920.0, 1040.0);
+
+        // Nothing remembered: the capture's own shape, capped to the fraction.
+        // A 1920x1040 work area is 1.85 wide, wider than 16:9, so a 16:9
+        // capture is bound by the *height* — which is exactly the arithmetic
+        // an assertion written by eye gets backwards.
+        let (width, height) = super::editor_size((None, None), 16.0 / 9.0, work);
+        assert!(
+            (height - work.1 * 0.85).abs() < 1.0,
+            "height-bound on a screen wider than the capture, got {height}",
+        );
+        assert!(
+            (width / height - 16.0 / 9.0).abs() < 0.001,
+            "and undistorted, got {width}x{height}",
+        );
+
+        // A tall capture is bound by the *other* edge, and must not come out
+        // wider than the screen to satisfy its aspect.
+        let (tall_w, tall_h) = super::editor_size((None, None), 0.5, work);
+        assert!(tall_h <= work.1 * 0.85 + 0.5, "height bound, got {tall_h}");
+        assert!(tall_w <= work.0 * 0.85 + 0.5, "and still on screen");
+
+        // Remembered wins outright — it is *not* re-fitted to the capture,
+        // which is the whole difference between this and the browse height.
+        assert_eq!(
+            super::editor_size((Some(700.0), Some(500.0)), 0.5, work),
+            (700.0, 500.0),
+        );
+
+        // …but is still floored, because a remembered size never passed
+        // through the OS clamp: it came back out of a file.
+        assert_eq!(
+            super::editor_size((Some(10.0), Some(10.0)), 16.0 / 9.0, work),
+            super::MIN_EDITOR_SIZE,
+        );
+
+        // A half-remembered pair is no memory at all — both fields are written
+        // together by `remember_editor_bounds`, so one alone is a hand-edit.
+        let (half_w, _) = super::editor_size((Some(700.0), None), 16.0 / 9.0, work);
+        assert!(half_w > 700.0, "one field alone is not a remembered size");
+
+        // A NaN that survived sanitise (it cannot, but the caller is not the
+        // only writer of that file) falls back rather than propagating.
+        let (nan_w, nan_h) = super::editor_size((Some(f64::NAN), Some(500.0)), 16.0 / 9.0, work);
+        assert!(nan_w.is_finite() && nan_h.is_finite());
+    }
+
+    #[test]
+    fn the_shape_rust_opened_the_editor_at_is_not_mistaken_for_the_users() {
+        // The bug this guards shipped for exactly one live run. Sizing and
+        // centring the window at a fresh open fires the same `Resized` and
+        // `Moved` events a drag does, so the *automatic* shape was written
+        // straight into settings — and automatic then never happened again,
+        // because a remembered size was always there to be found. The window
+        // came up fitted to its capture and `settings.json` immediately held
+        // that size as though a hand had chosen it.
+        let ours = ((1559.0, 877.0), (172.0, 61.0));
+
+        assert!(
+            super::near(ours.0, (1559.0, 877.0)) && super::near(ours.1, (172.0, 61.0)),
+            "the shape we set must be recognised as ours",
+        );
+        // DPI rounding moves a logical value by a pixel or so on its round
+        // trip through physical coordinates; that is still ours.
+        assert!(super::near(ours.0, (1560.5, 875.5)));
+        assert!(super::near(ours.1, (173.0, 59.5)));
+
+        // A hand moves further than that, on either axis, in either pair.
+        assert!(!super::near(ours.0, (1200.0, 877.0)), "a narrowed window");
+        assert!(!super::near(ours.0, (1559.0, 600.0)), "a shortened one");
+        assert!(!super::near(ours.1, (400.0, 61.0)), "one dragged sideways");
+        assert!(!super::near(ours.1, (172.0, 300.0)), "or down");
+    }
+
+    #[test]
+    fn a_remembered_position_is_refused_once_its_monitor_is_gone() {
+        // The primary screen, and a second one to its left — negative
+        // coordinates are perfectly ordinary and must not be refused.
+        let origin = (0.0, 0.0);
+        let work = (1920.0, 1040.0);
+
+        assert!(super::position_is_on_screen((100.0, 100.0), origin, work));
+        assert!(
+            super::position_is_on_screen((0.0, 0.0), origin, work),
+            "the very corner is on screen",
+        );
+        assert!(
+            super::position_is_on_screen((1900.0, 1000.0), origin, work),
+            "hanging off the right edge is allowed — the OS allows it too",
+        );
+        assert!(
+            !super::position_is_on_screen((-1000.0, 100.0), origin, work),
+            "the unplugged monitor to the left",
+        );
+        assert!(
+            !super::position_is_on_screen((100.0, 2000.0), origin, work),
+            "and the one below",
+        );
+        assert!(!super::position_is_on_screen(
+            (f64::NAN, 100.0),
+            origin,
+            work
+        ));
+
+        // A second monitor left of the primary: the same coordinate that was
+        // refused above is accepted once the work area is that monitor's.
+        assert!(super::position_is_on_screen(
+            (-1000.0, 100.0),
+            (-1920.0, 0.0),
+            work
+        ));
+    }
+
+    #[test]
+    fn a_box_fits_inside_its_bounds_whichever_edge_hits_first() {
+        // Wider than the box: width-bound.
+        let (width, height) = super::fit_aspect(4.0, (800.0, 600.0), (100.0, 100.0));
+        assert!((width - 800.0).abs() < 0.001);
+        assert!((height - 200.0).abs() < 0.001);
+
+        // Taller than the box: height-bound, and not distorted to fill it.
+        let (width, height) = super::fit_aspect(0.5, (800.0, 600.0), (100.0, 100.0));
+        assert!((height - 600.0).abs() < 0.001);
+        assert!((width - 300.0).abs() < 0.001);
+
+        // A nonsense aspect from outside falls back to 16:9 rather than
+        // dividing by zero — the reason the sanitising lives in here.
+        for bad in [0.0, -2.0, f64::NAN, f64::INFINITY] {
+            let (width, height) = super::fit_aspect(bad, (1600.0, 1200.0), (100.0, 100.0));
+            assert!(width.is_finite() && height.is_finite(), "{bad} survived");
+            assert!((width / height - 16.0 / 9.0).abs() < 0.001, "{bad}");
+        }
+
+        // The floor outranks the box: a box smaller than the minimum yields
+        // the minimum, not something unusable.
+        let (width, height) = super::fit_aspect(1.0, (50.0, 50.0), (480.0, 360.0));
+        assert!((width - 480.0).abs() < 0.001);
+        assert!((height - 360.0).abs() < 0.001);
     }
 
     #[test]
@@ -1282,6 +1885,12 @@ mod tests {
 
         assert_eq!(shared["opened"].as_str(), Some(OPENED_EVENT));
         assert_eq!(shared["hidden"].as_str(), Some(HIDDEN_EVENT));
+        assert_eq!(shared["edited"].as_str(), Some(EDITED_EVENT));
+        // The editor window's two. They are emitted from Rust and heard only
+        // by the editor page, so the fixture is the whole join: nothing else
+        // in either language mentions these strings.
+        assert_eq!(shared["editorOpen"].as_str(), Some(EDITOR_OPEN_EVENT));
+        assert_eq!(shared["editorClose"].as_str(), Some(EDITOR_CLOSE_EVENT));
 
         // Both values, and *which appearance sends which* — the fixture pinned
         // the two booleans and neither side pinned the mapping onto them, so

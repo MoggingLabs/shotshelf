@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "editor-window",
+  "description": "What the editor window may do — the same short list as the settings window, and for the same reason. Its whole Tauri JS surface is `invoke` (not ACL-gated) and `listen`, for `editor://open`, `editor://close-requested` and `settings://changed`, so the one permission below is the one with a caller in src/editor-window/. No `core:window:*`: the page never shows, hides, closes or destroys its own window — it asks Rust to, through `hide_editor`, and Rust owns every window shape in this app. That is what keeps the close-with-unsaved-marks rule enforceable from one side. No drag: this window has real decorations and drags by its own title bar, and the capture inside it is drawn on a canvas, not dragged out. The rule is the main capability's rule: every entry has a caller, and an entry listed 'for later' grants webview reach today.",
+  "windows": ["editor"],
+  "permissions": ["core:event:allow-listen"]
+}

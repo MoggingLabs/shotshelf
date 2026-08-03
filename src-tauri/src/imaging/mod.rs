@@ -116,6 +116,31 @@ pub fn load(path: &Path) -> Result<DynamicImage, ImageError> {
         .map_err(|err| ImageError::Decode(err.to_string()))
 }
 
+/// A capture's width divided by its height, without decoding it.
+///
+/// `into_dimensions` reads the header and stops, so this costs a file open and
+/// a few dozen bytes where [`load`] would cost a full bitmap. That difference
+/// is the whole reason it exists: the editor window is sized from the capture's
+/// shape before anything is displayed, and holding a 4K image in memory to
+/// choose a window size would be an absurd way to pay for it.
+///
+/// `None` for anything that cannot be read or measured — a missing file, a
+/// format the decoders do not know, a zero height. Every caller has a sane
+/// default, and none of them should treat "I could not size this window
+/// perfectly" as a failure worth reporting.
+pub fn aspect_of(path: &Path) -> Option<f64> {
+    let (width, height) = ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    if height == 0 {
+        return None;
+    }
+    Some(f64::from(width) / f64::from(height))
+}
+
 /// The most a single decode may allocate. Matches the `image` crate's own
 /// default, stated here so overriding the other limits cannot silently raise it.
 const MAX_DECODE_BYTES: u64 = 512 * 1024 * 1024;

@@ -49,7 +49,8 @@ in about five minutes.
 | Corner / monitor choice | Pass | — | — | Corner hop driven live 2026-08-01: all four corners, window rect read back exactly at the work-area edge minus the 12px margin each time. The cursor-monitor choice is untestable on this one-display machine and stays gates-only |
 | On-device text recognition | Pass | — | — | `Windows.Media.Ocr`; macOS uses Vision, Linux tesseract if present |
 | Credential warning | Pass | — | — | A capture containing an `AKIA…` placeholder showed the marker on its card |
-| Annotation editor | Pass | — | — | Five tools present; a box drawn and saved |
+| Annotation editor (in the shelf's window) | ~~Pass~~ | — | — | Struck rather than dropped: this read Pass on Windows for a surface that no longer exists. The editor was an overlay inside the shelf's popover until 2026-08-03; five tools present and a box drawn and saved was observed of *that*, and says nothing about the window below |
+| Annotation editor (its own window) | Pass | — | — | Driven live 2026-08-03 against the dev build, by mouse rather than by hand (injected *keys* do not reach this app's webview from an automation process — a `p` on a picked capture left `pinned.json` empty, which is the decisive check — so every step below is a click at a coordinate read off a screenshot of the window). Clicking Edit opened a second window titled `<name> — Shotshelf`, **decorated, resizable, maximizable and in the taskbar, and not always-on-top**, with the shelf taken off screen. Sized from the capture: `wide.png` opened 1575×916 landscape, `tall.png` 496×916 portrait, both centred and capped to 85% of the work area. A `SetWindowPos` to 900×700 at 300,150 — what a hand on the border looks like from inside — reached `settings.json` as `editorWidth=884 editorHeight=661 editorX=300 editorY=150` after the debounce (inner size, outer position, by design), the X closed it, and re-opening brought it back at **exactly 900×700 at 300,150**. A box drawn at 100% landed under the pointer; the X over that unsaved mark showed the **Save / Discard / Cancel** bar instead of discarding; Save wrote `<name> (edited).png` into `edits/`, closed the window, and the shelf came back holding **two** captures — the edit with the box burned in, and the original untouched. That last step is `capture://edited` crossing windows, which no spec can prove. Two bugs were found by this run and fixed before it was repeated: Rust's own opening size was being persisted as though the user had chosen it (so "automatic" was overwritten on the very first open), and Fit *enlarged* a small capture to 464% instead of capping at actual size. **Not** covered: the macOS activation-policy swap that gives the window a ⌘-Tab entry, wheel zoom and Space-drag pan (both need real input this route cannot send), and Reset to automatic end to end |
 | Saved edit becomes a capture | Pass | — | — | `<name> (edited).png` in `edits/`, on the shelf, annotation burned in |
 | Popover placement | Pass | Pass — bottom-right corner of the runner desktop | Pass — bottom-right under openbox | Bottom-right of the **work area** (1920×1032 of a 1920×1080 screen), clear of the taskbar |
 | Corner anchoring | Pass | — | — | Column grew upward; bottom edge stayed fixed |
@@ -114,8 +115,18 @@ fixtures — take real captures, or synthesise them as below.
    and the original is still where it was. This is the one step nothing else can substitute for.
 7. **Copy one** with the tile's copy control and paste it somewhere. Then check the shelf did
    **not** gain a second copy of it.
-8. **Mark one up.** Select an image, press `e`, draw a box, Save. A new capture appears carrying
-   the annotation, and the original is untouched.
+8. **Mark one up.** Select an image, press `e`. A **separate window** opens on the capture and
+   the shelf goes away. Confirm it is a real one: drag its edges, maximize it, find it in
+   Alt-Tab (⌘-Tab on macOS, where the app takes a Dock icon for as long as the window is up).
+   Draw a box, Save. The window closes and a new capture appears on the shelf carrying the
+   annotation, with the original untouched.
+8a. **Zoom.** Reopen the editor on the largest screenshot you have. `Fit` shows all of it;
+   `100%` should make small text *readable* — that is the whole point of this feature. Scroll
+   to zoom about the cursor, hold Space and drag to pan, then redact a word at 100% and check
+   the saved copy has nothing underneath it and is still the capture's full resolution.
+   Then close the window with its X while a mark is unsaved: it must ask (Save / Discard /
+   Cancel) rather than either discarding or refusing to close. Reopen it — it comes back where
+   and how big you left it — then use **Reset to automatic** in Settings → Appearance.
 8b. **Open the settings window** with the gear. Walk the five sections; change Max items and
    watch the shelf obey without a restart; switch the theme to Light and both windows should
    repaint; click the hotkey control, press a new combination, and summon the shelf with it.

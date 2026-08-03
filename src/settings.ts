@@ -102,6 +102,21 @@ export interface Settings {
    */
   browseWidth: number | null;
   browseHeight: number | null;
+  /**
+   * The editor window's size and place, as the user left them; `null` is
+   * automatic — centred and fitted to the capture.
+   *
+   * A size here is a *size*, not a ceiling like `browseHeight`: the editor is
+   * a window you work in, and re-fitting it to each capture would undo a
+   * deliberate choice the first time a portrait screenshot was opened. The
+   * position is the one value that can go stale on its own, when the monitor
+   * it named is unplugged; Rust checks that at restore time and centres
+   * instead, so a coordinate that looks wrong here may be perfectly good.
+   */
+  editorWidth: number | null;
+  editorHeight: number | null;
+  editorX: number | null;
+  editorY: number | null;
   pinned: PinnedItem[];
 }
 
@@ -124,6 +139,10 @@ export const DEFAULTS: Settings = {
   clipboardKeepDays: null,
   browseWidth: null,
   browseHeight: null,
+  editorWidth: null,
+  editorHeight: null,
+  editorX: null,
+  editorY: null,
   pinned: [],
 };
 

@@ -46,7 +46,11 @@
     "watchRemoved",
     "clipboardKeepDays",
     "browseWidth",
-    "browseHeight"
+    "browseHeight",
+    "editorWidth",
+    "editorHeight",
+    "editorX",
+    "editorY"
   ],
   "VideoDetails": [
     "poster",

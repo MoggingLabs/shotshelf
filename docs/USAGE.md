@@ -146,9 +146,24 @@ Take a screenshot. Within about a second the shelf appears with a thumbnail of i
 - **Quick look** — press space to open the picked capture at readable size, and
   space or Esc to close it. A 199px card in a 225px panel is enough to recognise a screenshot and
   not enough to read one, which is the whole reason this exists.
-- **Edit** — pick one *image* and a button appears (a recording has nothing to mark up, so it stays hidden, as it does while a preview or the editor is open) in the title strip. Five tools,
-  and only five: **crop**, **box**, **arrow**, **number** and **redact**. Saving
-  produces a new capture on the shelf; the one you marked up is untouched.
+- **Edit** — pick one *image* and a button appears (a recording has nothing to mark up, so it
+  stays hidden, as it does while a preview is open) in the title strip. It opens **a window of
+  its own** — a real one, with a title bar, resizable, maximizable and in the taskbar — and the
+  shelf steps out of the way while you work. Five tools, and only five: **crop**, **box**,
+  **arrow**, **number** and **redact**. Saving produces a new capture on the shelf; the one you
+  marked up is untouched.
+
+  The window remembers the size and place you leave it in, and **Reset to automatic** in
+  Settings → Appearance goes back to centred-and-fitted. Because a big window is only half of
+  being able to see: **zoom** with the scroll wheel, `+`/`-`, or the toolbar's cluster — `Fit`
+  shows the whole capture, `100%` shows one capture pixel per screen pixel, which is what
+  reading a token in a 4K screenshot actually needs. Hold **Space** and drag to pan. None of it
+  reaches the saved file: an edit is always written at the capture's own resolution, whatever
+  the window was showing.
+
+  Closing with unsaved marks asks first — **Save**, **Discard** or **Cancel** — and so does
+  asking to mark up a different capture while marks are outstanding. Hiding the shelf no longer
+  touches the editor at all; it is a separate window and stays where it is.
 - **Compare** — pick exactly two *images* and a Compare button appears (two recordings show nothing: an `.mp4` cannot be decoded as a picture, and offering the button made it look broken) in the title strip. It puts them
   side by side with whatever changed outlined, as a single new capture you can drag out. The
   **older** capture is the "before", whichever order you picked them in — ctrl-clicking and
@@ -187,12 +202,17 @@ shows rather defeats the point.
 | `Space` | Open the picked **image** at readable size, and close it again — a recording answers that it has no preview |
 | `Enter` | Copy it to the clipboard, with a receipt in the strip |
 | `Delete` or `Backspace` | Take the picked captures off the shelf — **the files stay on disk**, and `Ctrl+Z` brings the batch back |
-| `e` | Mark the picked capture up |
+| `e` | Mark the picked capture up, in the editor's own window |
 | `t` | Copy the **text** in the picked image — recognised on your machine, straight onto the clipboard |
 | `p` | Pin or unpin the picked captures |
 | `o` | Show the picked capture's file in Explorer / Finder / your file manager |
-| `Ctrl+Z` | Undo the last mark while marking up; bring back the last removal otherwise |
-| `Esc` | Close the editor (twice if you have unsaved marks — the first press warns), then the preview, then the shelf |
+| `Ctrl+Z` | Bring back the last removal (a pending delete first) |
+| `Esc` | Close the preview, then the shelf |
+
+The editor's window has a keymap of its own, because it is its own window: `Esc`
+closes it (asking first if there are unsaved marks), `Ctrl+Z` takes back the
+last mark, `Ctrl+S` saves, `+`/`-` zoom, `1` is actual size, `0` is Fit, and
+holding `Space` pans.
 
 Escape backs out one level at a time on purpose: one key that closes two things
 at once is one key that loses your place. Every key that needs a pick says
@@ -304,6 +324,7 @@ allowlist, never a raw URL).
 | **Corner** | Appearance | Which screen corner the popover docks to — a 2×2 picker. A bottom corner grows the popped column upward; a top corner grows it downward |
 | **Monitor** | Appearance | Which monitor carries that corner: the primary, or whichever one your cursor is on when the shelf appears |
 | **Shelf size** | Appearance | Not a control but a receipt: the size you drag the summoned shelf to is remembered here, and **Reset to automatic** hands the sizing back to the content fit. Disabled while nothing was ever dragged |
+| **Editor window** | Appearance | The same receipt for the markup window's size *and place*. **Reset to automatic** puts it back to centred and fitted to whatever capture it opens on. Disabled while it has never been moved or resized |
 | **Summon the shelf** | Shortcuts | The global show/hide shortcut, recorded from your keys |
 | **Check at launch** | About | Whether Shotshelf asks GitHub Releases for a newer version once per launch |
 

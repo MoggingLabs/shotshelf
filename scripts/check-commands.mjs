@@ -180,7 +180,7 @@ if (unreachable.length > 0) {
 //
 // `bridge.ts`'s header states one: "This is the shelf's calls, not the app's:
 // `main.ts`, `popover.ts` and `settings.ts` invoke directly, because they are
-// outside the shelf." `src/editor/index.ts`'s header states a different one — "The
+// outside the shelf." The editor's header used to state a different one — "The
 // window itself goes through `bridge.ts` like every other view module" — and
 // `main.ts` imports from the bridge while also invoking directly, satisfying
 // neither. Nothing decided which applied, so both could be true of a file and
@@ -199,6 +199,12 @@ const INVOKERS = new Set([
   "src/popover.ts",
   "src/settings.ts",
   "src/main.ts",
+  // The editor's own window. A second page in a second window cannot reach
+  // the shelf's bridge — it has no shelf — so it owns one, exactly as the
+  // settings window owns `src/settings.ts`. Three commands and a save, and
+  // the point of naming it here rather than widening the rule is that the
+  // list stays a list: a sixth entry has to be argued for in a diff too.
+  "src/editor-window/bridge.ts",
 ]);
 
 const strays = globSync("src/**/*.ts")

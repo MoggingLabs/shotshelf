@@ -117,6 +117,47 @@ look are sized by their content and show no grip. There is no snap-back
 mid-gesture — the window stays where the hand left it, and the next capture
 or reopen reconciles through the normal fit.
 
+## The editor window
+
+The second decorated window, and the newest. It was an overlay mounted inside
+the shelf's own popover until 2026-08-03, on an argument worth keeping because
+it was half right: "look at this closely" and "point at part of this" are one
+view at two intensities, and a second window needs its own lifecycle, placement
+and dismissal. The quick look still works exactly that way and still should.
+
+What the argument missed is what the shelf's window *is*: `decorations: false`,
+`alwaysOnTop`, `skipTaskbar`, `resizable: false`. An editor living in it could
+not be resized, maximized, snapped or found in Alt-Tab, and always scaled the
+capture to fit — so a 4K screenshot stayed a quarter size however much screen
+was free. For a glance you dismiss, none of that matters. For the surface where
+a credential gets redacted, all of it does. **The owner's report was "too small
+to see anything", and the fix is a window, not a bigger overlay.**
+
+It follows the settings window in every structural way — declared in
+`tauri.conf.json`, shown by a command, closing into hiding, one stylesheet, the
+same theme — and differs in three:
+
+- **The shelf gets out of the way.** `open_editor` hides it. Two windows cannot
+  share a screen when one of them is always-on-top and cornered, and there is
+  no gesture that raises the other above it.
+- **macOS gets its Dock icon back for the duration.** The app runs as
+  `Accessory` so a tray-resident shelf has no ⌘-Tab entry; an editor you work in
+  for minutes must be findable when something covers it, so the activation
+  policy follows the window up and back down.
+- **Zoom, which no other surface has.** `Fit` and `100%` are named controls
+  because they are the two answers people want; the wheel zooms about the
+  cursor, `+`/`-` step, and Space-drag pans (the second cursor affordance in the
+  app after `grab` on a card, and for the same reason — it names a direct
+  manipulation rather than decorating a control). The zoom is a property of the
+  *view*: marks are stored in image pixels and the export composites at scale 1,
+  so nothing here can change a pixel of the saved file.
+
+Unsaved marks are asked about with a real three-answer bar — Save, Discard,
+Cancel — in the toolbar rather than over the picture, since the question is
+about the marks and covering them to ask would hide what is being decided. That
+replaces the old "press Escape again within four seconds", which existed only
+because a frameless never-focused popover had nowhere to put a question.
+
 ## Palette
 
 Semantic tokens only; `check-design.mjs` refuses a colour literal outside
@@ -246,10 +287,11 @@ the point the user is standing on.
   terminal period ("Mark up this capture (E)"), informational tooltips are
   full-stopped sentences. Controls with a keyboard accelerator name it in
   parentheses at the end.
-- **Stated limitation:** drawing in the editor is pointer-only. The tools,
-  Undo and Save are keyboard-reachable, but placing a mark needs a pointer;
-  an accessible marking flow is future work, recorded here rather than
-  implied absent.
+- **Stated limitation:** drawing in the editor is pointer-only, and so is
+  panning a zoomed view. The tools, Undo, Save, the zoom controls and the
+  close question are all keyboard-reachable — and zoom gained `+`/`-`, `1` and
+  `0` — but placing a mark needs a pointer; an accessible marking flow is
+  future work, recorded here rather than implied absent.
 
 ## Feature inventory — what each one is for
 
@@ -269,7 +311,7 @@ that cannot say what job it does gets removed before it gets polished.
 | Corner / monitor choice | A corner widget on the wrong corner is furniture in the way | `corner_origin` unit table + settings e2e + live re-place on save |
 | Poster frames, duration, size | A recording is a file until you can see into it | Rust poster tests, e2e |
 | OCR + credential warning | The last moment a token is only on your machine | Rust `secrets.rs` table, e2e, live OCR on Windows |
-| Editor (5 tools, real redaction) | Point at the thing without a second app; redaction that removes pixels | `tests/e2e/editor.spec.ts` |
+| Editor (5 tools, real redaction, zoom) | Point at the thing without a second app; redaction that removes pixels — in a window big enough to see what you are pointing at | `tests/e2e/editor.spec.ts` (the window), `editor-open.spec.ts` (the shelf's half), `src/editor/view.test.ts` (the zoom maths) |
 | Compare | The unit of iteration when working against a model | e2e compare specs |
 | Quick look | Read the capture without opening an app | e2e + window-resize specs |
 | Keyboard map | The shelf is summoned by key; acting on it should not need the mouse — incl. `t` copy-text, `p` pin, `o` show-in-folder, shelf-level `Ctrl+Z`, receipts for every key, and a guard sentence when nothing is picked. Taught in-app: tooltips name their keys, the settings footer lists the map, the empty state names the hotkey | `tests/e2e/keyboard.spec.ts` |

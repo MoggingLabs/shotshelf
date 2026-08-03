@@ -27,23 +27,15 @@
  * aged out leaked its frame forever.
  */
 
-import {
-  closeEditor,
-  discardEditor,
-  discardNeedsConfirm,
-  editorIsOpen,
-  openEditor,
-  undoEdit,
-} from "../editor/index.ts";
 import { persistPinned, type Settings } from "../settings.ts";
 import {
-  browseShelf,
   commitDelete,
   compareCaptures,
   copyCapture,
   copyCaptureText,
   deleteCapture,
   forgetVideo,
+  openEditorWindow,
   revealCapture,
   setCaptureCount,
   undoDeleteStaged,
@@ -229,8 +221,16 @@ export class Shelf {
    * dismissal on a drag or the settings panel, and neither knew about the
    * overlay. Both tore an open editor down and took every unsaved mark with it.
    */
+  /**
+   * Whether something is covering the list.
+   *
+   * The quick look alone, now that the editor has its own window. The term
+   * that named the editor here is gone rather than left as a `false` — the
+   * shelf can no longer observe the editor at all, and a predicate that
+   * pretends otherwise is worse than one that admits it.
+   */
   get overlayOpen(): boolean {
-    return editorIsOpen() || previewIsOpen();
+    return previewIsOpen();
   }
 
   /**
@@ -744,19 +744,22 @@ export class Shelf {
   // ── Quick look and the keyboard ────────────────────────────────────────
 
   /**
-   * Mark up the picked capture.
+   * Mark up the picked capture, in the editor's own window.
    *
-   * Opens on the same window the preview uses — annotating is looking at a
-   * capture closely and then pointing at part of it, which is one view at two
-   * intensities rather than two windows.
+   * All this does now is ask. The editor used to be an overlay mounted into
+   * *this* window, which is why this method carried fifty lines of restore
+   * debt — the quick look torn down without giving the window back, a `.catch`
+   * ordered before its `.then` so a refused open could not skip the restore,
+   * and a conditional `browseShelf()` for the case where it did. None of it
+   * exists once the editor has a window of its own: Rust sizes that window,
+   * shows it, and takes this one off screen.
+   *
+   * The quick look is still closed first, and now properly — `hidePreview`
+   * rather than `discardPreview`, because nothing downstream owes this window
+   * anything and leaving it at preview size is exactly the state the old code
+   * was fighting.
    */
   editPicked(): void {
-    // Every reason not to open is checked *before* the quick look is torn
-    // down. `discardPreview` deliberately does not give the window back, so
-    // tearing down first and bailing afterwards stranded an always-on-top
-    // window at preview size with the browse list inside it — the exact
-    // symptom the editor's own restore was added to fix, on a path that
-    // predated it.
     const [item] = this.#pickedOrSay();
     if (!item) return;
     if (!isEditable(item)) {
@@ -766,79 +769,25 @@ export class Shelf {
       return;
     }
 
-    // Torn down rather than closed: closing gives the window back to the
-    // browse shape, and the editor is about to ask for a large one — the user
-    // would watch it shrink and grow again for no reason.
-    discardPreview();
+    this.closePreview();
 
-    void openEditor(item, this.#overlay, {
-      saved: (path) => {
-        // An edit is a capture in its own right, dated now.
-        this.add({ path, kind: "image", ts: Date.now() });
-      },
-      failed: (message) => this.#options.onProblem(message),
-    })
-      // Before the settlement below, not after it, and this ordering is the
-      // whole point. `openEditor` can reject — `Overlay.show` has a `finally`
-      // and no `catch`, so anything thrown while building propagates — and a
-      // bare `.then` is skipped on rejection. That skipped the restore, which
-      // is the one thing that cannot be skipped here: the quick look has
-      // already been discarded, the window has already been grown, and
-      // nothing else in the app knows it is owed back. The user was left with
-      // an always-on-top window at preview size showing the browse list, which
-      // is verbatim what the comment below exists to prevent.
-      .catch((error: unknown) => {
-        console.error("[shotshelf] the editor could not open", error);
-        this.#options.onProblem("That capture could not be opened for editing.");
-      })
-      .then(() => {
-        // The editor either mounted or refused. Either way the title-strip
-        // controls depend on whether an overlay is up, and this is the moment
-        // that answer changed.
-        this.#reflectSelection();
-        // And if it refused after the quick look was torn down, the window it
-        // grew is still large with nothing in it. `discardPreview` above owes
-        // no restore by contract, so the debt lands here — the only place that
-        // knows a preview was thrown away for an editor that never opened.
-        if (!this.overlayOpen) {
-          void browseShelf().catch((error: unknown) => {
-            console.error("[shotshelf] could not restore the browse window", error);
-          });
-        }
-      });
-  }
-
-  get editing(): boolean {
-    return editorIsOpen();
-  }
-
-  /** Back out of the editor. Returns false if there was nothing to back out of. */
-  closeEditor(): boolean {
-    // The first Escape over unsaved marks warns instead of discarding; the
-    // second inside four seconds proceeds. Consuming the gesture (true) is
-    // what stops the ladder falling through to the settings panel.
-    if (this.warnUnsavedMarks()) return true;
-    const closed = closeEditor();
-    if (closed) this.#reflectSelection();
-    return closed;
-  }
-
-  /**
-   * Warn about unsaved marks, once per gesture window. True when the caller
-   * should stop and let the user repeat the gesture to mean it — shared by
-   * Escape and the Hide button, the two discard routes the front end owns.
-   * (The tray and the hotkey hide through Rust and cannot be intercepted
-   * here; the editor's teardown on those routes is documented behaviour.)
-   */
-  warnUnsavedMarks(): boolean {
-    if (!discardNeedsConfirm()) return false;
-    this.#options.onProblem("You have unsaved marks — press again to discard them.");
-    return true;
-  }
-
-  /** Undo the last mark. Returns false if there was nothing to undo. */
-  undoEdit(): boolean {
-    return undoEdit();
+    void openEditorWindow(item.path).catch((error: unknown) => {
+      // Rust refuses a capture whose file has gone before any window appears,
+      // which is why this reports rather than opening an empty window to say
+      // so. The command's own sentence is used where there is one, because it
+      // names the actual cause and the generic fallback cannot.
+      //
+      // Both shapes, deliberately: a `#[tauri::command]` returning
+      // `Result<_, String>` rejects with the bare string, while anything that
+      // *throws* — including the browser harness's stubs — rejects with an
+      // `Error`. Reading only one of the two is how a curated message reaches
+      // the user in the app and a useless one reaches them in a test, or the
+      // reverse.
+      console.error("[shotshelf] the editor could not open", error);
+      const said =
+        typeof error === "string" ? error : error instanceof Error ? error.message : "";
+      this.#options.onProblem(said || "That capture could not be opened for editing.");
+    });
   }
 
   /** Close the preview. Returns false if there was nothing to close. */
@@ -852,17 +801,21 @@ export class Shelf {
    * Drop whatever is on the overlay because the window is going away.
    *
    * The overlay was given a lifetime of its own so the list could rebuild
-   * underneath it, and then nothing ever ended that lifetime: an editor or a
-   * quick look survived the shelf being hidden, and the next capture popped a
-   * column with a stale canvas painted across it. That column is never
-   * focused, so Escape could not reach the thing covering it either — one
-   * hide, and the app's core loop was blind for the rest of the session.
+   * underneath it, and then nothing ever ended that lifetime: a quick look
+   * survived the shelf being hidden, and the next capture popped a column with
+   * a stale canvas painted across it. That column is never focused, so Escape
+   * could not reach the thing covering it either — one hide, and the app's
+   * core loop was blind for the rest of the session.
+   *
+   * The editor was the other half of this and is deliberately not here any
+   * more: it is a window of its own, it survives the shelf being hidden, and
+   * that is the point. Hiding the shelf must not throw away marks in a window
+   * the user can still see.
    *
    * Silent by design. The deliberate closes hand the window back to the browse
    * shape; doing that here would re-show a window the user has just dismissed.
    */
   discardOverlay(): void {
-    discardEditor();
     discardPreview();
     this.#reflectSelection();
   }

@@ -1,42 +1,43 @@
 /**
- * Marking up a capture.
+ * Marking up a capture, in the editor's own window.
  *
  * The tools exist for one job — telling someone else, or a model, where to
  * look — and the one property that must never quietly stop holding is that a
  * redaction destroys what it covers rather than drawing over it.
+ *
+ * Everything here drives `/editor.html`. How the *shelf* asks for that window,
+ * and what happens to the shelf when it does, is `editor-open.spec.ts` — the
+ * two used to be one file because the editor was an overlay inside the shelf's
+ * window, and about a third of that file tested the seam between them rather
+ * than the editor. That seam is now one command, so those tests are gone
+ * rather than ported: an assertion about a coupling that no longer exists is
+ * worse than no assertion at all.
  */
 
 import {
-  bootShelf,
+  bootEditor,
+  EDITOR_CLOSE_EVENT,
+  EDITOR_OPEN_EVENT,
   expect,
   FIXTURE,
-  HIDDEN_EVENT,
-  land,
-  openBrowse,
   test,
 } from "../harness/app.ts";
 
+/**
+ * The editor, open on a capture, with a save that will succeed.
+ *
+ * `save_edit` is stubbed after the boot rather than seeded before it because
+ * nothing reads it during module evaluation — unlike `edit_target`, which
+ * `bootEditor` seeds for exactly that reason.
+ */
 async function openEditor(
   page: import("@playwright/test").Page,
   file: string = FIXTURE.wide,
 ): Promise<void> {
-  await bootShelf(page);
+  await bootEditor(page, { target: file });
   await page.evaluate(() => {
-    // `preview_shelf` reports nothing back: in the app Rust really does resize
-    // the window, and the canvas is fitted to the stage it ends up with rather
-    // than to any number crossing IPC. In the browser the window cannot resize
-    // at all, which is exactly why the fit assertions below are written
-    // against the stage — they hold at whatever size the stage happens to be.
-    window.__shotshelf__.respond("preview_shelf", null);
     window.__shotshelf__.respond("save_edit", "/edits/wide (edited).png");
   });
-  await land(page, file);
-  await openBrowse(page);
-
-  await page.keyboard.press("ArrowDown");
-  await expect(page.locator("#shelf-edit")).toBeVisible();
-  await page.locator("#shelf-edit").click();
-  await expect(page.locator(".editor__canvas")).toBeVisible();
 }
 
 /**
@@ -96,13 +97,17 @@ async function inkAt(
   return page.evaluate(
     ({ x, y }) => {
       const canvas = document.querySelector<HTMLCanvasElement>(".editor__canvas");
+      const frame = document.querySelector<HTMLElement>(".editor");
       const context = canvas?.getContext("2d");
-      if (!canvas || !context) throw new Error("no canvas");
+      if (!canvas || !frame || !context) throw new Error("no canvas");
       const box = canvas.getBoundingClientRect();
-      // Rendered coordinates to backing-store pixels.
+      // Image coordinates, like `drag` — through the view, then CSS pixels to
+      // backing-store pixels, which differ by `devicePixelRatio`.
+      const scale = Number(frame.dataset["scale"]);
+      const ratio = canvas.width / box.width;
       const data = context.getImageData(
-        Math.round((x / box.width) * canvas.width),
-        Math.round((y / box.height) * canvas.height),
+        Math.round((x - Number(frame.dataset["originX"])) * scale * ratio),
+        Math.round((y - Number(frame.dataset["originY"])) * scale * ratio),
         1,
         1,
       ).data;
@@ -145,44 +150,100 @@ async function savedPng(page: import("@playwright/test").Page): Promise<number[]
   ]);
 }
 
-/** Drag on the canvas, in canvas coordinates. */
+/**
+ * Where an image coordinate is on screen right now, in client pixels.
+ *
+ * For the specs that hold a drag open across several assertions and so cannot
+ * use `drag`. The same conversion, exposed once rather than copied.
+ */
+async function imagePoint(
+  page: import("@playwright/test").Page,
+  point: [number, number],
+): Promise<[number, number]> {
+  return page.evaluate((at) => {
+    const canvas = document.querySelector(".editor__canvas");
+    const frame = document.querySelector<HTMLElement>(".editor");
+    if (!canvas || !frame) throw new Error("the editor is not on screen");
+    const box = canvas.getBoundingClientRect();
+    const scale = Number(frame.dataset["scale"]);
+    return [
+      box.x + (at[0] - Number(frame.dataset["originX"])) * scale,
+      box.y + (at[1] - Number(frame.dataset["originY"])) * scale,
+    ] as [number, number];
+  }, point);
+}
+
+/**
+ * The part of the capture being edited: the whole picture until a crop, and
+ * the crop afterwards. In image pixels, like every coordinate here.
+ *
+ * Read from the frame rather than measured off the canvas. The canvas is a
+ * *viewport* — it is the stage's size and shows whatever the view is over — so
+ * measuring it answers "how much could I see", which is a different question
+ * and a bigger number whenever the capture is smaller than the window.
+ */
+async function region(page: import("@playwright/test").Page): Promise<{
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}> {
+  return page.evaluate(() => {
+    const frame = document.querySelector<HTMLElement>(".editor");
+    if (!frame) throw new Error("the editor is not on screen");
+    return {
+      x: Number(frame.dataset["regionX"]),
+      y: Number(frame.dataset["regionY"]),
+      width: Number(frame.dataset["regionWidth"]),
+      height: Number(frame.dataset["regionHeight"]),
+    };
+  });
+}
+
+/**
+ * Drag on the canvas, in **image** coordinates.
+ *
+ * Image pixels rather than stage pixels, because that is the space a mark is
+ * stored in and the only one that means the same thing at every zoom. The
+ * conversion reads the view off `.editor`'s dataset — the inverse of the
+ * transform `render` draws under.
+ *
+ * These were stage coordinates once, which worked only because Fit used to
+ * enlarge a small capture until it filled the window: the fixtures are 320×180
+ * and smaller, so a point 30px from the canvas's corner happened to land on
+ * the picture. Capping Fit at actual size — which is what every image viewer
+ * does, and what the live run showed this one should — put the picture in the
+ * middle with letterbox around it, and five drags started landing on nothing
+ * at all.
+ */
 async function drag(
   page: import("@playwright/test").Page,
   from: [number, number],
   to: [number, number],
 ): Promise<void> {
-  const box = await page.locator(".editor__canvas").boundingBox();
-  expect(box).not.toBeNull();
-  await page.mouse.move(box!.x + from[0], box!.y + from[1]);
+  const at = await page.evaluate(
+    ({ from, to }) => {
+      const canvas = document.querySelector(".editor__canvas");
+      const frame = document.querySelector<HTMLElement>(".editor");
+      if (!canvas || !frame) throw new Error("the editor is not on screen");
+      const box = canvas.getBoundingClientRect();
+      const scale = Number(frame.dataset["scale"]);
+      const originX = Number(frame.dataset["originX"]);
+      const originY = Number(frame.dataset["originY"]);
+      const stage = (point: [number, number]): [number, number] => [
+        box.x + (point[0] - originX) * scale,
+        box.y + (point[1] - originY) * scale,
+      ];
+      return { from: stage(from), to: stage(to) };
+    },
+    { from, to },
+  );
+
+  await page.mouse.move(at.from[0], at.from[1]);
   await page.mouse.down();
-  await page.mouse.move(box!.x + to[0], box!.y + to[1], { steps: 4 });
+  await page.mouse.move(at.to[0], at.to[1], { steps: 4 });
   await page.mouse.up();
 }
-
-test("the edit control appears for exactly one picked capture", async ({ page }) => {
-  await bootShelf(page);
-  await land(page, FIXTURE.wide, { ts: 1 });
-  await land(page, FIXTURE.tall, { ts: 2 });
-  await openBrowse(page);
-
-  await expect(page.locator("#shelf-edit")).toBeHidden();
-  await page.keyboard.press("ArrowDown");
-  await expect(page.locator("#shelf-edit")).toBeVisible();
-
-  // There is no such thing as marking up two captures at once.
-  //
-  // Picked by ctrl-clicking rather than with Shift+Arrow: the arrows ignore
-  // the shift key and every move ends in a selection of exactly one, so the
-  // gesture this used to use could not reach two captures at all — and the
-  // half of the test that mattered had no assertion after it either way.
-  const cards = page.locator(".tile");
-  await cards.nth(0).click();
-  await cards.nth(1).click({ modifiers: ["ControlOrMeta"] });
-  await expect(page.locator("#shelf-edit")).toBeHidden();
-  // Two is the number that offers a comparison instead.
-  await expect(page.locator("#shelf-compare")).toBeVisible();
-});
-
 test("the editor offers exactly the five tools", async ({ page }) => {
   await openEditor(page);
 
@@ -215,18 +276,25 @@ test("a mark is saved as a new capture, leaving the original alone", async ({ pa
   expect(png.length).toBeGreaterThan(100);
   expect(png.slice(0, 4)).toEqual([0x89, 0x50, 0x4e, 0x47]);
 
-  // The edit joins the shelf; the capture it came from is still there.
-  await expect(page.locator(".tile")).toHaveCount(2);
+  // The saved edit joining the shelf is the shelf's half of this, asserted in
+  // `editor-open.spec.ts` against `capture://edited` — this window holds no
+  // list of captures to check. Here the window closes itself instead, which is
+  // the editor's whole part in finishing.
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("hide_editor").length))
+    .toBe(1);
 });
 
 test("a redaction destroys the pixels rather than drawing over them", async ({ page }) => {
   await openEditor(page);
   await page.locator('.editor__tool[data-tool="redact"]').click();
-  await drag(page, [20, 20], [190, 105]);
 
-  // Measured before saving: Save closes the editor, taking the canvas with it.
-  const shown = await page.locator(".editor__canvas").boundingBox();
-  expect(shown).not.toBeNull();
+  // A rectangle around the middle of the capture — `wide.png` is 320×180 —
+  // and sampled out of the *saved file* by fraction rather than by mapping
+  // canvas coordinates into it. That mapping is what this test used to do, and
+  // it stopped being true when the canvas became a viewport: it is the stage's
+  // size now, with the picture placed inside it by the view.
+  await drag(page, [90, 50], [230, 130]);
 
   await page.locator("#editor-save").click();
   await expect
@@ -243,49 +311,39 @@ test("a redaction destroys the pixels rather than drawing over them", async ({ p
   // every CI runner while working locally. They have no reason to cross the
   // boundary: the assertion is about what is in the file, and the file is
   // already in the page.
-  //
-  // The sample point is derived from the canvas the drag actually happened on,
-  // rather than from an assumed size — the window is sized by Rust, so the
-  // canvas is whatever fits, and a hard-coded width samples the wrong pixel.
-  const covered = await page.evaluate(
-    async ({ width, height }: { width: number; height: number }) => {
-      const bytes = window.__shotshelf__.callsTo("save_edit").at(-1)?.body;
-      if (!bytes?.length) throw new Error("nothing was saved");
+  const covered = await page.evaluate(async () => {
+    const bytes = window.__shotshelf__.callsTo("save_edit").at(-1)?.body;
+    if (!bytes?.length) throw new Error("nothing was saved");
 
-      const blob = new Blob([new Uint8Array(bytes).slice()], { type: "image/png" });
-      const bitmap = await createImageBitmap(blob);
-      const canvas = document.createElement("canvas");
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("no 2d context");
-      context.drawImage(bitmap, 0, 0);
+    const blob = new Blob([new Uint8Array(bytes).slice()], { type: "image/png" });
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("no 2d context");
+    context.drawImage(bitmap, 0, 0);
 
-      const at = (x: number, y: number): [number, number, number, number] => {
-        const data = context.getImageData(
-          Math.round((x / width) * bitmap.width),
-          Math.round((y / height) * bitmap.height),
-          1,
-          1,
-        ).data;
-        return [data[0] ?? 0, data[1] ?? 0, data[2] ?? 0, data[3] ?? 0];
-      };
+    /** A pixel of the saved image, by fraction of its own dimensions. */
+    const at = (fx: number, fy: number): [number, number, number, number] => {
+      const data = context.getImageData(
+        Math.min(bitmap.width - 1, Math.round(fx * bitmap.width)),
+        Math.min(bitmap.height - 1, Math.round(fy * bitmap.height)),
+        1,
+        1,
+      ).data;
+      return [data[0] ?? 0, data[1] ?? 0, data[2] ?? 0, data[3] ?? 0];
+    };
 
-      // Inside the drag, and outside it on all four sides.
-      //
-      // The drag is [20, 20] → [190, 105], and each axis converts by its own
-      // ratio: the element can be letterboxed by `max-height`, so the two are
-      // not the same number.
-      return {
-        inside: at(105, 62),
-        above: at(105, 8),
-        below: at(105, height - 6),
-        left: at(6, 62),
-        right: at(width - 6, 62),
-      };
-    },
-    { width: shown!.width, height: shown!.height },
-  );
+    // The centre of the drag, and the four edges well outside it.
+    return {
+      inside: at(0.5, 0.5),
+      above: at(0.5, 0.02),
+      below: at(0.5, 0.98),
+      left: at(0.02, 0.5),
+      right: at(0.98, 0.5),
+    };
+  });
 
   // Opaque and near-black: the fill, not the fixture's blue gradient.
   expect(covered.inside[3]).toBe(255);
@@ -329,173 +387,6 @@ test("undo takes back the last mark", async ({ page }) => {
   const undone = await inkAt(page, 25, 25);
   expect(undone).toEqual(clean);
 });
-
-test("escape backs out of the editor before it backs out of the shelf", async ({ page }) => {
-  await openEditor(page);
-  await page.evaluate(() => window.__shotshelf__.clearCalls());
-
-  await page.keyboard.press("Escape");
-  await expect(page.locator(".editor")).toHaveCount(0);
-  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
-
-  await page.keyboard.press("Escape");
-  await expect
-    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length))
-    .toBe(1);
-});
-
-test("the shelf keys do not reach the list while the editor is open", async ({ page }) => {
-  await openEditor(page);
-
-  // Delete belongs to the editor's surface here, not to the shelf underneath.
-  await page.keyboard.press("Delete");
-  await page.keyboard.press("Escape");
-
-  await expect(page.locator(".tile")).toHaveCount(1);
-});
-
-test("a capture landing mid-annotation does not destroy the editor", async ({ page }) => {
-  // The editor used to be a child of the card list, which the view rebuilds
-  // wholesale on every render — so any capture arriving while you were marking
-  // one up removed the editor from under you, silently, leaving the module
-  // pointing at a detached node and the keyboard stuck in editor mode.
-  await openEditor(page);
-  await drag(page, [30, 25], [170, 95]);
-
-  await land(page, FIXTURE.tall, { ts: 99 });
-
-  await expect(page.locator(".editor__canvas")).toBeVisible();
-  // And it is still the editor: Escape acts on it rather than the shelf.
-  // A mark was drawn above, so the first Escape warns instead of discarding
-  // — silent discard was reachable from four routes — and the second, inside
-  // the window, closes. Neither may fall through to hiding the shelf.
-  await page.evaluate(() => window.__shotshelf__.clearCalls());
-  await page.keyboard.press("Escape");
-  await expect(page.locator("#shelf-alert")).toHaveText(/unsaved marks/);
-  await expect(page.locator(".editor")).toHaveCount(1);
-  await page.keyboard.press("Escape");
-  await expect(page.locator(".editor")).toHaveCount(0);
-  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
-});
-
-test("holding the edit key does not stack editors", async ({ page }) => {
-  await bootShelf(page);
-  await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", [220, 124]));
-  await land(page, FIXTURE.wide);
-  await openBrowse(page);
-  await page.keyboard.press("ArrowDown");
-
-  // Key auto-repeat puts a keydown inside every await of the open sequence,
-  // and `live` is undefined for all of them.
-  for (let press = 0; press < 5; press += 1) await page.keyboard.press("e");
-
-  await expect(page.locator(".editor")).toHaveCount(1);
-});
-
-test("holding space does not stack previews", async ({ page }) => {
-  await bootShelf(page);
-  await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", [220, 124]));
-  await land(page, FIXTURE.wide);
-  await openBrowse(page);
-  await page.keyboard.press("ArrowDown");
-
-  for (let press = 0; press < 5; press += 1) await page.keyboard.press(" ");
-
-  // An odd number of presses leaves it open, so this is exactly one. It used
-  // to allow "one or fewer", which passes at zero — i.e. it would have passed
-  // with the quick look deleted outright, and it is the regression test for
-  // the guard that stops presses stacking.
-  await expect(page.locator(".preview")).toHaveCount(1);
-});
-
-test("closing the editor gives the window back", async ({ page }) => {
-  // The editor grows the window to show one capture large. Nothing put it
-  // back: after every annotation the always-on-top shelf sat centred at 72% of
-  // the screen showing a 225px column of cards until it was hidden and
-  // reopened. The quick look next door always restored it, which is what made
-  // the gap invisible — the behaviour existed, just not on this path.
-  await openEditor(page);
-  await page.evaluate(() => window.__shotshelf__.clearCalls());
-
-  await page.keyboard.press("Escape");
-  await expect(page.locator(".editor")).toHaveCount(0);
-
-  const restored = await page.evaluate(() =>
-    window.__shotshelf__.callsTo("show_shelf").map((call) => call.args["focus"]),
-  );
-  expect(restored).toEqual([true]);
-});
-
-test("saving gives the window back too", async ({ page }) => {
-  await openEditor(page);
-  await drag(page, [30, 25], [170, 95]);
-  await page.evaluate(() => window.__shotshelf__.clearCalls());
-
-  await page.locator("#editor-save").click();
-  await expect(page.locator(".editor")).toHaveCount(0);
-
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          window.__shotshelf__.callsTo("show_shelf").filter((call) => call.args["focus"] === true)
-            .length,
-      ),
-    )
-    .toBe(1);
-});
-
-test("hiding the shelf takes the editor with it", async ({ page }) => {
-  // The overlay was given a lifetime of its own so the list could rebuild
-  // underneath it, and then nothing ended that lifetime. An editor survived
-  // the hide, and the next capture popped a column with a stale canvas painted
-  // across it — untouchable, because a popped column never takes focus, so
-  // Escape could not reach the thing covering it either.
-  await openEditor(page);
-  await page.evaluate(() => window.__shotshelf__.clearCalls());
-
-  await page.evaluate((event) => window.__shotshelf__.emit(event, null), HIDDEN_EVENT);
-  await expect(page.locator(".editor")).toHaveCount(0);
-
-  // And it must not ask for the window back on the way out — the user just
-  // put it away.
-  expect(await page.evaluate(() => window.__shotshelf__.callsTo("show_shelf").length)).toBe(0);
-
-  // The next capture pops a column showing just that capture — and the card
-  // is actually reachable, which is the part that broke: a hit test at the
-  // centre of the card used to land on the stale `.editor__canvas` over it.
-  await land(page, FIXTURE.tall, { ts: 99 });
-  await expect(page.locator(".tile")).toHaveCount(1);
-  await expect(page.locator(".editor")).toHaveCount(0);
-  expect(await hitTest(page, ".tile")).toBe(true);
-});
-
-test("hiding the shelf takes the quick look with it", async ({ page }) => {
-  await bootShelf(page);
-  await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", null));
-  await land(page, FIXTURE.wide);
-  await openBrowse(page);
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press(" ");
-  await expect(page.locator(".preview")).toHaveCount(1);
-
-  await page.evaluate((event) => window.__shotshelf__.emit(event, null), HIDDEN_EVENT);
-  await expect(page.locator(".preview")).toHaveCount(0);
-});
-
-test("the title strip stays usable while the editor is up", async ({ page }) => {
-  // The overlay is absolutely positioned, and it was stretched across the
-  // whole panel rather than across the list. On a frameless window that strip
-  // is the only drag handle there is, and Hide and Settings live in it — so
-  // opening the editor made the window unmovable and both buttons dead.
-  await openEditor(page);
-  await expect(page.locator(".editor")).toHaveCount(1);
-
-  expect(await hitTest(page, "#shelf-hide")).toBe(true);
-  expect(await hitTest(page, "#shelf-settings")).toBe(true);
-  expect(await hitTest(page, ".shelf__bar")).toBe(true);
-});
-
 test("a save that fails says so where the user can see it", async ({ page }) => {
   // The editor's redact tool destroys pixels and the docs sell it as
   // permanent, so a failed save is the one failure here that must never be
@@ -508,22 +399,26 @@ test("a save that fails says so where the user can see it", async ({ page }) => 
 
   await page.locator("#editor-save").click();
 
-  // The message itself, not merely that the strip is showing something. The
-  // harness boots with no watch folders, so start-up writes "No capture
-  // folders found" to this strip — which made `toBeVisible()` true for the
-  // whole session and this test pass with the save's failure report deleted.
-  const alert = page.locator("#shelf-alert");
+  // This window's own strip, not the shelf's. The report used to travel back
+  // to `#shelf-alert` through a callback, which is exactly what the editor
+  // having its own window makes impossible — and it is a plain improvement:
+  // the message now appears on the surface the user is looking at rather than
+  // on a 225px popover behind it.
+  const alert = page.locator("#editor-note");
   await expect(alert).toHaveText(/could not be saved/);
   // `toHaveText` reads textContent and says nothing about visibility — a
   // `display: none` strip with the right words in it satisfies it. Both halves
   // are needed: the text catches a missing report, the visibility catches one
-  // that is painted out of existence.
+  // that is painted out of existence. The hit test is the third: `.editor` is
+  // `position: absolute; inset: 0` over this whole page, so a strip *under* it
+  // would satisfy both of the above and be unreadable.
   await expect(alert).toBeVisible();
-  expect(await hitTest(page, "#shelf-alert")).toBe(true);
-  // And the *marks* are still there to try again with, which is what the
-  // message promises. Asserting the frame count alone would pass with the
-  // session cleared out from under it.
+  expect(await hitTest(page, "#editor-note")).toBe(true);
+  // The window stays up, and the *marks* are still there to try again with,
+  // which is what the message promises. Asserting the frame count alone would
+  // pass with the session cleared out from under it.
   await expect(page.locator(".editor")).toHaveCount(1);
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_editor").length)).toBe(0);
   expect(await inkAt(page, 30, 25)).toEqual(marked);
 });
 
@@ -558,51 +453,6 @@ test("the canvas fits the stage it is given, on both axes", async ({ page }) => 
   expect(cropped.bufferTaller).toBeLessThanOrEqual(1);
   expect(cropped.bufferWider).toBeLessThanOrEqual(1);
 });
-
-test("escape during a slow open cancels it instead of dismissing the shelf", async ({ page }) => {
-  // `editorIsOpen()` goes true the instant an open begins, but the close paths
-  // bailed on "nothing is live yet" — so Escape fell straight through to
-  // dismissing the popover, and the editor then mounted itself into a window
-  // that was no longer on screen.
-  await bootShelf(page);
-  await page.evaluate(() => window.__shotshelf__.hang("preview_shelf"));
-  await land(page, FIXTURE.wide);
-  await openBrowse(page);
-  await page.keyboard.press("ArrowDown");
-
-  await page.keyboard.press("e");
-  await page.keyboard.press("Escape");
-
-  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
-  await expect(page.locator(".editor")).toHaveCount(0);
-});
-
-test("a capture that will not open reports rather than doing nothing", async ({ page }) => {
-  // The Edit control is offered for any single picked capture, including one
-  // whose file has since been emptied out of the Recycle Bin. The open failed
-  // and returned in silence, so the button simply looked broken.
-  //
-  // The message names no single cause, and neither does this. `readable`
-  // answers the same `undefined` for a missing file, a decode failure, a
-  // fifteen-second timeout on a disconnected share, and an asset-protocol
-  // refusal — so "its file is gone", which this used to assert, was a claim the
-  // code cannot support, and `src/shelf/view/preview.ts` opens the same capture on the
-  // same value.
-  await bootShelf(page);
-  await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", null));
-  await land(page, FIXTURE.missing);
-  await openBrowse(page);
-  await page.keyboard.press("ArrowDown");
-
-  await page.locator("#shelf-edit").click();
-
-  // Asserted on the text for the same reason as above: the boot message made
-  // "the strip is visible" true before this test did anything at all.
-  await expect(page.locator("#shelf-alert")).toHaveText(/could not be opened/);
-  await expect(page.locator("#shelf-alert")).toBeVisible();
-  await expect(page.locator(".editor")).toHaveCount(0);
-});
-
 test("a double click on save writes one file", async ({ page }) => {
   await openEditor(page);
   await drag(page, [30, 25], [170, 95]);
@@ -624,133 +474,6 @@ test("a double click on save writes one file", async ({ page }) => {
   // had its chance before the count means anything.
   await page.waitForTimeout(200);
   expect(await page.evaluate(() => window.__shotshelf__.callsTo("save_edit").length)).toBe(1);
-});
-
-// ── The popped column ─────────────────────────────────────────────────────
-//
-// Every test above reaches the editor through `openBrowse`. None of them did
-// before either, which is how two blockers lived here: the column shape hides
-// the alert strip, and the column's expiry timer dismisses the window. Both
-// are reachable by an ordinary sequence — a capture lands, you click the card,
-// you press `e`.
-
-/** Open the editor the way a user does when a capture has just landed. */
-async function openEditorFromColumn(
-  page: import("@playwright/test").Page,
-  options: { fakeClock?: boolean } = {},
-): Promise<void> {
-  // Installed before `bootShelf`, which is the only order that works: the app
-  // captures `setTimeout` at module evaluation.
-  if (options.fakeClock) await page.clock.install();
-  await bootShelf(page);
-  await page.evaluate(() => {
-    window.__shotshelf__.respond("preview_shelf", null);
-    window.__shotshelf__.respond("save_edit", "/edits/wide (edited).png");
-  });
-  // No `openBrowse`: this is the auto-popup column.
-  await land(page, FIXTURE.wide);
-  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
-
-  await page.locator(".tile").first().click();
-  await page.keyboard.press("e");
-  await expect(page.locator(".editor__canvas")).toBeVisible();
-}
-
-test("opening the editor from the column puts the shelf into the browse shape", async ({
-  page,
-}) => {
-  // `window::preview` sets Rust's "opened" flag; this event is the only thing
-  // that tells the front-end. Without it the shelf kept rendering its column
-  // shape around a full-size editor — which is what made both blockers below
-  // reachable at all.
-  await openEditorFromColumn(page);
-  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "browse");
-});
-
-test("a failed save is visible when the editor was opened from the column", async ({ page }) => {
-  // On a fake clock, because the thing being asserted takes itself down after
-  // twelve seconds of *real* time — `status.ts`'s `ALERT_MS`. Without it this
-  // spec is a race between the assertion and the strip's own timer, and it lost
-  // that race under parallel load: it failed once in a full run and passed on
-  // every isolated re-run. `playwright.config.ts` says a gate that passes on a
-  // retry is not a gate, so the dependency is removed rather than retried.
-  await openEditorFromColumn(page, { fakeClock: true });
-  await drag(page, [30, 25], [170, 95]);
-  await page.evaluate(() => window.__shotshelf__.reject("save_edit", "the disk is full"));
-
-  await page.locator("#editor-save").click();
-
-  // The redact tool destroys pixels and the docs sell it as permanent. This
-  // message was being written correctly and painted out of existence by
-  // `.shelf[data-mode="column"] .shelf__alert { display: none }`.
-  await expect(page.locator("#shelf-alert")).toHaveText(/could not be saved/);
-  await expect(page.locator("#shelf-alert")).toBeVisible();
-  await expect(page.locator(".editor")).toHaveCount(1);
-});
-
-test("the column's timer does not tear down an open editor", async ({ page }) => {
-  // Note what this actually covers: the **mode** guard, not the overlay veto.
-  //
-  // `openEditorFromColumn` stubs `preview_shelf`, a successful `preview_shelf`
-  // emits `shelf://opened`, and that puts the shelf in the browse shape — so
-  // `#ageColumn` returns on `this.#mode !== "column"` before it ever reaches
-  // `if (this.overlayOpen) return;`. Deleting the overlay veto leaves this
-  // test green. The veto is belt to that brace, and the test below is the one
-  // that holds it.
-  await openEditorFromColumn(page, { fakeClock: true });
-  await drag(page, [30, 25], [170, 95]);
-  await page.evaluate(() => window.__shotshelf__.clearCalls());
-
-  // Well past the card's minute, with the pointer off the window so no hold
-  // is keeping the column alive. The clock is a real installed fake — without
-  // `clock.install()` before boot, `runFor` advances nothing and the test
-  // asserts that 0 ms of ageing changed nothing.
-  await page.mouse.move(0, 0);
-  await page.clock.runFor(70_000);
-
-  await expect(page.locator(".editor__canvas")).toBeVisible();
-  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
-});
-
-test("the edit control is out of reach while the editor is open", async ({ page }) => {
-  // The overlay deliberately does not cover the title strip — that is the
-  // window's only drag handle — so Edit and Compare stayed live and clickable
-  // behind an open editor. One click discarded every unsaved mark, silently:
-  // `openEditor` treated "already open" as "replace me", and the `editing`
-  // guard existed twice on the keyboard path and on neither click path.
-  await openEditor(page);
-  await drag(page, [30, 25], [170, 95]);
-
-  await expect(page.locator("#shelf-edit")).toBeHidden();
-  // No `#shelf-compare` assertion here: this test opens the editor with one
-  // capture picked, so `comparable` is already false and asserting it hidden
-  // holds whether or not the overlay is part of the expression. The test below
-  // is the one that can fail.
-
-  // And even reached directly — the handler, not the button — it refuses
-  // rather than replacing. Dispatched programmatically because Playwright
-  // will not click a hidden element even with `force`, which is itself the
-  // first lock working.
-  //
-  // Asserted on the *mark*, not on the editor count. An earlier version
-  // checked that one editor existed with Undo visible — which a replacement
-  // editor satisfies exactly, so it passed with the refuse-guard reverted.
-  // That guard is the half of the fix which does not depend on remembering to
-  // hide the button, and it was the half nothing checked.
-  const marked = await inkAt(page, 30, 25);
-  await page.evaluate(() => document.querySelector<HTMLButtonElement>("#shelf-edit")?.click());
-  await expect(page.locator(".editor")).toHaveCount(1);
-  expect(await inkAt(page, 30, 25)).toEqual(marked);
-
-  // And the refused open left no trace on the editor that survived. Keying
-  // the post-mount work off "is anything live" rather than "did *this* call
-  // mount" bound a second set of pointer handlers to the same canvas, after
-  // which one drag committed two marks and one undo took back half of it.
-  const clean = await inkAt(page, 55, 55);
-  await drag(page, [55, 55], [120, 85]);
-  expect(await inkAt(page, 55, 55)).not.toEqual(clean);
-  await page.locator("#editor-undo").click();
-  expect(await inkAt(page, 55, 55)).toEqual(clean);
 });
 
 test("a save still in flight cannot tear down a later editor", async ({ page }) => {
@@ -776,14 +499,24 @@ test("a save still in flight cannot tear down a later editor", async ({ page }) 
   );
   await page.locator("#editor-save").click();
 
-  // Back out while that save is still outstanding, then open another.
-  await page.keyboard.press("Escape");
-  await expect(page.locator(".editor")).toHaveCount(0);
-  await page.keyboard.press("e");
-  await expect(page.locator(".editor__canvas")).toBeVisible();
+  // Switch to another capture while that save is still outstanding. The window
+  // stays up now — it is the same window showing something else — so this is
+  // the *ordinary* way to reach the race rather than the exotic one it used to
+  // be, and the ticket that guards it matters more, not less.
+  await page.evaluate(
+    ([event, path]) => window.__shotshelf__.emit(event, path),
+    [EDITOR_OPEN_EVENT, FIXTURE.tall] as const,
+  );
+  // It asks first, because the marks are still unsaved until that slow save
+  // lands — which is exactly the window this race lives in. Discarding is the
+  // answer that reproduces it: it tears the first session down while its save
+  // is still in the air.
+  await page.locator(".editor__ask button", { hasText: "Discard and open" }).click();
+  await expect(page.locator(".editor")).toHaveAttribute("data-capture", FIXTURE.tall);
   await drag(page, [40, 30], [120, 80]);
+  const marked = await inkAt(page, 45, 35);
 
-  // Let the first save land on top of the second editor.
+  // Let the first save land on top of the second capture.
   await expect
     .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("save_edit").length), {
       timeout: 5000,
@@ -791,58 +524,12 @@ test("a save still in flight cannot tear down a later editor", async ({ page }) 
     .toBeGreaterThan(0);
   await page.waitForTimeout(1200);
 
-  await expect(page.locator(".editor")).toHaveCount(1);
+  // Still showing the second capture, still holding its mark, and the window
+  // was never hidden out from under it.
+  await expect(page.locator(".editor")).toHaveAttribute("data-capture", FIXTURE.tall);
+  expect(await inkAt(page, 45, 35)).toEqual(marked);
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_editor").length)).toBe(0);
 });
-
-test("backing out of a slow open leaves the keyboard working", async ({ page }) => {
-  // `editorIsOpen()` reports `opening`, and the keydown handler routes on it,
-  // so a cancelled open that stayed "opening" until its 15-second deadline
-  // left the whole shelf keyboard dead — with Escape itself swallowed.
-  await bootShelf(page);
-  await page.evaluate(() => window.__shotshelf__.hang("preview_shelf"));
-  await land(page, FIXTURE.wide);
-  await openBrowse(page);
-  await page.keyboard.press("ArrowDown");
-
-  await page.keyboard.press("e");
-  await page.keyboard.press("Escape");
-  await page.evaluate(() => window.__shotshelf__.clearCalls());
-
-  // Enter copies the picked capture. If the keyboard is dead this does nothing.
-  await page.keyboard.press("Enter");
-  await expect
-    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("copy_capture").length))
-    .toBe(1);
-});
-
-test("a quick look then an editor that will not open gives the window back", async ({ page }) => {
-  // `editPicked` tears the quick look down with `discardPreview`, which owes no
-  // restore by contract — so when the editor then refused, the always-on-top
-  // window was left at 72% of the screen with a 225px list inside it.
-  await bootShelf(page);
-  await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", null));
-  await land(page, FIXTURE.missing);
-  await openBrowse(page);
-  await page.keyboard.press("ArrowDown");
-
-  await page.keyboard.press(" ");
-  await expect(page.locator(".preview")).toHaveCount(1);
-  await page.evaluate(() => window.__shotshelf__.clearCalls());
-
-  // The file is gone, so the editor reports and never grows the window.
-  await page.keyboard.press("e");
-
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          window.__shotshelf__.callsTo("show_shelf").filter((c) => c.args["focus"] === true).length,
-      ),
-    )
-    .toBeGreaterThan(0);
-  await expect(page.locator(".editor")).toHaveCount(0);
-});
-
 test("the crop guide dims around the selection without erasing it", async ({ page }) => {
   // `clearRect` on the selection made those pixels transparent, and there is
   // no layer underneath — the capture was painted onto this same canvas, and
@@ -852,21 +539,24 @@ test("the crop guide dims around the selection without erasing it", async ({ pag
   await openEditor(page);
   await page.locator('.editor__tool[data-tool="crop"]').click();
 
-  const box = await page.locator(".editor__canvas").boundingBox();
-  expect(box).not.toBeNull();
-  const inside: [number, number] = [box!.width * 0.5, box!.height * 0.5];
+  // Image coordinates throughout, so the samples mean the same thing at any
+  // zoom and whatever the window's shape.
+  const span = await region(page);
+  const inside: [number, number] = [span.x + span.width * 0.5, span.y + span.height * 0.5];
 
   // Outside the selection, which is the half this test is named for and did
   // not check. Both samples are taken before and during the drag.
-  const outside: [number, number] = [box!.width * 0.08, box!.height * 0.5];
+  const outside: [number, number] = [span.x + span.width * 0.08, span.y + span.height * 0.5];
 
   const before = await inkAt(page, ...inside);
   const beforeOutside = await inkAt(page, ...outside);
 
   // Hold a crop drag open across the middle of the capture.
-  await page.mouse.move(box!.x + box!.width * 0.25, box!.y + box!.height * 0.25);
+  const from = await imagePoint(page, [span.x + span.width * 0.25, span.y + span.height * 0.25]);
+  const to = await imagePoint(page, [span.x + span.width * 0.75, span.y + span.height * 0.75]);
+  await page.mouse.move(from[0], from[1]);
   await page.mouse.down();
-  await page.mouse.move(box!.x + box!.width * 0.75, box!.y + box!.height * 0.75, { steps: 6 });
+  await page.mouse.move(to[0], to[1], { steps: 6 });
 
   const guided = await inkAt(page, ...inside);
   const guidedOutside = await inkAt(page, ...outside);
@@ -906,20 +596,31 @@ test("the crop guide still frames the selection on a second crop", async ({ page
   await openEditor(page);
   await page.locator('.editor__tool[data-tool="crop"]').click();
 
-  const whole = await page.locator(".editor__canvas").boundingBox();
-  expect(whole).not.toBeNull();
-  await drag(page, [whole!.width * 0.5, whole!.height * 0.5], [whole!.width * 0.98, whole!.height * 0.98]);
+  const whole = await region(page);
+  await drag(
+    page,
+    [whole.width * 0.5, whole.height * 0.5],
+    [whole.width * 0.98, whole.height * 0.98],
+  );
 
-  // The canvas is resized to the crop, so everything below re-measures.
-  const box = await page.locator(".editor__canvas").boundingBox();
-  expect(box).not.toBeNull();
-  const inside: [number, number] = [box!.width * 0.5, box!.height * 0.5];
+  // The view is refitted to the crop, so everything below re-measures — and
+  // the crop's own origin is *not* zero, which is the whole point of this
+  // spec. Image coordinates are capture-absolute, so the samples below are
+  // offset by that origin rather than starting from it.
+  // The crop's own origin is *not* zero, which is the whole point of this
+  // spec: image coordinates are capture-absolute, so everything below is
+  // offset by `span.x`/`span.y` rather than starting from them.
+  const span = await region(page);
+  expect(span.x).toBeGreaterThan(0);
+  const inside: [number, number] = [span.x + span.width * 0.5, span.y + span.height * 0.5];
 
   const before = await inkAt(page, ...inside);
 
-  await page.mouse.move(box!.x + box!.width * 0.2, box!.y + box!.height * 0.2);
+  const from = await imagePoint(page, [span.x + span.width * 0.2, span.y + span.height * 0.2]);
+  const to = await imagePoint(page, [span.x + span.width * 0.8, span.y + span.height * 0.8]);
+  await page.mouse.move(from[0], from[1]);
   await page.mouse.down();
-  await page.mouse.move(box!.x + box!.width * 0.8, box!.y + box!.height * 0.8, { steps: 6 });
+  await page.mouse.move(to[0], to[1], { steps: 6 });
 
   const guided = await inkAt(page, ...inside);
   await page.mouse.up();
@@ -940,10 +641,9 @@ test("the mark under the pointer looks like the mark that lands", async ({ page 
   await openEditor(page);
   await page.locator('.editor__tool[data-tool="box"]').click();
 
-  const box = await page.locator(".editor__canvas").boundingBox();
-  expect(box).not.toBeNull();
-  const from: [number, number] = [box!.width * 0.25, box!.height * 0.3];
-  const to: [number, number] = [box!.width * 0.75, box!.height * 0.7];
+  const span = await region(page);
+  const from: [number, number] = [span.x + span.width * 0.25, span.y + span.height * 0.3];
+  const to: [number, number] = [span.x + span.width * 0.75, span.y + span.height * 0.7];
   // Sampled one pixel outside the rectangle's starting corner.
   //
   // What this can and cannot see, stated because it was measured.
@@ -957,49 +657,19 @@ test("the mark under the pointer looks like the mark that lands", async ({ page 
   // pixel after antialiasing, and neither an edge nor a corner sample can tell
   // them apart. That is worth knowing rather than papering over: the sharing
   // is still right, and this test guards the part of it that is observable.
-  const atCorner: [number, number] = [box!.width * 0.25 - 1, box!.height * 0.3 - 1];
+  const atCorner: [number, number] = [from[0] - 1, from[1] - 1];
 
-  await page.mouse.move(box!.x + from[0], box!.y + from[1]);
+  const start = await imagePoint(page, from);
+  const end = await imagePoint(page, to);
+  await page.mouse.move(start[0], start[1]);
   await page.mouse.down();
-  await page.mouse.move(box!.x + to[0], box!.y + to[1], { steps: 6 });
+  await page.mouse.move(end[0], end[1], { steps: 6 });
   const previewed = await inkAt(page, ...atCorner);
   await page.mouse.up();
   const committed = await inkAt(page, ...atCorner);
 
   expect(previewed).toEqual(committed);
 });
-
-test("the column's timer does not tear down an editor that is still opening", async ({ page }) => {
-  // The overlay veto in `#ageColumn`, on its own — the only state where it is
-  // the thing standing between a timer and someone's unsaved work.
-  //
-  // Reaching it takes a shelf still in the *column* shape with an overlay up,
-  // and a successful `preview_shelf` leaves the browse shape behind. So this
-  // hangs `preview_shelf`: no answer means no `shelf://opened`, the mode stays
-  // "column", and `Overlay.isOpen` is true for the whole in-flight span — which
-  // is exactly what that getter exists to express. The editor is *opening*, and
-  // the column's minute is up.
-  await page.clock.install();
-  await bootShelf(page);
-  await page.evaluate(() => window.__shotshelf__.hang("preview_shelf"));
-  await land(page, FIXTURE.wide);
-  await expect(page.locator(".tile")).toHaveCount(1);
-  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
-
-  // Through the keyboard, not the button: the column shape hides the title
-  // strip, so `#shelf-edit` is present and unclickable there.
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("e");
-  await page.evaluate(() => window.__shotshelf__.clearCalls());
-
-  await page.mouse.move(0, 0);
-  await page.clock.runFor(70_000);
-
-  // The shelf must not put itself away underneath an overlay that is coming.
-  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_shelf").length)).toBe(0);
-  await expect(page.locator(".shelf")).toHaveAttribute("data-mode", "column");
-});
-
 test("a redaction previews as what it will do, not as a box around it", async ({ page }) => {
   // Every tool drew the same hollow amber rectangle while dragging, so the one
   // irreversible operation in the app looked exactly like Box until release —
@@ -1009,15 +679,16 @@ test("a redaction previews as what it will do, not as a box around it", async ({
   await openEditor(page);
   await page.locator('.editor__tool[data-tool="redact"]').click();
 
-  const box = await page.locator(".editor__canvas").boundingBox();
-  expect(box).not.toBeNull();
-  const middle: [number, number] = [box!.width * 0.5, box!.height * 0.5];
+  const span = await region(page);
+  const middle: [number, number] = [span.x + span.width * 0.5, span.y + span.height * 0.5];
 
   // Held open mid-drag, which is the whole point: this is about what is on
   // screen while the pointer is still down.
-  await page.mouse.move(box!.x + box!.width * 0.25, box!.y + box!.height * 0.25);
+  const start = await imagePoint(page, [span.x + span.width * 0.25, span.y + span.height * 0.25]);
+  const end = await imagePoint(page, [span.x + span.width * 0.75, span.y + span.height * 0.75]);
+  await page.mouse.move(start[0], start[1]);
   await page.mouse.down();
-  await page.mouse.move(box!.x + box!.width * 0.75, box!.y + box!.height * 0.75, { steps: 6 });
+  await page.mouse.move(end[0], end[1], { steps: 6 });
 
   const midDrag = await inkAt(page, ...middle);
   await page.mouse.up();
@@ -1028,43 +699,6 @@ test("a redaction previews as what it will do, not as a box around it", async ({
   expect(midDrag[1]).toBeLessThan(40);
   expect(midDrag[2]).toBeLessThan(40);
 });
-
-test("the compare control is out of reach while the editor is open", async ({ page }) => {
-  // The companion to "the edit control is out of reach", and the one that bites.
-  //
-  // That test opened the editor with a single capture picked, so `comparable`
-  // was already false and its `#shelf-compare` assertion held with or without
-  // the overlay term — deleting `busyOverlay ||` from the compare line in
-  // `main.ts` left the whole suite green.
-  //
-  // Two picked images is the reachable case: `e` reaches `editPicked`, which
-  // opens the editor on the *first* picked capture whatever the count, so the
-  // selection is still comparable while the overlay is up. The overlay
-  // deliberately does not cover the title strip — that is the window's only
-  // drag handle — so an unguarded Compare sits there live and clickable, and
-  // pressing it starts a comparison in the middle of someone's annotation.
-  await bootShelf(page);
-  await page.evaluate(() => {
-    window.__shotshelf__.respond("preview_shelf", null);
-    window.__shotshelf__.respond("save_edit", "/edits/wide (edited).png");
-  });
-  await land(page, FIXTURE.wide, { ts: 1 });
-  await land(page, FIXTURE.tall, { ts: 2 });
-  await openBrowse(page);
-
-  const cards = page.locator(".tile");
-  await cards.nth(0).click();
-  await cards.nth(1).click({ modifiers: ["ControlOrMeta"] });
-
-  // Two images: Compare is exactly what the shelf offers here.
-  await expect(page.locator("#shelf-compare")).toBeVisible();
-
-  await page.keyboard.press("e");
-  await expect(page.locator(".editor__canvas")).toBeVisible();
-
-  await expect(page.locator("#shelf-compare")).toBeHidden();
-});
-
 test("ctrl+z takes back the last mark", async ({ page }) => {
   // The shortcut had no test at all — the undo test above clicks the button.
   //
@@ -1083,33 +717,186 @@ test("ctrl+z takes back the last mark", async ({ page }) => {
   expect(await inkAt(page, 25, 25)).toEqual(clean);
 });
 
-test("capslock does not put the editor out of reach", async ({ page }) => {
-  // `event.key` reports the character produced, so with CapsLock on it is "E",
-  // not "e" — which fell through every branch of the switch and left the editor
-  // and undo unreachable. The lower-casing that fixes it is one of the four
-  // things `main.ts`'s header says the file owns outright, and no spec had ever
-  // pressed a capital.
+test("capslock does not put undo out of reach", async ({ page }) => {
+  // `event.key` reports the character produced, so with CapsLock on it is "Z",
+  // not "z" — which fell through every branch of the switch and left undo
+  // unreachable. That bug shipped once on the shelf's own keymap, and this
+  // window has a *new* keydown handler with its own case fold, so it is a
+  // fresh chance to ship the same thing again.
   //
-  // Shift is how Playwright produces one; the app cannot tell the two apart,
-  // which is the whole point of folding the case rather than reading modifiers.
-  await bootShelf(page);
-  await page.evaluate(() => {
-    window.__shotshelf__.respond("preview_shelf", null);
-    window.__shotshelf__.respond("save_edit", "/edits/wide (edited).png");
-  });
-  await land(page, FIXTURE.wide);
-  await openBrowse(page);
-  await page.keyboard.press("ArrowDown");
+  // Shift is how Playwright produces a capital; the app cannot tell the two
+  // apart, which is the whole point of folding the case rather than reading
+  // modifiers. (The `e` half of this lives in `editor-open.spec.ts` — it is
+  // the shelf's key, not the editor's.)
+  await openEditor(page);
 
-  await page.keyboard.press("Shift+E");
-  await expect(page.locator(".editor__canvas")).toBeVisible();
-
-  // And the same for undo, which shares the fold and is additionally gated by
-  // the `shelf.editing` guard three lines above it.
   const clean = await inkAt(page, 25, 25);
   await drag(page, [25, 25], [150, 90]);
   expect(await inkAt(page, 25, 25)).not.toEqual(clean);
 
   await page.keyboard.press("ControlOrMeta+Shift+Z");
+  expect(await inkAt(page, 25, 25)).toEqual(clean);
+});
+
+test("the whole capture fits at Fit, and overflows on purpose at 100%", async ({ page }) => {
+  // A tall capture in a wide window, so Fit is height-bound and 100% is not.
+  await openEditor(page, FIXTURE.tall);
+
+  await page.locator("#editor-fit").click();
+  const fitted = await overflow(page);
+  expect(fitted.bufferTaller).toBeLessThanOrEqual(1);
+  expect(fitted.bufferWider).toBeLessThanOrEqual(1);
+
+  // At 100% the canvas element still fills the stage — it is a viewport now,
+  // not a picture — and what changes is how much of the capture is inside it.
+  // This is the invariant that replaced "the canvas never exceeds the stage":
+  // zoom makes that one false on purpose, and the canvas being *scaled down by
+  // CSS* instead would have made zooming in produce a blurrier picture at the
+  // same size, which is the failure this asserts against.
+  await page.locator("#editor-zoom").click();
+  await expect(page.locator("#editor-zoom")).toHaveText("100%");
+  const full = await overflow(page);
+  expect(full.bufferTaller).toBeLessThanOrEqual(1);
+  expect(full.bufferWider).toBeLessThanOrEqual(1);
+});
+
+test("zoom changes what is on screen and never what is saved", async ({ page }) => {
+  // The standing constraint with teeth: a saved edit is the *capture's* own
+  // resolution, whatever the window was showing. `saveEditedCapture` composites
+  // offscreen at scale 1 with no origin, so neither the zoom nor
+  // `devicePixelRatio` can reach the file — and this is what proves it rather
+  // than the comment saying so.
+  await openEditor(page);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+
+  await drag(page, [30, 25], [170, 95]);
+  await page.locator("#editor-save").click();
+  const atFit = await savedPng(page);
+
+  // Same capture, same mark, wildly different view.
+  await openEditor(page);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+  await page.locator("#editor-zoom-in").click();
+  await page.locator("#editor-zoom-in").click();
+  await expect(page.locator("#editor-zoom")).not.toHaveText("100%");
+  await page.locator("#editor-save").click();
+  const zoomed = await savedPng(page);
+
+  // The dimensions live in the IHDR chunk, bytes 16..24 of a PNG. Comparing
+  // those rather than the whole file: the mark lands in different image pixels
+  // because the drag is in *stage* coordinates and the view moved, which is
+  // correct. What must not move is the size of the thing written.
+  expect(zoomed.slice(16, 24)).toEqual(atFit.slice(16, 24));
+});
+
+test("a zoom is kept when the window is resized, and a fit is recomputed", async ({ page }) => {
+  // The ResizeObserver re-fits, which is right in Fit mode and wrong at 100%:
+  // it would undo the user's zoom every time they dragged a window edge, and
+  // this window is maximizable. `layout()` branches on `view.fitted` for
+  // exactly this, and nothing else would catch it.
+  await openEditor(page);
+
+  await page.locator("#editor-zoom").click();
+  await expect(page.locator("#editor-zoom")).toHaveText("100%");
+
+  await page.setViewportSize({ width: 700, height: 500 });
+  await expect(page.locator("#editor-zoom")).toHaveText("100%");
+
+  // In Fit mode the readout tracks the window instead. The window has to
+  // become *smaller than the capture* for that to show: Fit never enlarges, so
+  // a 320x180 fixture reads 100% at every size big enough to hold it, and an
+  // assertion that the number merely "changes" would be asserting the bug this
+  // cap exists to fix.
+  await page.locator("#editor-fit").click();
+  await expect(page.locator("#editor-zoom")).toHaveText("100%");
+
+  await page.setViewportSize({ width: 260, height: 300 });
+  await expect(page.locator("#editor-zoom")).not.toHaveText("100%");
+
+  // …and back, without the user having touched the zoom.
+  await page.setViewportSize({ width: 900, height: 700 });
+  await expect(page.locator("#editor-zoom")).toHaveText("100%");
+});
+
+test("the close request asks before it discards, and goes quietly when clean", async ({
+  page,
+}) => {
+  await openEditor(page);
+
+  // Nothing drawn: the X is instant, and the window hides.
+  await page.evaluate((event) => window.__shotshelf__.emit(event, null), EDITOR_CLOSE_EVENT);
+  await expect
+    .poll(() => page.evaluate(() => window.__shotshelf__.callsTo("hide_editor").length))
+    .toBe(1);
+
+  // With marks, the same request asks instead — and asks with three answers,
+  // because a two-button question about unsaved work has no safe one.
+  await openEditor(page);
+  await drag(page, [30, 25], [170, 95]);
+  await page.evaluate(() => window.__shotshelf__.clearCalls());
+  await page.evaluate((event) => window.__shotshelf__.emit(event, null), EDITOR_CLOSE_EVENT);
+
+  await expect(page.locator(".editor__ask")).toBeVisible();
+  await expect(page.locator(".editor__ask button")).toHaveText(["Save", "Discard", "Cancel"]);
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_editor").length)).toBe(0);
+
+  // Cancel leaves the marks alone and the window up.
+  await page.locator(".editor__ask button", { hasText: "Cancel" }).click();
+  await expect(page.locator(".editor__ask")).toHaveCount(0);
+  await expect(page.locator(".editor")).toBeVisible();
+  expect(await page.evaluate(() => window.__shotshelf__.callsTo("hide_editor").length)).toBe(0);
+});
+
+test("asking for another capture resumes the same one and asks about a different one", async ({
+  page,
+}) => {
+  await openEditor(page);
+  await drag(page, [30, 25], [170, 95]);
+  const marked = await inkAt(page, 35, 30);
+
+  // The same capture again — Rust shows and focuses the window before this
+  // arrives, so a stray second press must cost nothing. Reloading would throw
+  // the marks away without asking.
+  await page.evaluate(
+    ([event, path]) => window.__shotshelf__.emit(event, path),
+    [EDITOR_OPEN_EVENT, FIXTURE.wide] as const,
+  );
+  await expect(page.locator(".editor")).toHaveAttribute("data-capture", FIXTURE.wide);
+  expect(await inkAt(page, 35, 30)).toEqual(marked);
+
+  // A *different* capture over unsaved marks asks first, and keeps showing the
+  // one being asked about until it is answered.
+  await page.evaluate(
+    ([event, path]) => window.__shotshelf__.emit(event, path),
+    [EDITOR_OPEN_EVENT, FIXTURE.tall] as const,
+  );
+  await expect(page.locator(".editor__ask")).toBeVisible();
+  await expect(page.locator(".editor")).toHaveAttribute("data-capture", FIXTURE.wide);
+
+  await page.locator(".editor__ask button", { hasText: "Discard and open" }).click();
+  await expect(page.locator(".editor")).toHaveAttribute("data-capture", FIXTURE.tall);
+});
+
+test("a second open for the same capture does not bind a second set of handlers", async ({
+  page,
+}) => {
+  // The nugget worth keeping from the old "the edit control is out of reach
+  // while the editor is open": a repeated open used to leave a second listener
+  // on the same canvas, so one drag committed two marks and one undo took back
+  // half of it. The refusal left no other trace, which is why this is asserted
+  // through the pixels rather than by counting anything.
+  await openEditor(page);
+  await page.evaluate(
+    ([event, path]) => window.__shotshelf__.emit(event, path),
+    [EDITOR_OPEN_EVENT, FIXTURE.wide] as const,
+  );
+  await expect(page.locator(".editor")).toHaveAttribute("data-capture", FIXTURE.wide);
+
+  const clean = await inkAt(page, 25, 25);
+  await drag(page, [25, 25], [150, 90]);
+  expect(await inkAt(page, 25, 25)).not.toEqual(clean);
+
+  // One undo, one mark gone. Two bindings would leave half of it behind.
+  await page.keyboard.press("ControlOrMeta+z");
   expect(await inkAt(page, 25, 25)).toEqual(clean);
 });

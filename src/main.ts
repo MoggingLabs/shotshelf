@@ -74,9 +74,9 @@ const shelf = new Shelf(
       //
       // The overlay deliberately does not cover the title strip — that is the
       // window's only drag handle — so these two stayed live and clickable
-      // behind an open editor. One click on Edit discarded every unsaved mark,
-      // silently. The keydown handler has guarded this since the editor
-      // existed; the click handlers never did.
+      // behind it. "It" now means the quick look alone: the editor has its own
+      // window and cannot be clicked through from here at all, which is why
+      // this term names one surface where it used to name two.
       const busyOverlay = shelf.overlayOpen;
       // Not `picked !== 2`: two picked *recordings* showed Compare, and
       // pressing it decoded an `.mp4` as an image and reported that the two
@@ -93,11 +93,12 @@ const shelf = new Shelf(
 );
 
 const popover = new Popover(root, shelf, {
-  // An OS drag steals focus and an open editor is someone's unsaved work; a
-  // launch appearance must not vanish out from under either. The overlay was
-  // missing from this list once, so the four-second launch timer discarded an
-  // editor opened inside it. (The settings panel used to be a third term —
-  // it is its own window now, with its own lifetime.)
+  // An OS drag steals focus and an open quick look is something the user is
+  // reading; a launch appearance must not vanish out from under either. The
+  // overlay was missing from this list once, so the four-second launch timer
+  // discarded a surface opened inside it. (The settings panel used to be a
+  // third term, and the editor a fourth — both are their own windows now,
+  // with their own lifetimes, and neither can be dismissed by this timer.)
   busy: () => shelf.dragging || shelf.overlayOpen,
 });
 
@@ -141,40 +142,33 @@ document.addEventListener("keydown", (event) => {
   ) {
     return;
   }
-  // While marking up a capture, the arrows and Delete belong to the editor's
-  // own surface, not to the list underneath it.
   // Lower-cased because `key` reports the character produced: with CapsLock
   // on it is "Z" and "E", which fell through every branch below and left undo
   // and the editor unreachable.
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-  if (shelf.editing && !["Escape", "z"].includes(key)) return;
 
   switch (key) {
     case "Escape":
-      // Escape backs out one level at a time: the editor, then a preview,
-      // then the shelf. One key that closes two things at once is one key
-      // that loses your place. (Settings was once a rung here; it is its own
-      // window now, with the OS's own close.)
-      if (shelf.closeEditor()) return;
+      // Escape backs out one level at a time: a preview, then the shelf. One
+      // key that closes two things at once is one key that loses your place.
+      // (Settings was once a rung here, and the editor another; both are their
+      // own windows now, each with the OS's own close and its own Escape.)
       if (!shelf.closePreview()) popover.dismiss();
       return;
 
     case "z":
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
-      // Three undos, split by surface and recency: in the editor Ctrl+Z
-      // takes back the last mark; on the shelf a pending *delete* — the one
-      // undo with a clock on it — comes back first, then the last removal,
-      // the pair the Delete receipt promises.
-      if (shelf.editing) {
-        shelf.undoEdit();
-      } else if (!shelf.undoDelete() && !shelf.restoreRemoved()) {
+      // Two undos on the shelf, by recency: a pending *delete* — the one undo
+      // with a clock on it — comes back first, then the last removal, the pair
+      // the Delete receipt promises. The editor's own Ctrl+Z takes back the
+      // last mark, and lives in the editor's window with the marks.
+      if (!shelf.undoDelete() && !shelf.restoreRemoved()) {
         say("Nothing to bring back.");
       }
       return;
 
     case "e":
-      if (shelf.editing) return;
       event.preventDefault();
       shelf.editPicked();
       return;
@@ -224,9 +218,10 @@ document.addEventListener("keydown", (event) => {
 });
 
 hideButton.addEventListener("click", () => {
-  // The hide button reaches the same discard the Escape ladder does, so it
-  // gets the same double-step when marks are unsaved.
-  if (shelf.editing && shelf.warnUnsavedMarks()) return;
+  // No unsaved-marks step here any more: hiding the shelf cannot reach the
+  // editor, which is a window of its own and stays open with its marks. That
+  // is the point of the move — the shelf going away is not a decision about
+  // somebody's unsaved work.
   popover.dismiss();
 });
 
@@ -321,6 +316,24 @@ subscribe(
 subscribe(
   listen<Capture>("capture://new", ({ payload }) => popover.catch(payload)),
   "New captures will not appear on the shelf. Restarting should fix it.",
+);
+
+// A saved edit is a capture in its own right, dated now.
+//
+// This used to be a callback: the editor was an overlay in *this* window and
+// handed the path straight to `shelf.add`. It has its own window now, which
+// holds no list, so Rust tells the shelf instead — emitted from `edit.rs` the
+// moment the file is written, targeted at this window alone.
+//
+// Not `popover.catch`, which is for captures the *OS* produced and which pops
+// the column: the user is looking at the editor, not at the corner of their
+// screen, and a column appearing over their work to announce what they just
+// did would be the shelf interrupting itself.
+subscribe(
+  listen<string>("capture://edited", ({ payload }) => {
+    shelf.add({ path: payload, kind: "image", ts: Date.now() });
+  }),
+  "Saved edits will not appear on the shelf. Restarting should fix it.",
 );
 
 /**

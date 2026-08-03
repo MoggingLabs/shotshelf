@@ -28,18 +28,25 @@
  * less of the app than they do.
  *
  * **Where the boundary runs**, as a list rather than a description.
- * `scripts/check-commands.mjs` holds `invoke` to four files: this one, and the
- * three that each own a piece of Rust the shelf does not — the window
- * (`popover.ts`), the settings panel (`settings.ts`) and start-up (`main.ts`).
- * Anything else calling Rust fails that gate.
+ * `scripts/check-commands.mjs` holds `invoke` to five files: this one, and the
+ * four that each own a piece of Rust the shelf does not — the window
+ * (`popover.ts`), the settings panel (`settings.ts`), start-up (`main.ts`) and
+ * the editor's own window (`editor-window/bridge.ts`). Anything else calling
+ * Rust fails that gate.
+ *
+ * The last of those is the newest and the clearest case for the rule: the
+ * editor is a second page in a second window, so it cannot reach this file's
+ * shelf-shaped helpers, and giving it its own bridge keeps its whole IPC
+ * surface — three commands and a save — readable in one screen.
  *
  * It was a description, and two files described it differently: this header
  * said "the shelf's calls, not the app's — `main.ts` … invoke[s] directly,
- * because [it is] outside the shelf", while `editor/index.ts` said "the window
- * itself goes through `bridge.ts` like every other view module". `main.ts`
- * both imports from here and invokes directly, so it satisfied neither, and
- * nothing decided which applied. A rule stated twice in prose is a rule that
- * decides nothing.
+ * because [it is] outside the shelf", while the editor said "the window itself
+ * goes through `bridge.ts` like every other view module". `main.ts` both
+ * imports from here and invokes directly, so it satisfied neither, and nothing
+ * decided which applied. A rule stated twice in prose is a rule that decides
+ * nothing. (The editor's half of that disagreement is now moot in the most
+ * literal way: it is not in this window.)
  *
  * Within the shelf, view modules reach Rust through here and call back to
  * `Shelf` only for what the shelf owns — what is on it, and what the user is
@@ -190,28 +197,17 @@ export async function browseShelf(): Promise<void> {
 }
 
 /**
- * Save an annotated copy of a capture.
+ * Open the editor's window on a capture.
  *
- * The bytes are a PNG the editor composited on a canvas — which is what makes
- * a redaction real rather than decorative: the marks are drawn *into* the
- * pixels before encoding, so what Rust receives has no layer to peel off.
- * Returns the new capture's path.
+ * Rejects rather than opening an empty window when the capture's file has
+ * gone: Rust checks the path before anything appears, so the shelf can say so
+ * on its own alert strip instead of flashing a window up to carry the message.
+ *
+ * `saveEdit` used to live beside this. It moved to
+ * `src/editor-window/bridge.ts` with the editor itself — the shelf does not
+ * save anything, and learns that an edit was written from Rust's
+ * `capture://edited` rather than from a value handed back through here.
  */
-export function saveEdit(source: string, png: Uint8Array): Promise<string> {
-  // Sent as a raw body, not as JSON.
-  //
-  // `{ png: [...png] }` turned a 5 MB PNG into a five-million-element JS array
-  // and roughly 20 MB of JSON text for serde to parse back — on the one path
-  // holding work the user cannot afford to lose, and scaling with exactly the
-  // captures most worth annotating. At the 64 MiB ceiling the command
-  // documents, that shape builds a quarter-gigabyte of string in the webview
-  // before Rust sees a byte, which is also why the ceiling could not protect
-  // the memory it named.
-  //
-  // Tauri takes a `Uint8Array` as the whole payload and transfers it as bytes.
-  // Everything else then has to travel as a header, and a header must be
-  // ASCII — hence the encoding, undone by `percent_decode` in `edit.rs`.
-  return invoke<string>("save_edit", png, {
-    headers: { "x-shotshelf-source": encodeURIComponent(source) },
-  });
+export async function openEditorWindow(path: string): Promise<void> {
+  await invoke("open_editor", { path });
 }

@@ -214,6 +214,22 @@ pub fn run() {
                         f64::from(physical.height) / scale,
                     );
                 }
+                // The editor is a real window the user resizes and moves, and
+                // both are remembered. One handler for both events because the
+                // answer is the same: read the window's whole geometry back and
+                // debounce it. Reading it back rather than using the event's
+                // payload is what lets `Moved` and `Resized` share a path, and
+                // it is also the only way to see the *restored* size while a
+                // maximize is in progress.
+                if window.label() == window::EDITOR_WINDOW {
+                    window::note_editor_bounds(window);
+                }
+                return;
+            }
+            if let tauri::WindowEvent::Moved(_) = event {
+                if window.label() == window::EDITOR_WINDOW {
+                    window::note_editor_bounds(window);
+                }
                 return;
             }
             // This closure fires for every window, so it branches by label —
@@ -225,6 +241,23 @@ pub fn run() {
                 if window.label() == window::SETTINGS_WINDOW {
                     api.prevent_close();
                     let _ = window.hide();
+                    return;
+                }
+                // The editor's close is *always* refused here, and what
+                // happens next is `note_editor_close`'s decision: it asks the
+                // page, which is the only side that knows whether there are
+                // unsaved marks, and hides without asking on a second press.
+                //
+                // Unconditional on purpose. Tauri will auto-prevent a close
+                // when the page holds a `tauri://close-requested` listener,
+                // but that listener does not exist for the first moments
+                // after a page load — and in that gap the window would be
+                // *destroyed*. A declared window destroyed once is gone for
+                // the life of the process, so the editor would be unreachable
+                // until restart. Refusing here closes that gap.
+                if window.label() == window::EDITOR_WINDOW {
+                    api.prevent_close();
+                    window::note_editor_close(window);
                     return;
                 }
                 // The shelf has no close button, but Alt+F4 / ⌘W still fire.

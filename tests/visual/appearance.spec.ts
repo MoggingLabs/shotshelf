@@ -14,6 +14,7 @@
  */
 
 import {
+  bootEditor,
   bootSettings,
   bootShelf,
   DAY,
@@ -49,13 +50,12 @@ test.describe("appearance", () => {
 
   /** The editor, mounted and painted, ready to be photographed. */
   async function openEditorForGolden(page: import("@playwright/test").Page): Promise<void> {
-    await bootShelf(page);
-    await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", null));
-    await land(page, FIXTURE.wide);
-    await openBrowse(page);
-    await page.keyboard.press("ArrowDown");
-    await page.locator("#shelf-edit").click();
-    await expect(page.locator(".editor__canvas")).toBeVisible();
+    // Its own window and its own page now, at the size the OS will actually
+    // give it — `bootEditor` sets the viewport from `tauri.conf.json` the way
+    // the settings window's golden does. Photographed through the shelf's
+    // 225×420 popover viewport, this image would be of a window that cannot
+    // exist.
+    await bootEditor(page, { target: FIXTURE.wide });
     await settled(page);
   }
 

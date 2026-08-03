@@ -332,6 +332,15 @@ fn the_new_settings_fields_cross_the_boundary_normalised_and_tolerated() {
             // discarded — small was the intent, the floor is the limit.
             "browseWidth": -5.0,
             "browseHeight": 5000.0,
+            // The editor's size follows the same rule. Its *position* does
+            // not, and this is the pair that proves the difference crosses the
+            // boundary intact: a negative coordinate is a second monitor to
+            // the left, and must arrive back unchanged rather than clamped to
+            // the primary screen.
+            "editorWidth": -5.0,
+            "editorHeight": 9000.0,
+            "editorX": -1200.0,
+            "editorY": 40.0,
             "pinned": [],
         }}),
     )
@@ -394,6 +403,29 @@ fn the_new_settings_fields_cross_the_boundary_normalised_and_tolerated() {
             .and_then(serde_json::Value::as_f64),
         Some(4000.0),
         "an absurd browse height crossed the boundary unclamped: {stored}",
+    );
+    assert_eq!(
+        stored
+            .get("editorWidth")
+            .and_then(serde_json::Value::as_f64),
+        Some(480.0),
+        "a below-floor editor width crossed the boundary unclamped: {stored}",
+    );
+    assert_eq!(
+        stored
+            .get("editorHeight")
+            .and_then(serde_json::Value::as_f64),
+        Some(4000.0),
+        "an absurd editor height crossed the boundary unclamped: {stored}",
+    );
+    assert_eq!(
+        stored.get("editorX").and_then(serde_json::Value::as_f64),
+        Some(-1200.0),
+        "a monitor to the left of the primary was clamped away: {stored}",
+    );
+    assert_eq!(
+        stored.get("editorY").and_then(serde_json::Value::as_f64),
+        Some(40.0),
     );
 }
 
@@ -497,4 +529,73 @@ fn a_command_asked_for_from_a_foreign_origin_is_refused() {
         refused.is_err(),
         "a foreign origin was allowed to call get_settings",
     );
+}
+
+#[test]
+fn targeting_a_window_does_not_narrow_delivery_to_a_plain_listener() {
+    // Why the three cross-window events broadcast instead of using `emit_to`.
+    //
+    // `emit_to(label, …)` reads as "only that window hears this". For the
+    // listeners this app actually has, it is not. Tauri's
+    // `match_any_or_filter` short-circuits — a handler registered with
+    // `EventTarget::Any` matches *before* the label filter is consulted, so it
+    // receives the event whichever window was named — and a plain `listen()`
+    // from `@tauri-apps/api/event` registers exactly `EventTarget::Any`, which
+    // is every listener in this app.
+    //
+    // So the targeted form buys no narrowing while claiming to, and the claim
+    // is the problem: the next reader sees `emit_to(SHELF, …)` and believes
+    // the editor window cannot hear it. `emit` is what actually happens, said
+    // out loud.
+    //
+    // This test was written the other way round first — asserting that
+    // targeting reached *nothing* — and failed, which is the only reason the
+    // comments in `window.rs` and `edit.rs` describe the real mechanism rather
+    // than a plausible one. If Tauri ever makes targeting real, this fails and
+    // those comments get corrected instead of quietly going wrong.
+    //
+    // `listen_any` is the Rust-side equivalent of the JS default, which is
+    // what makes the comparison meaningful rather than a tautology.
+    use tauri::{Emitter, Listener};
+
+    let (app, window) = app();
+    let label = window.label().to_owned();
+    let event = editor_open_event();
+
+    let heard = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = std::sync::Arc::clone(&heard);
+    app.listen_any(event.clone(), move |_| {
+        counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    });
+
+    app.emit_to(label.as_str(), &event, "a.png")
+        .expect("a targeted emit reports success");
+    assert_eq!(
+        heard.load(std::sync::atomic::Ordering::Relaxed),
+        1,
+        "targeting stopped reaching an untargeted listener — targeting is real \
+         now, and the broadcast comments in window.rs and edit.rs no longer \
+         describe the reason they give",
+    );
+
+    app.emit(&event, "a.png")
+        .expect("a broadcast reports success");
+    assert_eq!(
+        heard.load(std::sync::atomic::Ordering::Relaxed),
+        2,
+        "a broadcast did not reach a plain listener, so the editor window \
+         would never learn which capture to open",
+    );
+}
+
+/// The editor's open event, from the fixture both languages share rather than
+/// spelled out here — the rule every other event name in the suite follows.
+fn editor_open_event() -> String {
+    let fixture = include_str!("../../tests/fixtures/window-events.json");
+    let parsed: serde_json::Value =
+        serde_json::from_str(fixture).expect("the shared fixture parses");
+    parsed["editorOpen"]
+        .as_str()
+        .expect("the fixture names the editor's open event")
+        .to_owned()
 }

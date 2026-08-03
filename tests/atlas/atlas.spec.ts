@@ -20,8 +20,10 @@ import { dirname, resolve } from "node:path";
 import type { Page, Locator } from "@playwright/test";
 
 import {
+  bootEditor,
   bootSettings,
   bootShelf,
+  EDITOR_CLOSE_EVENT,
   expect,
   FIXTURE,
   HIDDEN_EVENT,
@@ -209,7 +211,7 @@ test("video and missing", async ({ page }) => {
   await shot(page, "tile-06-video-badge-and-missing-rim");
 });
 
-test("quick look and editor", async ({ page }) => {
+test("quick look", async ({ page }) => {
   await bootShelf(page);
   await page.evaluate(() => window.__shotshelf__.respond("preview_shelf", null));
   await land(page, FIXTURE.wide);
@@ -219,10 +221,14 @@ test("quick look and editor", async ({ page }) => {
   await expect(page.locator(".preview__picture")).toBeVisible();
   await settled(page);
   await shot(page, "overlay-00-preview-at-225");
-  await page.keyboard.press(" ");
+});
 
-  await page.locator("#shelf-edit").click();
-  await expect(page.locator(".editor__canvas")).toBeVisible();
+test("editor window states", async ({ page }) => {
+  // Its own page and its own window size now. It used to be photographed
+  // inside the shelf's 225x420 popover viewport, which is a shape the editor
+  // can no longer be in — an atlas exists to show a person what the app looks
+  // like, and a picture of an impossible state is worse than a missing one.
+  await bootEditor(page, { target: FIXTURE.wide });
   await settled(page);
   await shot(page, "overlay-01-editor-open");
 
@@ -231,7 +237,7 @@ test("quick look and editor", async ({ page }) => {
     await shot(page.locator(".editor__bar"), `overlay-02-tool-${tool}`);
   }
 
-  // A drawn box and a redaction, then a failed save with its strip.
+  // A drawn box, then the zoom cluster away from Fit.
   await page.locator('.editor__tool[data-tool="box"]').click();
   const canvas = await page.locator(".editor__canvas").boundingBox();
   if (canvas) {
@@ -242,10 +248,22 @@ test("quick look and editor", async ({ page }) => {
   }
   await shot(page, "overlay-03-editor-drawn-box");
 
+  await page.locator("#editor-zoom").click();
+  await settled(page);
+  await shot(page, "overlay-05-editor-at-actual-size");
+
+  // A failed save, with its message on this window's own strip.
   await page.evaluate(() => window.__shotshelf__.reject("save_edit", "the disk is full"));
   await page.locator("#editor-save").click();
-  await expect(page.locator("#shelf-alert")).toBeVisible();
+  await expect(page.locator("#editor-note")).toBeVisible();
   await shot(page, "overlay-04-editor-save-failed");
+
+  // And the question asked before unsaved marks are thrown away — a surface
+  // that exists only in this window, because only a focused decorated window
+  // has room to ask anything.
+  await page.evaluate((event) => window.__shotshelf__.emit(event, null), EDITOR_CLOSE_EVENT);
+  await expect(page.locator(".editor__ask")).toBeVisible();
+  await shot(page, "overlay-06-editor-unsaved-question");
 });
 
 test("settings window states", async ({ page }) => {

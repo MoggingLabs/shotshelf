@@ -126,6 +126,15 @@ function fill(): void {
   // "did my drag get remembered?" without showing raw pixel numbers.
   el<HTMLButtonElement>("#shelf-size-reset").disabled =
     current.browseWidth === null && current.browseHeight === null;
+  // Four fields, and *any* of them set means there is something to reset:
+  // moving the editor window without resizing it stores a position alone, and
+  // a button that stayed disabled through that would be telling the user their
+  // window had not moved when it had.
+  el<HTMLButtonElement>("#editor-size-reset").disabled =
+    current.editorWidth === null &&
+    current.editorHeight === null &&
+    current.editorX === null &&
+    current.editorY === null;
   el<HTMLButtonElement>("#setting-hotkey").textContent = prettyHotkey(current.hotkey);
 
   for (const corner of document.querySelectorAll<HTMLButtonElement>("[data-corner]")) {
@@ -163,6 +172,9 @@ function bindControls(): void {
   });
   el<HTMLButtonElement>("#shelf-size-reset").addEventListener("click", () => {
     void save({ browseWidth: null, browseHeight: null });
+  });
+  el<HTMLButtonElement>("#editor-size-reset").addEventListener("click", () => {
+    void save({ editorWidth: null, editorHeight: null, editorX: null, editorY: null });
   });
 
   el<HTMLSelectElement>("#setting-theme").addEventListener("change", (event) => {

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shotshelf Editor</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <!-- The editor window: a real window with real decorations, like the
+         settings window and unlike the shelf, so nothing here fights the OS
+         chrome and the OS's own maximize, snap and Alt-Tab all work. It used
+         to be an overlay mounted into the shelf's 225px always-on-top popover,
+         which could not be resized at all.
+
+         The page is deliberately empty markup: `src/editor-window/main.ts`
+         builds the toolbar and the stage once it knows which capture it is
+         opening, because until Rust answers `edit_target` there is nothing to
+         size a canvas against. The alert line is the exception — a failure
+         while loading has to have somewhere to go before anything is built. -->
+    <div class="edt" id="editor-root">
+      <p class="edt__note" id="editor-note" role="alert"></p>
+    </div>
+    <script type="module" src="/src/editor-window/main.ts"></script>
+  </body>
+</html>
