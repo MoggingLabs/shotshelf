@@ -253,9 +253,14 @@ function watchRow(dir: string, down: boolean): HTMLLIElement {
   const path = document.createElement("span");
   path.className = "stg__watchpath";
   path.textContent = dir;
+  // An added folder is watched with everything inside it; the tip is where
+  // that depth is said, per row, without spending a column on it.
+  const deep = currentSettings().watchAdded.includes(dir)
+    ? `${dir}\nWatched with everything inside it.`
+    : dir;
   path.dataset["tip"] = down
     ? `${dir}\nNot currently watched — the folder may not exist on this machine.`
-    : dir;
+    : deep;
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "stg__watchremove";

@@ -514,21 +514,32 @@ for (const file of globSync("src-tauri/src/**/*.rs")) {
   // …)` walked straight past the older spelling, and a reviewer used exactly
   // that. The paren keeps prose out — several files name the function while
   // explaining why they must not call it.
-  // The three permitted grants must stay non-recursive.
+  // The permitted grants must not deepen on their own.
   //
   // `allow_directory(p, recursive)` with `true` opens every *subdirectory* of
-  // `p` as well — on Linux, where the watch list is `~/Pictures` and `~/Videos`
-  // themselves, that is the user's entire picture library handed to
-  // `describe_capture`, `copy_capture` and `prepare_drag`. Nothing could see
-  // that: this rule only asked *whether* the call was there, the granting
+  // `p` as well — on Linux, where the stock watch list is `~/Pictures` and
+  // `~/Videos` themselves, that is the user's entire picture library handed
+  // to `describe_capture`, `copy_capture` and `prepare_drag`. Nothing could
+  // see that: this rule only asked *whether* the call was there, the granting
   // modules are exempt from it by name, and each of them carries an `#[allow]`
   // that silences clippy's own entry by design. One character, no gate.
+  //
+  // One data-driven depth is permitted, in the one module that owns the watch
+  // grant: `dir.recursive` is `WatchDir`'s flag, whose provenance is pinned in
+  // `src-tauri/src/catch/paths.rs` — stock folders are built `recursive: false`
+  // in exactly one function, and only a folder the *user* added carries `true`
+  // (owner decision, 2026-08-03: "watch D:\Work" means its subfolders too, and
+  // the grant must be exactly as deep as the watch or the shelf catches what
+  // it cannot show). A literal `true` stays refused everywhere: depth must
+  // arrive as the user's own choice, never as a constant.
   for (const grant of grantsIn(source)) {
     if (grant === "false") continue;
+    if (grant === "dir.recursive" && normalised === "src-tauri/src/catch/mod.rs") continue;
     problems.push(
       `  ${normalised}: grants a directory recursively. ` +
         `\`allow_directory(p, true)\` opens every subdirectory of \`p\` to the ` +
-        `webview; the watch list is not a tree.`,
+        `webview; only the user's own watch choice may carry depth, as ` +
+        `\`dir.recursive\` in the watch module.`,
     );
   }
 

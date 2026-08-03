@@ -22,7 +22,7 @@ use notify::{
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
 use tauri::{AppHandle, Runtime};
 
-use super::{kind_of, CaptureKind, CaptureSink, Source};
+use super::{kind_of, paths::WatchDir, CaptureKind, CaptureSink, Source};
 
 /// Coalescing window for raw filesystem events.
 const DEBOUNCE: Duration = Duration::from_millis(400);
@@ -153,16 +153,18 @@ pub struct FolderWatch {
 /// A directory that fails to register appears in neither list, so nothing later
 /// pairs a file with a watcher that is not running.
 fn register(
-    dirs: &[PathBuf],
-    mut watch: impl FnMut(&Path) -> Result<(), String>,
+    dirs: &[WatchDir],
+    mut watch: impl FnMut(&WatchDir) -> Result<(), String>,
 ) -> Vec<(PathBuf, SystemTime)> {
     let mut started = Vec::with_capacity(dirs.len());
 
     for dir in dirs {
         match watch(dir) {
             // Stamped as each one is taken, not once for the loop.
-            Ok(()) => started.push((dir.clone(), SystemTime::now())),
-            Err(err) => crate::diag::warn(&format!("cannot watch {}: {err}", dir.display())),
+            Ok(()) => started.push((dir.path.clone(), SystemTime::now())),
+            Err(err) => {
+                crate::diag::warn(&format!("cannot watch {}: {err}", dir.path.display()));
+            }
         }
     }
 
@@ -171,7 +173,7 @@ fn register(
 
 pub fn start<R: Runtime>(
     app: &AppHandle<R>,
-    dirs: &[PathBuf],
+    dirs: &[WatchDir],
     sink: Arc<CaptureSink>,
 ) -> Result<FolderWatch, notify::Error> {
     let (tx, rx) = mpsc::channel::<Candidate>();
@@ -187,11 +189,19 @@ pub fn start<R: Runtime>(
     // usage guide tells the user to check that line when nothing appears, so
     // the one diagnostic offered for the app's central failure was the one
     // thing that could not report it.
-    // Non-recursive on purpose: capture folders are flat, and recursing a whole
-    // Pictures tree would be a lot of churn for nothing.
+    // Depth per directory, which is WatchDir's whole point: stock capture
+    // folders stay flat — the OS writes at their top level, and recursing a
+    // Pictures tree is churn for nothing — while a folder the user added is
+    // watched with everything inside it, because "watch D:\Work" means the
+    // captures in D:\Work\shots too.
     let started = register(dirs, |dir| {
+        let depth = if dir.recursive {
+            RecursiveMode::Recursive
+        } else {
+            RecursiveMode::NonRecursive
+        };
         debouncer
-            .watch(dir, RecursiveMode::NonRecursive)
+            .watch(&dir.path, depth)
             .map_err(|err| err.to_string())
     });
     let watching: Vec<PathBuf> = started.iter().map(|(dir, _)| dir.clone()).collect();
@@ -531,16 +541,34 @@ mod tests {
         // Two registrations with a real pause between them: their stamps must
         // differ, and each must fall after its own `watch` call rather than all
         // sharing one moment.
-        let dirs = vec![PathBuf::from("/first"), PathBuf::from("/second")];
+        let dirs = vec![
+            WatchDir {
+                path: PathBuf::from("/first"),
+                recursive: false,
+            },
+            WatchDir {
+                path: PathBuf::from("/second"),
+                recursive: true,
+            },
+        ];
         let mut before_second = None;
+        let mut depths = Vec::new();
         let started = register(&dirs, |dir| {
-            if dir == Path::new("/second") {
+            // The mode each registration would take, recorded — the closure is
+            // where `start` decides depth, and this is the seam a test can see.
+            depths.push(dir.recursive);
+            if dir.path == Path::new("/second") {
                 before_second = Some(SystemTime::now());
             } else {
                 std::thread::sleep(Duration::from_millis(20));
             }
             Ok(())
         });
+        assert_eq!(
+            depths,
+            vec![false, true],
+            "each directory keeps its own depth"
+        );
 
         assert_eq!(started.len(), 2);
         assert_eq!(started[0].0, PathBuf::from("/first"));
@@ -559,9 +587,12 @@ mod tests {
     fn a_directory_that_will_not_register_is_in_neither_list() {
         // It must not be paired with a watcher that is not running: backfill
         // would then hand it over to a watcher that can never emit it.
-        let dirs = vec![PathBuf::from("/ok"), PathBuf::from("/denied")];
+        let dirs = [PathBuf::from("/ok"), PathBuf::from("/denied")].map(|path| WatchDir {
+            path,
+            recursive: false,
+        });
         let started = register(&dirs, |dir| {
-            if dir == Path::new("/denied") {
+            if dir.path == Path::new("/denied") {
                 Err("permission denied".to_owned())
             } else {
                 Ok(())

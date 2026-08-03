@@ -381,9 +381,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) {
     if watch_dirs.is_empty() {
         crate::diag::warn("no capture folders found — clipboard watch only");
     }
-    for dir in &watch_dirs {
-        crate::diag::info(&format!("watching {}", dir.display()));
-    }
+    log_watching(&watch_dirs);
 
     allow_reading_captures(app, &watch_dirs);
 
@@ -453,9 +451,7 @@ pub fn rewatch<R: Runtime>(app: &AppHandle<R>) {
     };
 
     let watch_dirs = paths::resolve_watch_dirs(app, &overrides_from_env());
-    for dir in &watch_dirs {
-        crate::diag::info(&format!("watching {}", dir.display()));
-    }
+    log_watching(&watch_dirs);
     allow_reading_captures(app, &watch_dirs);
 
     let folders = match folders::start(app, &watch_dirs, std::sync::Arc::clone(&sink)) {
@@ -805,15 +801,36 @@ fn as_ms(at: SystemTime) -> u64 {
 /// replace the list outright. Deriving it from the resolved watch list keeps
 /// one source of truth — the shelf can read exactly what the engine watches,
 /// non-recursively, and nothing else.
-fn allow_reading_captures<R: Runtime>(app: &AppHandle<R>, dirs: &[PathBuf]) {
+/// One line per folder, with its depth said when it is not the default —
+/// the log is the diagnostic USAGE points at, and "is my subfolder covered"
+/// is exactly the question a user with an added tree brings to it.
+fn log_watching(dirs: &[paths::WatchDir]) {
+    for dir in dirs {
+        if dir.recursive {
+            crate::diag::info(&format!(
+                "watching {} and everything inside it",
+                dir.path.display()
+            ));
+        } else {
+            crate::diag::info(&format!("watching {}", dir.path.display()));
+        }
+    }
+}
+
+fn allow_reading_captures<R: Runtime>(app: &AppHandle<R>, dirs: &[paths::WatchDir]) {
     let scope = app.asset_protocol_scope();
 
-    let clipboard = clipboard::capture_dir(app);
+    let clipboard = clipboard::capture_dir(app).map(|path| paths::WatchDir {
+        path,
+        recursive: false,
+    });
     for dir in dirs.iter().chain(clipboard.iter()) {
         // The watch list and the clipboard folder: whole folders whose contents
         // are captures by definition, which is the one shape this grant fits.
+        // The grant is exactly as deep as the watch: a recursive folder needs
+        // its subfolders readable or the shelf catches what it cannot show.
         #[allow(clippy::disallowed_methods)]
-        if let Err(err) = scope.allow_directory(dir, false) {
+        if let Err(err) = scope.allow_directory(&dir.path, dir.recursive) {
             // Watch folders may be logged — `diag.rs` names them as one of the
             // two permitted kinds — but this list also carries the clipboard
             // capture directory, which is a capture's own folder and is not.

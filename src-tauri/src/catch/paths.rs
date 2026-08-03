@@ -17,7 +17,7 @@ use tauri::{AppHandle, Manager, Runtime};
 /// folders they removed subtracted — and the result is filtered to
 /// directories that exist and de-duplicated — on Windows, Pictures redirected
 /// into OneDrive would otherwise be watched twice.
-pub fn resolve_watch_dirs<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) -> Vec<PathBuf> {
+pub fn resolve_watch_dirs<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf]) -> Vec<WatchDir> {
     let candidates = if overrides.is_empty() {
         defaults(app)
     } else {
@@ -42,20 +42,54 @@ pub fn resolve_watch_dirs<R: Runtime>(app: &AppHandle<R>, overrides: &[PathBuf])
     )
 }
 
+/// A directory the engine should watch, and how deep.
+///
+/// Stock folders are watched flat: the OS writes screenshots at their top
+/// level, and recursing a whole Pictures tree is churn for nothing. A folder
+/// the *user* added is watched with everything inside it — "watch `D:\Work`"
+/// means the captures in `D:\Work\shots` too, which is what anyone adding a
+/// tree expects (owner decision, 2026-08-03).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchDir {
+    pub path: PathBuf,
+    pub recursive: bool,
+}
+
 /// The user's watch choices, applied to the platform's candidates.
 ///
-/// Added folders join the end, and removals are applied *after* — so a path
-/// somehow present in both lists stays unwatched, which is the predictable
-/// reading of "stop watching this". Order is preserved: the first entry stays
-/// the primary screenshots location the tray's "Open the screenshots folder"
-/// opens, unless the user removed exactly that.
-fn apply_choices(candidates: Vec<PathBuf>, added: &[String], removed: &[String]) -> Vec<PathBuf> {
+/// Added folders join the end — recursive, per [`WatchDir`] — and removals
+/// are applied *after*, so a path somehow present in both lists stays
+/// unwatched, which is the predictable reading of "stop watching this".
+/// Order is preserved: the first entry stays the primary screenshots
+/// location the tray's "Open the screenshots folder" opens, unless the user
+/// removed exactly that.
+fn apply_choices(candidates: Vec<PathBuf>, added: &[String], removed: &[String]) -> Vec<WatchDir> {
     let removed: HashSet<PathBuf> = removed.iter().map(PathBuf::from).collect();
-    candidates
+    let mut merged: Vec<WatchDir> = Vec::new();
+    for dir in candidates
         .into_iter()
-        .chain(added.iter().map(PathBuf::from))
-        .filter(|dir| !removed.contains(dir))
-        .collect()
+        .map(|path| WatchDir {
+            path,
+            recursive: false,
+        })
+        .chain(added.iter().map(|dir| WatchDir {
+            path: PathBuf::from(dir),
+            recursive: true,
+        }))
+        .filter(|dir| !removed.contains(&dir.path))
+    {
+        // A path named twice keeps its first position and the deeper of the
+        // two intents — so hand-adding a stock folder deepens it, rather
+        // than the explicit add silently losing to the default. Compared by
+        // spelling; `settle`'s canonical dedupe still catches a duplicate
+        // spelled differently, first appearance winning there.
+        if let Some(existing) = merged.iter_mut().find(|kept| kept.path == dir.path) {
+            existing.recursive |= dir.recursive;
+        } else {
+            merged.push(dir);
+        }
+    }
+    merged
 }
 
 /// Turn a candidate list into the folders actually watched.
@@ -63,7 +97,7 @@ fn apply_choices(candidates: Vec<PathBuf>, added: &[String], removed: &[String])
 /// Split from `resolve_watch_dirs` so the create-and-filter rule can be tested
 /// without an `AppHandle` — the rule is where the interesting decisions are,
 /// and it had no coverage while it was inlined above `defaults()`.
-fn settle(candidates: Vec<PathBuf>, home: Option<&Path>) -> Vec<PathBuf> {
+fn settle(candidates: Vec<WatchDir>, home: Option<&Path>) -> Vec<WatchDir> {
     let mut seen = HashSet::new();
     candidates
         .into_iter()
@@ -111,14 +145,14 @@ fn settle(candidates: Vec<PathBuf>, home: Option<&Path>) -> Vec<PathBuf> {
             // of `user-dirs.dirs`, a case difference on a case-insensitive
             // mount. `dedupe_key` two functions down already canonicalises for
             // exactly this reason, and this comparison was the one that did not.
-            let parent = dir.parent();
+            let parent = dir.path.parent();
             let parent_is_there = parent.is_some_and(Path::is_dir);
             let parent_is_home = match (parent, home) {
                 (Some(parent), Some(home)) => dedupe_key(parent) == dedupe_key(home),
                 _ => false,
             };
-            if parent_is_there && !parent_is_home && !dir.exists() {
-                let _ = std::fs::create_dir(dir);
+            if parent_is_there && !parent_is_home && !dir.path.exists() {
+                let _ = std::fs::create_dir(&dir.path);
             }
         })
         // Said out loud. `docs/USAGE.md` sends the user to `shotshelf.log` to
@@ -133,13 +167,18 @@ fn settle(candidates: Vec<PathBuf>, home: Option<&Path>) -> Vec<PathBuf> {
         // because "the folder I expected is not being watched" is otherwise
         // indistinguishable from "the watcher is broken".
         .filter(|dir| {
-            let there = dir.is_dir();
+            let there = dir.path.is_dir();
             if !there {
-                crate::diag::info(&format!("not watching {} — no such folder", dir.display()));
+                crate::diag::info(&format!(
+                    "not watching {} — no such folder",
+                    dir.path.display()
+                ));
             }
             there
         })
-        .filter(|dir| seen.insert(dedupe_key(dir)))
+        // First appearance wins here; `apply_choices` has already merged
+        // same-spelled duplicates with the deeper intent kept.
+        .filter(|dir| seen.insert(dedupe_key(&dir.path)))
         .collect()
 }
 
@@ -439,7 +478,10 @@ mod tests {
         // could not change any assertion in the suite, and deleting it left all
         // 142 tests and clippy green. The one configuration it was written for
         // was the only one never tested.
-        let watched = settle(vec![leaf.clone(), invented.clone()], Some(&root));
+        let watched = settle(
+            vec![flat(leaf.clone()), flat(invented.clone())],
+            Some(&root),
+        );
 
         assert!(
             leaf.is_dir(),
@@ -447,7 +489,7 @@ mod tests {
         );
         assert!(!invented.exists(), "a speculative tree is left alone");
         assert!(!root.join("OneDrive").exists(), "and so is its root");
-        assert_eq!(watched, vec![leaf]);
+        assert_eq!(watched, vec![flat(leaf)]);
 
         // And nothing is created directly under the home directory itself.
         //
@@ -458,7 +500,7 @@ mod tests {
         // it does not touch your things, and `allow_reading_captures` then
         // grants the webview read over the two directories it just made.
         let home_level = root.join("Videos");
-        let watched_home = settle(vec![home_level.clone()], Some(&root));
+        let watched_home = settle(vec![flat(home_level.clone())], Some(&root));
         assert!(
             !home_level.exists(),
             "a folder whose parent is $HOME is not created"
@@ -484,7 +526,7 @@ mod tests {
         // `ParentDir` component that survives, and `canonicalize` resolves it.
         let spelled_differently = root.join("Pictures").join("..");
         let beside_it = root.join("Videos2");
-        let watched_other = settle(vec![beside_it.clone()], Some(&spelled_differently));
+        let watched_other = settle(vec![flat(beside_it.clone())], Some(&spelled_differently));
         assert!(
             !beside_it.exists(),
             "the guard holds however the home directory is spelled"
@@ -501,9 +543,48 @@ mod tests {
         std::fs::create_dir_all(root.join("Pictures")).expect("a real dir");
 
         let dir = root.join("Pictures");
-        assert_eq!(settle(vec![dir.clone(), dir.clone()], None).len(), 1);
+        assert_eq!(
+            settle(vec![flat(dir.clone()), flat(dir.clone())], None).len(),
+            1
+        );
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Most cases only care about the paths; the depth cases build their own.
+    fn flat(path: PathBuf) -> WatchDir {
+        WatchDir {
+            path,
+            recursive: false,
+        }
+    }
+
+    #[test]
+    fn an_added_folder_is_watched_deep_and_a_stock_one_flat() {
+        // The owner's rule: "watch D:\Work" means the captures in
+        // D:\Work\shots too, while the OS's own screenshot folders stay
+        // top-level. And a stock folder the user *also* added by hand keeps
+        // its position and takes the deeper intent, rather than the explicit
+        // add silently losing to the default.
+        let shaped = apply_choices(
+            vec![PathBuf::from("/d/one"), PathBuf::from("/d/two")],
+            &["/mine/extra".to_owned(), "/d/one".to_owned()],
+            &[],
+        );
+        assert_eq!(
+            shaped,
+            vec![
+                WatchDir {
+                    path: PathBuf::from("/d/one"),
+                    recursive: true,
+                },
+                flat(PathBuf::from("/d/two")),
+                WatchDir {
+                    path: PathBuf::from("/mine/extra"),
+                    recursive: true,
+                },
+            ]
+        );
     }
 
     #[test]
@@ -519,20 +600,27 @@ mod tests {
         );
         assert_eq!(
             shaped,
-            vec![PathBuf::from("/d/one"), PathBuf::from("/mine/extra")]
+            vec![
+                flat(PathBuf::from("/d/one")),
+                WatchDir {
+                    path: PathBuf::from("/mine/extra"),
+                    recursive: true,
+                },
+            ]
         );
 
         // Removals the defaults do not contain are harmless — they may name a
         // default on the *other* machine this file roams to.
         let unknown = apply_choices(defaults.clone(), &[], &["/not/here".to_owned()]);
-        assert_eq!(unknown, defaults);
+        assert_eq!(unknown, defaults.into_iter().map(flat).collect::<Vec<_>>());
 
         // A path in both lists stays unwatched: "stop watching" always wins.
+        let defaults = vec![PathBuf::from("/d/one"), PathBuf::from("/d/two")];
         let both = apply_choices(
-            defaults,
+            defaults.clone(),
             &["/mine/extra".to_owned()],
             &["/mine/extra".to_owned()],
         );
-        assert_eq!(both, vec![PathBuf::from("/d/one"), PathBuf::from("/d/two")]);
+        assert_eq!(both, defaults.into_iter().map(flat).collect::<Vec<_>>());
     }
 }
